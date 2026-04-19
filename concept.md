@@ -92,6 +92,8 @@ later. See `doc/wishlist.md`.
 
 - `doc/gui.md` — retained-mode widget layer, XView-style API, v1.0
   widget set.
+- `doc/terminal.md` — terminal widget built on `lumi/libvt` (parser,
+  cell grid, scrollback) + `ludica` glyph atlas.
 - `doc/network.md` — sockets, TLS (mbedTLS), telnet, and MUD telnet
   extensions (MTH from boris as the starting point).
 - `doc/profiles.md` — the MUD list: property-list storage, CSV title

@@ -54,9 +54,39 @@ schema (`doc/profiles.md`) carries a `tls` column that picks plain vs.
 TLS at connect time.
 
 Trust store: bundle Mozilla's CA list (via `certdata.txt` conversion)
-under `share/birdie/cacert.pem`, overridable per-profile. Document the
-update path in `doc/vendoring.md` conventions — it's effectively a
-vendored asset.
+at install prefix `share/birdie/cacert.pem`, overridable per-profile.
+Per-user overrides live at:
+
+- Linux: `$XDG_DATA_HOME/birdie/cacert.pem` (default
+  `~/.local/share/birdie/cacert.pem`).
+- Windows: `%LOCALAPPDATA%\birdie\cacert.pem`.
+
+Document the update path in `doc/vendoring.md` conventions — it's
+effectively a vendored asset.
+
+## Filesystem layout
+
+Birdie follows the XDG Base Directory Specification on Linux and the
+standard `%APPDATA%` / `%LOCALAPPDATA%` split on Windows.
+
+| role            | Linux                                    | Windows                          |
+|-----------------|------------------------------------------|----------------------------------|
+| config (roaming)| `$XDG_CONFIG_HOME/birdie/`               | `%APPDATA%\birdie\`              |
+| data / logs     | `$XDG_DATA_HOME/birdie/`                 | `%LOCALAPPDATA%\birdie\`         |
+| cache           | `$XDG_CACHE_HOME/birdie/`                | `%LOCALAPPDATA%\birdie\cache\`   |
+| bundled assets  | install-prefix `share/birdie/`           | install dir `share\birdie\`      |
+
+What lives where:
+
+- `config/` — `profiles.csv`, `settings.toml`, filter defaults.
+- `data/` — `logs/<year>/<mud>/<character>/...`, per-profile
+  `profiles/<name>/` scripts, per-user CA override.
+- `cache/` — transient state (DNS cache, downloaded gist imports
+  awaiting review).
+- `share/birdie/` — bundled CA list, default themes, shipped Lua
+  stdlib.
+
+`doc/profiles.md` and `doc/logging.md` reference these roots.
 
 ### SSH
 
@@ -76,7 +106,6 @@ All covered by MTH; listing here so the set is explicit.
 | `ECHO`       | server-controlled local echo               | used for password prompts     |
 | `EOR` / `GA` | prompt marking                             | drives prompt-type triggers   |
 | `MCCP2`      | server → client compression (zlib)         | on by default when offered    |
-| `MCCP3`      | client → server compression                | off by default; opt-in per profile (rare) |
 | `MSSP`       | MUD status report                          | surfaced in profile dialog    |
 | `MSDP`       | structured out-of-band messaging           | routed to `bd_vm` as tables   |
 | `GMCP`       | structured out-of-band messaging (JSON)    | routed to `bd_vm` as tables; NDJSON-logged |
@@ -99,9 +128,10 @@ NDJSON `kind:"connect"` / `"disconnect"` record and a `bd_vm` event
 (`on.connect`, `on.disconnect`).
 
 **DNS:** resolve via `getaddrinfo` on a worker thread (libiox wraps
-this); the UI thread is never blocked on resolution. Happy Eyeballs is
-v1.0 because dual-stack MUD hosts are common and IPv4-first blocking
-resolution produces multi-second connect stalls.
+this); the UI thread is never blocked on resolution. **Happy Eyeballs
+(RFC 8305)** is in v1.0 with IPv6 preferred and a 250 ms delay before
+falling back to IPv4. Dual-stack MUD hosts are common and IPv4-first
+blocking resolution produces multi-second connect stalls.
 
 **Negotiation window:** give the server 2 s to finish `IAC DO/WILL`
 chatter before declaring the session `ready`. The window resets on
@@ -151,11 +181,6 @@ enough context to describe them.
 
 ## Open questions
 
-- Do we ship MCCP3 on? It's rare enough that the added complexity may
-  not be worth it. Leaning off-by-default, opt-in per profile.
-- IPv6 preference order when both records resolve. Happy Eyeballs
-  (RFC 8305) parameters: 250 ms delay, prefer IPv6. Document and move
-  on.
-- Windows: where does the CA bundle live? `%LOCALAPPDATA%\birdie\` is
-  the natural answer; confirm at build.md time.
-- Proxying (SOCKS5). Deferred unless asked — goes in `wishlist.md`.
+None currently — MCCP3, Happy Eyeballs defaults, CA bundle location,
+and SOCKS5 disposition are all decided above (or deferred to
+`doc/wishlist.md`).

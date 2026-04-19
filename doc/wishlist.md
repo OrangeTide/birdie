@@ -49,6 +49,12 @@ Not landing in v1.0. Keep the seam clean.
   auto-mapping before we build anything native.
 - **SSH transport** — libssh2 is a large dependency for a small set of
   MUDs; defer until requested.
+- **SOCKS5 proxying** — deferred unless asked. Some users run MUDs
+  through Tor or corporate proxies; straightforward to add on top of
+  `libiox` when needed.
+- **MCCP3** (client → server compression) — MTH supports it; Birdie
+  does not enable it in v1.0 because server-side adoption is rare and
+  the compile-time flag exists if a fork wants it.
 - **Kitty graphics protocol** — superior to SIXEL technically but zero MUD
   adoption. Revisit if a MUD ever ships support.
 - **NDJSON log compression** (`.ndjson.zst`) with transparent read in the
