@@ -92,6 +92,10 @@ later. See `doc/wishlist.md`.
 
 - `doc/gui.md` — retained-mode widget layer, XView-style API, v1.0
   widget set.
+- `doc/network.md` — sockets, TLS (mbedTLS), telnet, and MUD telnet
+  extensions (MTH from boris as the starting point).
+- `doc/profiles.md` — the MUD list: property-list storage, CSV title
+  schema, import/export column filters.
 - `doc/triggers.md` — trigger / alias / timer design.
 - `doc/logging.md` — NDJSON schema, plaintext format, sink configuration.
 - `doc/vendoring.md` — conventions for third-party code under
