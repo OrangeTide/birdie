@@ -107,12 +107,53 @@ state, control flow, or data structures**. The trigger verbs are a
 convenience layer over the Lua hook tables; nothing you can do in the verbs
 is inaccessible from Lua.
 
+## Scripting engine: Lua 5.4 + LPeg
+
+**Lua 5.4 is the scripting language. LPeg is the primary pattern-matching
+library.** Lua patterns are available for quick one-liners; LPeg is the
+expected tool for anything non-trivial. PCRE is not shipped — add it in a
+fork if you want it.
+
+Reasons this was chosen over alternatives (notably Wren):
+
+- **Pattern matching is the hot path.** MUD scripting is mostly text
+  matching against MUD output. LPeg is the gold standard for this and
+  has no real equivalent in other embeddable languages.
+- **User-script portability.** Mudlet, MUSHclient, TinTin++, TinyFugue
+  all speak Lua. Trigger snippets from wikis, forums, and other clients
+  drop in with minimal edits.
+- **Active ecosystem.** Lua ships everywhere, has LuaJIT when speed
+  matters, and is still actively developed.
+- **Fits the workload.** MUD scripts are "define handler for event" —
+  closures over tables. Lua matches that grain; class-first OO adds
+  ceremony without value here.
+
+## VM abstraction: `bd_vm`
+
+The trigger engine, log-note hook, and widget event routing do **not**
+talk to `lua_State` directly. They talk to an opaque `bd_vm` handle:
+
+    bd_vm *bd_vm_new(void);
+    int    bd_vm_eval(bd_vm *, const char *source);
+    int    bd_vm_call(bd_vm *, const char *name, /* args */ ...);
+    void   bd_vm_register(bd_vm *, const char *name, bd_host_fn fn);
+    void   bd_vm_free(bd_vm *);
+
+This is the same separation-of-concerns seam we maintain between the core
+and the GUI (`doc/gui.md`) and between the core and the log formatter
+(`doc/logging.md`). The v1.0 backend is Lua 5.4 + LPeg. A null backend
+exists for "scripting disabled" builds (constrained targets,
+accessibility mode). A recording backend exists for tests. A fork can
+swap in another language by implementing `bd_vm` without touching the
+trigger engine.
+
 ## Open questions
 
-- Regex engine: Lua patterns (small, present) vs PCRE (familiar, large).
-  Leaning Lua patterns with an opt-in `re"..."` wrapper for PCRE when
-  compiled in.
 - Do triggers run in the network thread or the UI thread? Leaning UI thread
-  for simplicity; network thread only parses and enqueues lines.
+  for simplicity; network thread only parses and enqueues lines. Matches
+  the decision in `doc/gui.md`.
 - Rate limiting / recursion cap for trigger cascades. Some ceiling is
   mandatory to prevent script loops from hanging the client.
+- Sandboxing posture for imported scripts (untrusted gist URLs etc.):
+  default to restricted (`os.execute` stripped, `io` limited to a
+  per-profile scratch dir). Opt-in to full standard library.

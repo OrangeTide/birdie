@@ -47,7 +47,14 @@ open. Further design notes for each area live under `doc/`.
 - **Graphical protocols:** SIXEL in **v1.0**; MXP (including `<IMAGE>`)
   in **v1.1**. RIPterm is not planned. Kitty graphics protocol has no
   MUD adoption and is parked on the wishlist.
-- **Scripting:** Lua 5.4, with LPeg available. See `doc/triggers.md`.
+- **Scripting:** **Lua 5.4 + LPeg**. Picked over Wren because LPeg
+  dominates the pattern-matching workload that MUD scripting actually
+  is, and the installed base of Lua trigger snippets across Mudlet /
+  MUSHclient / TinTin++ / TinyFugue means users can paste existing
+  scripts with minimal edits. Engine lives behind a `bd_vm` abstraction
+  so alt backends (null, test recorder, a future fork in another
+  language) don't require changes to the trigger engine. See
+  `doc/triggers.md`.
 - **Triggers / aliases / timers:** TinTin++-style verb syntax over a
   ZMud-style organizing model (nestable classes, multi-state chains,
   uniform trigger table). Full Lua is the escape hatch. See
