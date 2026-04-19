@@ -90,6 +90,8 @@ later. See `doc/wishlist.md`.
 
 ## Documents
 
+- `doc/core.md` — core pipeline seam (`bd_session`, line retirement,
+  threading contract) that keeps the GUI swappable.
 - `doc/gui.md` — retained-mode widget layer, XView-style API, v1.0
   widget set.
 - `doc/terminal.md` — terminal widget built on `lumi/libvt` (parser,
