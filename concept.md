@@ -100,6 +100,7 @@ later. See `doc/wishlist.md`.
   schema, import/export column filters.
 - `doc/triggers.md` — trigger / alias / timer design.
 - `doc/logging.md` — NDJSON schema, plaintext format, sink configuration.
+- `doc/build.md` — GNU make layout, targets, cross-build story.
 - `doc/vendoring.md` — conventions for third-party code under
   `src/thirdparty/` (provenance, update scripts, refresh workflow).
 - `doc/wishlist.md` — post-v1.0 ideas, including accessibility /
