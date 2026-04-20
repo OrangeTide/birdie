@@ -1,0 +1,26 @@
+$(BEGIN_TARGET)
+NAME = ludica
+TYPE = lib
+SRCS = *.c
+INCLUDEDIR = include
+CFLAGS = -Wall -W -O2
+CFLAGS += -g
+### Windows
+SRCS.Windows_NT = win32/*.c
+INCLUDEDIR.Windows_NT = win32/include
+CFLAGS.Windows_NT = -mwin32
+LDLIBS.Windows_NT = -lgdi32 -lwinmm -lEGL -lGLESv2 -lXinput
+LIBDIR.Windows_NT = win32libs
+COPYFILES.Windows_NT = \
+	win32libs/d3dcompiler_47.dll \
+	win32libs/libEGL.dll \
+	win32libs/libGLESv2.dll \
+	win32libs/vk_swiftshader.dll \
+	win32libs/vk_swiftshader_icd.json
+### Linux
+SRCS.Linux = unix/*.c linux/*.c
+INCLUDEDIR.Linux = unix/include
+LDLIBS.Linux = -lm -ldl -lEGL -lGLESv2 -lX11 # -lXcursor -lXi
+CFLAGS.Linux = -flto=auto
+LDFLAGS.Linux = -flto=auto
+$(END_TARGET)
