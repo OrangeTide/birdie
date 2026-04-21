@@ -65,13 +65,13 @@ Portable across Linux (x86-64, aarch64) and Windows (x86-64); macOS is a stretch
 
 Grep these before implementing anything from scratch (but vendor via update scripts, never symlink):
 
-- `/home/jon/DEVEL/lumi` (lumimux):
+- `lumi` (lumimux):
   - `src/libvt` — terminal escape sequence processing
   - `src/libcfg` — config files
   - `src/libutf8` — UTF-8 handling
   - `src/libcore` — misc
-- `/home/jon/boris` — MUD telnet processing (server-side reference)
-- `/home/jon/jondev/code` — snippets: `csv.[ch]`, `base64.[ch]`, `base26.c`, `base85.c`
+- `boris` — MUD telnet processing (server-side reference)
+- `jondev/code` — snippets: `csv.[ch]`, `base64.[ch]`, `base26.c`, `base85.c`
 
 ## MUD list format
 
