@@ -77,4 +77,14 @@ describe: $upstream_desc
 synced_at: $upstream_date
 EOF
 
+# Merge ludica's Claude Code skills into birdie's .claude/skills/.
+if [ -d "$tmpdir/ludica/.claude/skills" ]; then
+	for skill_dir in "$tmpdir/ludica/.claude/skills"/*/; do
+		skill_name=$(basename "$skill_dir")
+		mkdir -p "$HERE/.claude/skills/$skill_name"
+		cp "$skill_dir"SKILL.md "$HERE/.claude/skills/$skill_name/SKILL.md" 2>/dev/null || true
+	done
+	echo "update-ludica: merged skills into .claude/skills/"
+fi
+
 echo "update-ludica: synced $upstream_desc (ref: $REF) into $DEST"

@@ -18,6 +18,7 @@ SUBDIRS = \
 	$(LUDICA)/src/thirdparty \
 	$(LUDICA)/src/libiox \
 	$(LUDICA)/src/ludica \
+	$(LUDICA)/tools \
 	src/birdie
 
 # Shader-to-C generation using the vendored glsl2h.
