@@ -51,9 +51,21 @@ init(void)
 		BD_GAP_I, 16,
 		BD_END);
 
-	bd_create(menu, BD_LABEL, BD_LABEL_S, "File", BD_END);
-	bd_create(menu, BD_LABEL, BD_LABEL_S, "Edit", BD_END);
-	bd_create(menu, BD_LABEL, BD_LABEL_S, "Session", BD_END);
+	bd_id m_file = bd_create(menu, BD_MENU, BD_LABEL_S, "File", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "New", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Open...", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Save", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Quit",
+		BD_ON_CLICK_F, on_quit, BD_END);
+
+	bd_id m_edit = bd_create(menu, BD_MENU, BD_LABEL_S, "Edit", BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Copy", BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Paste", BD_END);
+
+	bd_id m_sess = bd_create(menu, BD_MENU, BD_LABEL_S, "Session", BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Connect",
+		BD_ON_CLICK_F, on_connect, BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect", BD_END);
 
 	/* terminal area (placeholder) */
 	bd_id term = bd_create(frame, BD_PANEL,

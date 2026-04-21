@@ -66,6 +66,7 @@ enum {
 
 	BD_VISIBLE_B  = 0x016,
 	BD_ENABLED_B  = 0x026,
+	BD_MENU_PIN_B = 0x036,
 };
 
 /* tagged-union attribute for bd_create_v / bd_set_v */
