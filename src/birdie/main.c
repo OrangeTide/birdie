@@ -85,6 +85,12 @@ init(void)
 		BD_FG_C, 0x888888FFu,
 		BD_END);
 
+	/* command input */
+	bd_create(frame, BD_INPUT_LINE,
+		BD_PREF_H_I, 24,
+		BD_PAD_I, 4,
+		BD_END);
+
 	/* button bar */
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW,

@@ -35,6 +35,8 @@
 #define TH_TEXT     0xBBBBBBFFu
 #define TH_TEXT_HI  0xFFFFFFFFu
 #define TH_BORDER   0x555555FFu
+#define TH_FOCUS    0x5599DDFFu
+#define TH_SELECT   0x264F78FFu
 
 /* ------------------------------------------------------------------ */
 /* internal widget structure                                          */
@@ -68,6 +70,12 @@ struct widget {
 
 	int menu_open, menu_pinned;
 	int popup_x, popup_y, popup_w, popup_h;
+
+	char text_buf[1024];
+	int text_len;
+	int cursor;
+	int sel_anchor;
+	float scroll_x;
 };
 
 /* ------------------------------------------------------------------ */
@@ -86,6 +94,8 @@ static lud_texture_t font_tex;
 static lud_vfont_t gui_font;
 static lud_texture_t pin_out_tex;
 static lud_texture_t pin_in_tex;
+static bd_id focus_id = BD_NONE;
+static float cursor_blink;
 
 /* ------------------------------------------------------------------ */
 /* color / drawing helpers                                            */
@@ -221,6 +231,90 @@ flush_text(int vw, int vh)
 }
 
 /* ------------------------------------------------------------------ */
+/* UTF-8 helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+static int
+utf8_encode(unsigned cp, char *out)
+{
+	if (cp < 0x80) {
+		out[0] = (char)cp;
+		return 1;
+	}
+	if (cp < 0x800) {
+		out[0] = (char)(0xC0 | (cp >> 6));
+		out[1] = (char)(0x80 | (cp & 0x3F));
+		return 2;
+	}
+	if (cp < 0x10000) {
+		out[0] = (char)(0xE0 | (cp >> 12));
+		out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+		out[2] = (char)(0x80 | (cp & 0x3F));
+		return 3;
+	}
+	out[0] = (char)(0xF0 | (cp >> 18));
+	out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+	out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+	out[3] = (char)(0x80 | (cp & 0x3F));
+	return 4;
+}
+
+static int
+utf8_prev(const char *s, int pos)
+{
+	if (pos <= 0)
+		return 0;
+	pos--;
+	while (pos > 0 && (s[pos] & 0xC0) == 0x80)
+		pos--;
+	return pos;
+}
+
+static int
+utf8_next(const char *s, int pos, int len)
+{
+	if (pos >= len)
+		return len;
+	pos++;
+	while (pos < len && (s[pos] & 0xC0) == 0x80)
+		pos++;
+	return pos;
+}
+
+static int
+word_left(const char *s, int pos)
+{
+	while (pos > 0 && s[pos - 1] == ' ')
+		pos--;
+	while (pos > 0 && s[pos - 1] != ' ')
+		pos--;
+	return pos;
+}
+
+static int
+word_right(const char *s, int pos, int len)
+{
+	while (pos < len && s[pos] != ' ')
+		pos++;
+	while (pos < len && s[pos] == ' ')
+		pos++;
+	return pos;
+}
+
+static float
+input_text_px(const char *buf, int end)
+{
+	if (end <= 0)
+		return 0.0f;
+	char tmp[1024];
+	if (end >= (int)sizeof(tmp))
+		end = (int)sizeof(tmp) - 1;
+	memcpy(tmp, buf, end);
+	tmp[end] = '\0';
+	return chrome_text_w(tmp);
+}
+
+/* ------------------------------------------------------------------ */
 /* attribute application                                              */
 /* ------------------------------------------------------------------ */
 
@@ -246,7 +340,19 @@ static void
 apply_s(struct widget *w, int attr, const char *val)
 {
 	switch (attr) {
-	case BD_LABEL_S: w->label = val; break;
+	case BD_LABEL_S:
+		w->label = val;
+		if (w->type == BD_INPUT_LINE && val) {
+			int n = (int)strlen(val);
+			if (n >= (int)sizeof(w->text_buf))
+				n = (int)sizeof(w->text_buf) - 1;
+			memcpy(w->text_buf, val, n);
+			w->text_buf[n] = '\0';
+			w->text_len = n;
+			w->cursor = n;
+			w->sel_anchor = -1;
+		}
+		break;
 	case BD_NAME_S:  w->acc_name = val; break;
 	}
 }
@@ -375,6 +481,13 @@ defaults(struct widget *w, int type)
 		break;
 	case BD_MENU:
 		w->pref_h = (int)CHROME_FONT_SZ + 4;
+		break;
+	case BD_INPUT_LINE:
+		w->bg = TH_PRESS;
+		w->fg = TH_TEXT_HI;
+		w->pref_h = (int)CHROME_FONT_SZ + 8;
+		w->pad = 4;
+		w->sel_anchor = -1;
 		break;
 	}
 }
@@ -517,7 +630,10 @@ bd_get_s(bd_id id, int attr)
 	if (id == BD_NONE || !pool[id].alive)
 		return NULL;
 	switch (attr) {
-	case BD_LABEL_S: return pool[id].label;
+	case BD_LABEL_S:
+		if (pool[id].type == BD_INPUT_LINE)
+			return pool[id].text_buf;
+		return pool[id].label;
 	case BD_NAME_S:  return pool[id].acc_name;
 	}
 	return NULL;
@@ -682,13 +798,60 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_INPUT_LINE: {
+		int focused = (focus_id == id);
+		uint32_t border = focused ? TH_FOCUS : TH_BORDER;
+		fill_rect(w->x, w->y, w->w, w->h, w->bg);
+		stroke_rect(w->x, w->y, w->w, w->h, border);
+
+		float vis_x = (float)(w->x + w->pad);
+		float vis_w = (float)(w->w - 2 * w->pad);
+
+		/* keep cursor in view */
+		float cursor_px = input_text_px(w->text_buf, w->cursor);
+		if (cursor_px - w->scroll_x > vis_w)
+			w->scroll_x = cursor_px - vis_w;
+		if (cursor_px - w->scroll_x < 0.0f)
+			w->scroll_x = cursor_px;
+
+		float base_y = chrome_baseline_y(w->y, w->h);
+
+		/* selection highlight */
+		if (focused && w->sel_anchor >= 0 &&
+		    w->sel_anchor != w->cursor) {
+			int s0 = w->sel_anchor < w->cursor
+			    ? w->sel_anchor : w->cursor;
+			int s1 = w->sel_anchor < w->cursor
+			    ? w->cursor : w->sel_anchor;
+			float sx0 = input_text_px(w->text_buf, s0) - w->scroll_x;
+			float sx1 = input_text_px(w->text_buf, s1) - w->scroll_x;
+			fill_rect((int)(vis_x + sx0), w->y + 2,
+			    (int)(sx1 - sx0), w->h - 4, TH_SELECT);
+		}
+
+		/* text */
+		if (w->text_len > 0)
+			queue_text(w->text_buf,
+			    vis_x - w->scroll_x, base_y, w->fg);
+
+		/* blinking cursor */
+		if (focused) {
+			double t = lud_time() - (double)cursor_blink;
+			if (((int)(t * 2.0)) % 2 == 0) {
+				float cx = vis_x + cursor_px - w->scroll_x;
+				fill_rect((int)cx, w->y + 2, 2, w->h - 4, w->fg);
+			}
+		}
+		break;
+	}
+
 	default:
 		if (w->bg & 0xFF)
 			fill_rect(w->x, w->y, w->w, w->h, w->bg);
 		break;
 	}
 
-	if (w->type != BD_MENU) {
+	if (w->type != BD_MENU && w->type != BD_INPUT_LINE) {
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
 			render_widget(c);
@@ -731,7 +894,7 @@ hit_interactive(bd_id id, int mx, int my)
 	}
 	if (found != BD_NONE)
 		return found;
-	if (w->on_click && w->enabled)
+	if ((w->on_click || w->type == BD_INPUT_LINE) && w->enabled)
 		return id;
 	return BD_NONE;
 }
@@ -1027,6 +1190,182 @@ handle_menu_event(const lud_event_t *ev)
 }
 
 /* ------------------------------------------------------------------ */
+/* input line editing                                                 */
+/* ------------------------------------------------------------------ */
+
+static void
+input_delete_selection(struct widget *w)
+{
+	int s0 = w->sel_anchor < w->cursor ? w->sel_anchor : w->cursor;
+	int s1 = w->sel_anchor < w->cursor ? w->cursor : w->sel_anchor;
+	memmove(w->text_buf + s0, w->text_buf + s1, w->text_len - s1);
+	w->text_len -= (s1 - s0);
+	w->text_buf[w->text_len] = '\0';
+	w->cursor = s0;
+	w->sel_anchor = -1;
+}
+
+static void
+input_insert_char(bd_id id, unsigned codepoint)
+{
+	struct widget *w = &pool[id];
+	char enc[4];
+	int n = utf8_encode(codepoint, enc);
+
+	if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor)
+		input_delete_selection(w);
+
+	if (w->text_len + n >= (int)sizeof(w->text_buf))
+		return;
+
+	memmove(w->text_buf + w->cursor + n,
+	    w->text_buf + w->cursor,
+	    w->text_len - w->cursor);
+	memcpy(w->text_buf + w->cursor, enc, n);
+	w->text_len += n;
+	w->cursor += n;
+	w->text_buf[w->text_len] = '\0';
+	w->sel_anchor = -1;
+	cursor_blink = (float)lud_time();
+}
+
+static void
+input_click(bd_id id, int mx)
+{
+	struct widget *w = &pool[id];
+	float text_x = (float)(w->x + w->pad) - w->scroll_x;
+	int best = 0;
+	float best_d = (float)mx - text_x;
+	if (best_d < 0) best_d = -best_d;
+
+	int pos = 0;
+	while (pos < w->text_len) {
+		int next = utf8_next(w->text_buf, pos, w->text_len);
+		float px = text_x + input_text_px(w->text_buf, next);
+		float d = (float)mx - px;
+		if (d < 0) d = -d;
+		if (d < best_d) {
+			best = next;
+			best_d = d;
+		}
+		pos = next;
+	}
+	w->cursor = best;
+	w->sel_anchor = -1;
+	cursor_blink = (float)lud_time();
+}
+
+static int
+input_key(bd_id id, int key, unsigned mods)
+{
+	struct widget *w = &pool[id];
+	int shift = mods & LUD_MOD_SHIFT;
+	int ctrl = mods & LUD_MOD_CTRL;
+	int old_cursor = w->cursor;
+
+	switch (key) {
+	case LUD_KEY_LEFT:
+		if (w->sel_anchor >= 0 && !shift) {
+			w->cursor = w->sel_anchor < w->cursor
+			    ? w->sel_anchor : w->cursor;
+			w->sel_anchor = -1;
+			cursor_blink = (float)lud_time();
+			return 1;
+		}
+		if (ctrl)
+			w->cursor = word_left(w->text_buf, w->cursor);
+		else
+			w->cursor = utf8_prev(w->text_buf, w->cursor);
+		break;
+	case LUD_KEY_RIGHT:
+		if (w->sel_anchor >= 0 && !shift) {
+			w->cursor = w->sel_anchor > w->cursor
+			    ? w->sel_anchor : w->cursor;
+			w->sel_anchor = -1;
+			cursor_blink = (float)lud_time();
+			return 1;
+		}
+		if (ctrl)
+			w->cursor = word_right(w->text_buf, w->cursor,
+			    w->text_len);
+		else
+			w->cursor = utf8_next(w->text_buf, w->cursor,
+			    w->text_len);
+		break;
+	case LUD_KEY_HOME:
+		w->cursor = 0;
+		break;
+	case LUD_KEY_END:
+		w->cursor = w->text_len;
+		break;
+
+	case LUD_KEY_BACKSPACE:
+		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
+			input_delete_selection(w);
+		} else if (w->cursor > 0) {
+			int prev = utf8_prev(w->text_buf, w->cursor);
+			memmove(w->text_buf + prev,
+			    w->text_buf + w->cursor,
+			    w->text_len - w->cursor);
+			w->text_len -= (w->cursor - prev);
+			w->cursor = prev;
+			w->text_buf[w->text_len] = '\0';
+		}
+		w->sel_anchor = -1;
+		cursor_blink = (float)lud_time();
+		return 1;
+	case LUD_KEY_DELETE:
+		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
+			input_delete_selection(w);
+		} else if (w->cursor < w->text_len) {
+			int next = utf8_next(w->text_buf, w->cursor,
+			    w->text_len);
+			memmove(w->text_buf + w->cursor,
+			    w->text_buf + next,
+			    w->text_len - next);
+			w->text_len -= (next - w->cursor);
+			w->text_buf[w->text_len] = '\0';
+		}
+		w->sel_anchor = -1;
+		cursor_blink = (float)lud_time();
+		return 1;
+
+	case LUD_KEY_ENTER:
+		if (w->on_click)
+			w->on_click(id, w->on_click_data);
+		w->text_buf[0] = '\0';
+		w->text_len = 0;
+		w->cursor = 0;
+		w->sel_anchor = -1;
+		w->scroll_x = 0.0f;
+		cursor_blink = (float)lud_time();
+		return 1;
+	case LUD_KEY_ESCAPE:
+		focus_id = BD_NONE;
+		return 1;
+	case LUD_KEY_A:
+		if (ctrl) {
+			w->sel_anchor = 0;
+			w->cursor = w->text_len;
+			cursor_blink = (float)lud_time();
+			return 1;
+		}
+		return 0;
+	default:
+		return 0;
+	}
+
+	if (shift) {
+		if (w->sel_anchor < 0)
+			w->sel_anchor = old_cursor;
+	} else {
+		w->sel_anchor = -1;
+	}
+	cursor_blink = (float)lud_time();
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* public: lifecycle                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -1118,6 +1457,19 @@ bd_gui_event(const void *evp)
 	if (handle_menu_event(ev))
 		return 1;
 
+	/* keyboard events for focused input line */
+	if (focus_id != BD_NONE &&
+	    pool[focus_id].alive &&
+	    pool[focus_id].type == BD_INPUT_LINE) {
+		if (ev->type == LUD_EV_CHAR && ev->ch.codepoint >= 32) {
+			input_insert_char(focus_id, ev->ch.codepoint);
+			return 1;
+		}
+		if (ev->type == LUD_EV_KEY_DOWN)
+			return input_key(focus_id, ev->key.keycode,
+			    ev->modifiers);
+	}
+
 	switch (ev->type) {
 	case LUD_EV_MOUSE_MOVE:
 		update_hover(root, ev->mouse_move.x, ev->mouse_move.y);
@@ -1125,8 +1477,19 @@ bd_gui_event(const void *evp)
 
 	case LUD_EV_MOUSE_DOWN:
 		if (ev->mouse_button.button == LUD_MOUSE_LEFT) {
-			bd_id hit = hit_interactive(root,
-			    ev->mouse_button.x, ev->mouse_button.y);
+			int mx = ev->mouse_button.x;
+			int my = ev->mouse_button.y;
+			bd_id hit = hit_interactive(root, mx, my);
+
+			if (hit != BD_NONE &&
+			    pool[hit].type == BD_INPUT_LINE) {
+				focus_id = hit;
+				input_click(hit, mx);
+				return 1;
+			}
+
+			focus_id = BD_NONE;
+
 			if (hit != BD_NONE) {
 				pool[hit].pressed = 1;
 				active_press = hit;
