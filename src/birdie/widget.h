@@ -94,6 +94,9 @@ bd_id       bd_parent(bd_id id);
 bd_id       bd_first_child(bd_id id);
 bd_id       bd_next_sibling(bd_id id);
 
+/* terminal widget */
+void bd_terminal_write(bd_id id, const char *data, int len);
+
 /* GUI lifecycle — called from the ludica main loop */
 void bd_gui_init(void);
 void bd_gui_cleanup(void);

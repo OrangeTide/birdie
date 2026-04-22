@@ -2,6 +2,11 @@
 #include "ludica.h"
 #include "ludica_gfx.h"
 #include "ludica_vfont.h"
+#include "vt_state.h"
+#include "vt_parse.h"
+#include "vt_ops.h"
+#include "vt_buf.h"
+#include "vt_cell.h"
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
@@ -37,6 +42,17 @@
 #define TH_BORDER   0x555555FFu
 #define TH_FOCUS    0x5599DDFFu
 #define TH_SELECT   0x264F78FFu
+
+#define TERM_DEFAULT_FG 0xAAAAAAFFu
+#define TERM_DEFAULT_BG 0x000000FFu
+#define TERM_SCROLLBACK 2000
+
+static const uint32_t ansi16[16] = {
+	0x000000FFu, 0xAA0000FFu, 0x00AA00FFu, 0xAA5500FFu,
+	0x0000AAFFu, 0xAA00AAFFu, 0x00AAAAFFu, 0xAAAAAAFFu,
+	0x555555FFu, 0xFF5555FFu, 0x55FF55FFu, 0xFFFF55FFu,
+	0x5555FFFFu, 0xFF55FFFFu, 0x55FFFFFFu, 0xFFFFFFFFu,
+};
 
 /* ------------------------------------------------------------------ */
 /* internal widget structure                                          */
@@ -76,6 +92,11 @@ struct widget {
 	int cursor;
 	int sel_anchor;
 	float scroll_x;
+
+	struct vt_state *vt;
+	struct vt_parse *vt_parser;
+	int term_cols, term_rows;
+	int scroll_back;
 };
 
 /* ------------------------------------------------------------------ */
@@ -140,6 +161,36 @@ str_px(const char *s)
 	if (s)
 		while (*s++) n++;
 	return n * GLYPH_W;
+}
+
+static uint32_t
+vt_color_rgba(const struct vt_color *c, uint32_t def)
+{
+	switch (c->type) {
+	case VT_COLOR_DEFAULT:
+		return def;
+	case VT_COLOR_INDEXED: {
+		unsigned idx = c->index;
+		if (idx < 16)
+			return ansi16[idx];
+		if (idx < 232) {
+			idx -= 16;
+			int b = (idx % 6) * 51;
+			idx /= 6;
+			int g = (idx % 6) * 51;
+			int r = (idx / 6) * 51;
+			return ((uint32_t)r << 24) | ((uint32_t)g << 16) |
+			    ((uint32_t)b << 8) | 0xFFu;
+		}
+		int v = 8 + (idx - 232) * 10;
+		return ((uint32_t)v << 24) | ((uint32_t)v << 16) |
+		    ((uint32_t)v << 8) | 0xFFu;
+	}
+	case VT_COLOR_RGB:
+		return ((uint32_t)c->rgb.r << 24) | ((uint32_t)c->rgb.g << 16) |
+		    ((uint32_t)c->rgb.b << 8) | 0xFFu;
+	}
+	return def;
 }
 
 static void
@@ -489,6 +540,11 @@ defaults(struct widget *w, int type)
 		w->pad = 4;
 		w->sel_anchor = -1;
 		break;
+	case BD_TERMINAL:
+		w->bg = TERM_DEFAULT_BG;
+		w->fg = TERM_DEFAULT_FG;
+		w->pad = 2;
+		break;
 	}
 }
 
@@ -522,6 +578,14 @@ bd_create(bd_id parent, int type, ...)
 	if (type == BD_MENU && w->pref_w == 0 && w->label)
 		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
 
+	if (type == BD_TERMINAL) {
+		w->term_cols = 80;
+		w->term_rows = 24;
+		w->vt = vt_state_new(w->term_rows, w->term_cols,
+		    TERM_SCROLLBACK);
+		w->vt_parser = vt_parse_new(vt_ops_default(), w->vt);
+	}
+
 	return id;
 }
 
@@ -549,6 +613,14 @@ bd_create_v(bd_id parent, int type, const bd_attr *attrs)
 	if (type == BD_MENU && w->pref_w == 0 && w->label)
 		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
 
+	if (type == BD_TERMINAL) {
+		w->term_cols = 80;
+		w->term_rows = 24;
+		w->vt = vt_state_new(w->term_rows, w->term_cols,
+		    TERM_SCROLLBACK);
+		w->vt_parser = vt_parse_new(vt_ops_default(), w->vt);
+	}
+
 	return id;
 }
 
@@ -572,6 +644,14 @@ bd_destroy(bd_id id)
 			pool[w->next_sib].prev_sib = w->prev_sib;
 		else
 			p->last_child = w->prev_sib;
+	}
+	if (w->vt_parser) {
+		vt_parse_free(w->vt_parser);
+		w->vt_parser = NULL;
+	}
+	if (w->vt) {
+		vt_state_free(w->vt);
+		w->vt = NULL;
 	}
 	if (root == id)
 		root = BD_NONE;
@@ -845,13 +925,76 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_TERMINAL: {
+		if (!w->vt)
+			break;
+		struct vt_buf *buf = w->vt->buf;
+		int cols = vt_buf_cols(buf);
+		int rows = vt_buf_rows(buf);
+		int ox = w->x + w->pad;
+		int oy = w->y + w->pad;
+
+		fill_rect(w->x, w->y, w->w, w->h, w->bg);
+
+		int sb_count = vt_buf_scrollback_lines(buf);
+		int off = w->scroll_back;
+		if (off > sb_count)
+			off = sb_count;
+
+		for (int r = 0; r < rows; r++) {
+			int vline = sb_count - off + r;
+			struct vt_row *row;
+			if (vline < sb_count)
+				row = vt_buf_scrollback_row(buf,
+				    -(sb_count - vline));
+			else
+				row = vt_buf_row(buf, vline - sb_count);
+			if (!row)
+				continue;
+			float dy = (float)(oy + r * GLYPH_H);
+			for (int c = 0; c < cols; c++) {
+				struct vt_cell *cell = &row->cells[c];
+				if (cell->width == 0)
+					continue;
+				uint32_t fg = vt_color_rgba(&cell->fg,
+				    TERM_DEFAULT_FG);
+				uint32_t bg = vt_color_rgba(&cell->bg,
+				    TERM_DEFAULT_BG);
+				if (cell->attrs & VT_ATTR_BOLD && fg == TERM_DEFAULT_FG)
+					fg = TH_TEXT_HI;
+				if (cell->attrs & VT_ATTR_REVERSE) {
+					uint32_t tmp = fg; fg = bg; bg = tmp;
+				}
+				int ch = cell->codepoint < 256
+				    ? (int)cell->codepoint : '?';
+				if (ch == 0)
+					ch = ' ';
+				float dx = (float)(ox + c * GLYPH_W);
+				draw_chr(ch, dx, dy, fg, bg);
+			}
+		}
+
+		if (off == 0 && (w->vt->modes & VT_MODE_CURSOR_VIS)) {
+			int cr = w->vt->cursor_row;
+			int cc = w->vt->cursor_col;
+			if (cr >= 0 && cr < rows && cc >= 0 && cc < cols) {
+				float cx = (float)(ox + cc * GLYPH_W);
+				float cy = (float)(oy + cr * GLYPH_H);
+				fill_rect((int)cx, (int)cy, GLYPH_W, GLYPH_H,
+				    TERM_DEFAULT_FG);
+			}
+		}
+		break;
+	}
+
 	default:
 		if (w->bg & 0xFF)
 			fill_rect(w->x, w->y, w->w, w->h, w->bg);
 		break;
 	}
 
-	if (w->type != BD_MENU && w->type != BD_INPUT_LINE) {
+	if (w->type != BD_MENU && w->type != BD_INPUT_LINE &&
+	    w->type != BD_TERMINAL) {
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
 			render_widget(c);
@@ -1397,6 +1540,12 @@ bd_gui_cleanup(void)
 		lud_destroy_texture(pin_in_tex);
 	if (font_tex.id != 0)
 		lud_destroy_texture(font_tex);
+	for (int i = 1; i < pool_next; i++) {
+		if (pool[i].vt_parser)
+			vt_parse_free(pool[i].vt_parser);
+		if (pool[i].vt)
+			vt_state_free(pool[i].vt);
+	}
 	memset(pool, 0, sizeof pool);
 	pool_next = 1;
 	root = BD_NONE;
@@ -1419,8 +1568,22 @@ bd_gui_layout(int win_w, int win_h)
 
 	bd_id i;
 	for (i = 1; i < (bd_id)pool_next; i++) {
-		if (pool[i].alive && pool[i].type == BD_MENU && pool[i].menu_open)
+		struct widget *wi = &pool[i];
+		if (!wi->alive)
+			continue;
+		if (wi->type == BD_MENU && wi->menu_open)
 			layout_popup(i);
+		if (wi->type == BD_TERMINAL && wi->vt) {
+			int nc = (wi->w - 2 * wi->pad) / GLYPH_W;
+			int nr = (wi->h - 2 * wi->pad) / GLYPH_H;
+			if (nc < 1) nc = 1;
+			if (nr < 1) nr = 1;
+			if (nc != wi->term_cols || nr != wi->term_rows) {
+				wi->term_cols = nc;
+				wi->term_rows = nr;
+				vt_state_resize(wi->vt, nr, nc);
+			}
+		}
 	}
 }
 
@@ -1475,6 +1638,27 @@ bd_gui_event(const void *evp)
 		update_hover(root, ev->mouse_move.x, ev->mouse_move.y);
 		return 0;
 
+	case LUD_EV_MOUSE_SCROLL: {
+		int mx = mouse_x, my = mouse_y;
+		bd_id i;
+		for (i = 1; i < (bd_id)pool_next; i++) {
+			struct widget *tw = &pool[i];
+			if (!tw->alive || tw->type != BD_TERMINAL || !tw->vt)
+				continue;
+			if (!in_rect(mx, my, tw->x, tw->y, tw->w, tw->h))
+				continue;
+			int lines = (int)(-ev->scroll.dy * 3.0f);
+			int sb_max = vt_buf_scrollback_lines(tw->vt->buf);
+			tw->scroll_back += lines;
+			if (tw->scroll_back < 0)
+				tw->scroll_back = 0;
+			if (tw->scroll_back > sb_max)
+				tw->scroll_back = sb_max;
+			return 1;
+		}
+		return 0;
+	}
+
 	case LUD_EV_MOUSE_DOWN:
 		if (ev->mouse_button.button == LUD_MOUSE_LEFT) {
 			int mx = ev->mouse_button.x;
@@ -1515,4 +1699,23 @@ bd_gui_event(const void *evp)
 	default:
 		return 0;
 	}
+}
+
+/* ------------------------------------------------------------------ */
+/* public: terminal write                                             */
+/* ------------------------------------------------------------------ */
+
+void
+bd_terminal_write(bd_id id, const char *data, int len)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TERMINAL)
+		return;
+	struct widget *w = &pool[id];
+	if (!w->vt_parser || !data)
+		return;
+	if (len < 0)
+		len = (int)strlen(data);
+	vt_parse_feed(w->vt_parser, data, (size_t)len);
+	if (w->scroll_back > 0)
+		w->scroll_back = 0;
 }

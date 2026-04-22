@@ -2,6 +2,7 @@
 #include "ludica.h"
 
 static bd_id status_label;
+static bd_id terminal;
 
 static void
 on_connect(bd_id id, void *arg)
@@ -67,23 +68,15 @@ init(void)
 		BD_ON_CLICK_F, on_connect, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect", BD_END);
 
-	/* terminal area (placeholder) */
-	bd_id term = bd_create(frame, BD_PANEL,
+	/* terminal output */
+	terminal = bd_create(frame, BD_TERMINAL,
 		BD_GROW_I, 1,
-		BD_LAYOUT_I, BD_LAYOUT_COL,
-		BD_PAD_I, 8,
-		BD_GAP_I, 4,
 		BD_END);
 
-	bd_create(term, BD_LABEL,
-		BD_LABEL_S, "birdie v0.0 - GUI skeleton",
-		BD_FG_C, 0xFFFFFFFFu,
-		BD_END);
-
-	bd_create(term, BD_LABEL,
-		BD_LABEL_S, "Terminal output area (placeholder)",
-		BD_FG_C, 0x888888FFu,
-		BD_END);
+	bd_terminal_write(terminal,
+		"\033[1mbirdie v0.0\033[0m\r\n"
+		"Terminal output area ready.\r\n",
+		-1);
 
 	/* command input */
 	bd_create(frame, BD_INPUT_LINE,
