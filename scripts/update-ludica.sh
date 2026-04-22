@@ -66,6 +66,8 @@ rsync -a \
 	--exclude '*.dep' \
 	--exclude '*~' \
 	--exclude 'compile_commands.json' \
+        --exclude '/src/thirdparty/ludica/assets/textures' \
+        --exclude '/src/thirdparty/ludica/src/imgui' \
 	"$tmpdir/ludica"/ "$DEST"/
 
 cat > "$DEST/UPSTREAM" <<EOF
