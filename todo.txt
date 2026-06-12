@@ -1,0 +1,8 @@
+- remove unnecessary things from ludica:
+  - src/thirdparty/ludica/assets/textures
+  - src/thirdparty/ludica/src/imgui
+  - src/samples/
+
+- post-0.1: let client backends choose texture filtering (linear vs nearest).
+  bd_backend.load_texture currently hardcodes nearest in the ludica binding;
+  add a filter parameter when a backend needs scaled/linear assets.
