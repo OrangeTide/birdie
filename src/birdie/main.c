@@ -1,4 +1,6 @@
 #include "widget.h"
+#include "bd_widget_vt.h"
+#include "bd_backend_ludica.h"
 #include "ludica.h"
 
 static bd_id status_label;
@@ -23,7 +25,8 @@ on_quit(bd_id id, void *arg)
 static int
 on_event(const lud_event_t *ev)
 {
-	if (bd_gui_event(ev))
+	bd_event bev;
+	if (bd_event_from_lud(ev, &bev) && bd_gui_event(&bev))
 		return 1;
 	if (ev->type == LUD_EV_KEY_DOWN &&
 	    ev->key.keycode == LUD_KEY_ESCAPE) {
@@ -36,7 +39,7 @@ on_event(const lud_event_t *ev)
 static void
 init(void)
 {
-	bd_gui_init();
+	bd_gui_init(&bd_backend_ludica);
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",
@@ -69,7 +72,7 @@ init(void)
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect", BD_END);
 
 	/* terminal output */
-	terminal = bd_create(frame, BD_TERMINAL,
+	terminal = bd_terminal_create(frame,
 		BD_GROW_I, 1,
 		BD_END);
 

@@ -2,6 +2,7 @@
 #define BD_WIDGET_H
 
 #include <stdint.h>
+#include "bd_backend.h"
 
 typedef unsigned int bd_id;
 #define BD_NONE ((bd_id)0)
@@ -21,7 +22,6 @@ enum {
 	BD_MENU,
 	BD_NOTICE,
 	BD_TAB_BAR,
-	BD_TERMINAL,
 	BD_INPUT_LINE,
 };
 
@@ -94,14 +94,13 @@ bd_id       bd_parent(bd_id id);
 bd_id       bd_first_child(bd_id id);
 bd_id       bd_next_sibling(bd_id id);
 
-/* terminal widget */
-void bd_terminal_write(bd_id id, const char *data, int len);
-
-/* GUI lifecycle — called from the ludica main loop */
-void bd_gui_init(void);
+/* GUI lifecycle — driven by the host's main loop. bd_gui_init() takes the
+ * renderer/window backend the toolkit will draw through; bd_gui_event()
+ * consumes neutral events the host translates from its native ones. */
+void bd_gui_init(const bd_backend *backend);
 void bd_gui_cleanup(void);
 void bd_gui_layout(int win_w, int win_h);
 void bd_gui_render(void);
-int  bd_gui_event(const void *ev);
+int  bd_gui_event(const bd_event *ev);
 
 #endif

@@ -1,13 +1,8 @@
 #include "widget.h"
-#include "ludica.h"
-#include "ludica_gfx.h"
-#include "ludica_vfont.h"
-#include "vt_state.h"
-#include "vt_parse.h"
-#include "vt_ops.h"
-#include "vt_buf.h"
-#include "vt_cell.h"
+#include "widget_ext.h"
+#include "bd_backend.h"
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -24,12 +19,27 @@
 #define TYPE_C      5
 #define TYPE_B      6
 
-#define FONT_COLS   32
-#define GLYPH_W     8
-#define GLYPH_H     16
+/*
+ * Asset paths — compile-time configurable. Override any of these with
+ * -DBD_ASSET_xxx='"path"' at build time; the defaults assume the source
+ * tree layout.
+ */
+#ifndef BD_ASSET_GUI_FONT
+#define BD_ASSET_GUI_FONT    "src/thirdparty/ludica/assets/fonts/dejavu-sans"
+#endif
+#ifndef BD_ASSET_PIN_OUT
+#define BD_ASSET_PIN_OUT     "src/birdie/assets/pushpin/pushpin-out-14.png"
+#endif
+#ifndef BD_ASSET_PIN_IN
+#define BD_ASSET_PIN_IN      "src/birdie/assets/pushpin/pushpin-in-14.png"
+#endif
 
 #define CHROME_FONT_SZ  14.0f
 #define CHROME_BASELINE 0.75f
+
+/* fallback intrinsic size for a child with no preferred dimension */
+#define DEFAULT_MIN_W   64
+#define DEFAULT_MIN_H   16
 
 /* flat dark theme — RGBA8 */
 #define TH_BG       0x2B2B2BFFu
@@ -42,17 +52,6 @@
 #define TH_BORDER   0x555555FFu
 #define TH_FOCUS    0x5599DDFFu
 #define TH_SELECT   0x264F78FFu
-
-#define TERM_DEFAULT_FG 0xAAAAAAFFu
-#define TERM_DEFAULT_BG 0x000000FFu
-#define TERM_SCROLLBACK 2000
-
-static const uint32_t ansi16[16] = {
-	0x000000FFu, 0xAA0000FFu, 0x00AA00FFu, 0xAA5500FFu,
-	0x0000AAFFu, 0xAA00AAFFu, 0x00AAAAFFu, 0xAAAAAAFFu,
-	0x555555FFu, 0xFF5555FFu, 0x55FF55FFu, 0xFFFF55FFu,
-	0x5555FFFFu, 0xFF55FFFFu, 0x55FFFFFFu, 0xFFFFFFFFu,
-};
 
 /* ------------------------------------------------------------------ */
 /* internal widget structure                                          */
@@ -93,10 +92,7 @@ struct widget {
 	int sel_anchor;
 	float scroll_x;
 
-	struct vt_state *vt;
-	struct vt_parse *vt_parser;
-	int term_cols, term_rows;
-	int scroll_back;
+	void *state;            /* per-instance data for extension widget types */
 };
 
 /* ------------------------------------------------------------------ */
@@ -111,12 +107,72 @@ static bd_id active_menu = BD_NONE;
 static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
 static int mouse_x, mouse_y;
-static lud_texture_t font_tex;
-static lud_vfont_t gui_font;
-static lud_texture_t pin_out_tex;
-static lud_texture_t pin_in_tex;
+static const bd_backend *be;    /* renderer/window backend, set by bd_gui_init */
+static bd_font gui_font;
+static bd_texture pin_out_tex;
+static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
 static float cursor_blink;
+
+/* ------------------------------------------------------------------ */
+/* extension widget-class registry                                    */
+/* ------------------------------------------------------------------ */
+
+#define BD_TYPE_CUSTOM_BASE 256
+#define MAX_WIDGET_CLASSES  16
+
+static const bd_widget_class *classes[MAX_WIDGET_CLASSES];
+static int class_count;
+
+static const bd_widget_class *
+class_of(int type)
+{
+	int i = type - BD_TYPE_CUSTOM_BASE;
+	if (i < 0 || i >= class_count)
+		return NULL;
+	return classes[i];
+}
+
+int
+bd_register_widget_class(const bd_widget_class *cls)
+{
+	if (!cls || class_count >= MAX_WIDGET_CLASSES)
+		return 0;
+	classes[class_count] = cls;
+	return BD_TYPE_CUSTOM_BASE + class_count++;
+}
+
+void *
+bd_widget_state(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive)
+		return NULL;
+	return pool[id].state;
+}
+
+int
+bd_widget_type(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive)
+		return 0;
+	return pool[id].type;
+}
+
+void
+bd_widget_rect(bd_id id, int *x, int *y, int *w, int *h)
+{
+	struct widget *wi = &pool[id];
+	if (x) *x = wi->x;
+	if (y) *y = wi->y;
+	if (w) *w = wi->w;
+	if (h) *h = wi->h;
+}
+
+const bd_backend *
+bd_backend_get(void)
+{
+	return be;
+}
 
 /* ------------------------------------------------------------------ */
 /* color / drawing helpers                                            */
@@ -132,74 +188,12 @@ rgba(uint32_t c, float *r, float *g, float *b, float *a)
 }
 
 static void
-draw_chr(int ch, float dx, float dy, uint32_t fg, uint32_t bg)
-{
-	float r, g, b, a;
-	int sx = (ch % FONT_COLS) * GLYPH_W;
-	int sy = (ch / FONT_COLS) * GLYPH_H;
-
-	if (bg & 0xFF) {
-		rgba(bg, &r, &g, &b, &a);
-		lud_sprite_rect(dx, dy, GLYPH_W, GLYPH_H, r, g, b, a);
-	}
-	rgba(fg, &r, &g, &b, &a);
-	lud_sprite_draw_tinted(font_tex, dx, dy, GLYPH_W, GLYPH_H,
-	    (float)sx, (float)sy, GLYPH_W, GLYPH_H, r, g, b, a);
-}
-
-static void
-draw_str(const char *s, float x, float y, uint32_t fg, uint32_t bg)
-{
-	for (; *s; s++, x += GLYPH_W)
-		draw_chr((unsigned char)*s, x, y, fg, bg);
-}
-
-static int
-str_px(const char *s)
-{
-	int n = 0;
-	if (s)
-		while (*s++) n++;
-	return n * GLYPH_W;
-}
-
-static uint32_t
-vt_color_rgba(const struct vt_color *c, uint32_t def)
-{
-	switch (c->type) {
-	case VT_COLOR_DEFAULT:
-		return def;
-	case VT_COLOR_INDEXED: {
-		unsigned idx = c->index;
-		if (idx < 16)
-			return ansi16[idx];
-		if (idx < 232) {
-			idx -= 16;
-			int b = (idx % 6) * 51;
-			idx /= 6;
-			int g = (idx % 6) * 51;
-			int r = (idx / 6) * 51;
-			return ((uint32_t)r << 24) | ((uint32_t)g << 16) |
-			    ((uint32_t)b << 8) | 0xFFu;
-		}
-		int v = 8 + (idx - 232) * 10;
-		return ((uint32_t)v << 24) | ((uint32_t)v << 16) |
-		    ((uint32_t)v << 8) | 0xFFu;
-	}
-	case VT_COLOR_RGB:
-		return ((uint32_t)c->rgb.r << 24) | ((uint32_t)c->rgb.g << 16) |
-		    ((uint32_t)c->rgb.b << 8) | 0xFFu;
-	}
-	return def;
-}
-
-static void
 fill_rect(int x, int y, int w, int h, uint32_t color)
 {
 	float r, g, b, a;
 	rgba(color, &r, &g, &b, &a);
 	if (a > 0.0f)
-		lud_sprite_rect((float)x, (float)y, (float)w, (float)h,
+		be->fill_rect((float)x, (float)y, (float)w, (float)h,
 		    r, g, b, a);
 }
 
@@ -208,7 +202,7 @@ stroke_rect(int x, int y, int w, int h, uint32_t color)
 {
 	float r, g, b, a;
 	rgba(color, &r, &g, &b, &a);
-	lud_sprite_rect_lines((float)x, (float)y, (float)w, (float)h,
+	be->stroke_rect((float)x, (float)y, (float)w, (float)h,
 	    r, g, b, a);
 }
 
@@ -225,7 +219,7 @@ in_rect(int px, int py, int rx, int ry, int rw, int rh)
 static float
 chrome_text_w(const char *s)
 {
-	return s ? lud_vfont_text_width(gui_font, CHROME_FONT_SZ, s) : 0.0f;
+	return s ? be->vfont_text_width(gui_font, CHROME_FONT_SZ, s) : 0.0f;
 }
 
 static float
@@ -254,12 +248,12 @@ queue_text(const char *text, float x, float y, uint32_t color)
 }
 
 static float
-queue_sprite(lud_texture_t tex, float x, float y,
+queue_sprite(bd_texture tex, float x, float y,
     float w, float h, float sw, float sh, uint32_t color)
 {
 	float r, g, b, a;
 	rgba(color, &r, &g, &b, &a);
-	lud_sprite_draw_tinted(tex, x, y, w, h,
+	be->draw_tinted(tex, x, y, w, h,
 	    0.0f, 0.0f, sw, sh, r, g, b, a);
 	return w;
 }
@@ -269,15 +263,15 @@ flush_text(int vw, int vh)
 {
 	if (text_count == 0)
 		return;
-	lud_vfont_begin(0, 0, (float)vw, (float)vh);
+	be->vfont_begin(0, 0, (float)vw, (float)vh);
 	for (int i = 0; i < text_count; i++) {
 		struct text_draw *td = &text_buf[i];
 		float r, g, b, a;
 		rgba(td->color, &r, &g, &b, &a);
-		lud_vfont_draw(gui_font, td->x, td->y, CHROME_FONT_SZ,
+		be->vfont_draw(gui_font, td->x, td->y, CHROME_FONT_SZ,
 		    r, g, b, a, td->text);
 	}
-	lud_vfont_end();
+	be->vfont_end();
 	text_count = 0;
 }
 
@@ -540,11 +534,6 @@ defaults(struct widget *w, int type)
 		w->pad = 4;
 		w->sel_anchor = -1;
 		break;
-	case BD_TERMINAL:
-		w->bg = TERM_DEFAULT_BG;
-		w->fg = TERM_DEFAULT_FG;
-		w->pad = 2;
-		break;
 	}
 }
 
@@ -552,8 +541,13 @@ defaults(struct widget *w, int type)
 /* public: create / destroy                                           */
 /* ------------------------------------------------------------------ */
 
-bd_id
-bd_create(bd_id parent, int type, ...)
+/*
+ * Allocate + default-init a widget and run any extension class init, before
+ * the caller's attributes are applied (so app attributes override class
+ * defaults). Returns BD_NONE if the pool is full.
+ */
+static bd_id
+create_begin(bd_id parent, int type)
 {
 	if (pool_next >= MAX_WIDGETS)
 		return BD_NONE;
@@ -570,57 +564,63 @@ bd_create(bd_id parent, int type, ...)
 	else if (root == BD_NONE)
 		root = id;
 
-	va_list ap;
-	va_start(ap, type);
-	parse_va(w, ap);
-	va_end(ap);
-
-	if (type == BD_MENU && w->pref_w == 0 && w->label)
-		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
-
-	if (type == BD_TERMINAL) {
-		w->term_cols = 80;
-		w->term_rows = 24;
-		w->vt = vt_state_new(w->term_rows, w->term_cols,
-		    TERM_SCROLLBACK);
-		w->vt_parser = vt_parse_new(vt_ops_default(), w->vt);
+	const bd_widget_class *cls = class_of(type);
+	if (cls) {
+		if (cls->state_size)
+			w->state = calloc(1, cls->state_size);
+		if (cls->init)
+			cls->init(id, w->state);
 	}
 
+	return id;
+}
+
+static void
+create_finish(bd_id id)
+{
+	struct widget *w = &pool[id];
+	if (w->type == BD_MENU && w->pref_w == 0 && w->label)
+		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
+}
+
+bd_id
+bd_create(bd_id parent, int type, ...)
+{
+	bd_id id = create_begin(parent, type);
+	if (id == BD_NONE)
+		return BD_NONE;
+
+	va_list ap;
+	va_start(ap, type);
+	parse_va(&pool[id], ap);
+	va_end(ap);
+
+	create_finish(id);
+	return id;
+}
+
+bd_id
+bd_create_va(bd_id parent, int type, va_list ap)
+{
+	bd_id id = create_begin(parent, type);
+	if (id == BD_NONE)
+		return BD_NONE;
+
+	parse_va(&pool[id], ap);
+	create_finish(id);
 	return id;
 }
 
 bd_id
 bd_create_v(bd_id parent, int type, const bd_attr *attrs)
 {
-	if (pool_next >= MAX_WIDGETS)
+	bd_id id = create_begin(parent, type);
+	if (id == BD_NONE)
 		return BD_NONE;
 
-	bd_id id = (bd_id)pool_next++;
-	struct widget *w = &pool[id];
-
-	memset(w, 0, sizeof *w);
-	w->alive = 1;
-	defaults(w, type);
-
-	if (parent != BD_NONE)
-		link_child(parent, id);
-	else if (root == BD_NONE)
-		root = id;
-
 	if (attrs)
-		parse_arr(w, attrs);
-
-	if (type == BD_MENU && w->pref_w == 0 && w->label)
-		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
-
-	if (type == BD_TERMINAL) {
-		w->term_cols = 80;
-		w->term_rows = 24;
-		w->vt = vt_state_new(w->term_rows, w->term_cols,
-		    TERM_SCROLLBACK);
-		w->vt_parser = vt_parse_new(vt_ops_default(), w->vt);
-	}
-
+		parse_arr(&pool[id], attrs);
+	create_finish(id);
 	return id;
 }
 
@@ -645,14 +645,12 @@ bd_destroy(bd_id id)
 		else
 			p->last_child = w->prev_sib;
 	}
-	if (w->vt_parser) {
-		vt_parse_free(w->vt_parser);
-		w->vt_parser = NULL;
-	}
-	if (w->vt) {
-		vt_state_free(w->vt);
-		w->vt = NULL;
-	}
+	const bd_widget_class *cls = class_of(w->type);
+	if (cls && cls->destroy)
+		cls->destroy(id, w->state);
+	free(w->state);
+	w->state = NULL;
+
 	if (root == id)
 		root = BD_NONE;
 	w->alive = 0;
@@ -781,7 +779,7 @@ layout_children(bd_id id)
 	for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
 		int pref = is_row ? pool[c].pref_w : pool[c].pref_h;
 		if (pref <= 0)
-			pref = is_row ? GLYPH_W * 8 : GLYPH_H;
+			pref = is_row ? DEFAULT_MIN_W : DEFAULT_MIN_H;
 		sum_pref += pref;
 		sum_grow += pool[c].grow;
 		n++;
@@ -796,7 +794,7 @@ layout_children(bd_id id)
 		struct widget *ch = &pool[c];
 		int pref = is_row ? ch->pref_w : ch->pref_h;
 		if (pref <= 0)
-			pref = is_row ? GLYPH_W * 8 : GLYPH_H;
+			pref = is_row ? DEFAULT_MIN_W : DEFAULT_MIN_H;
 
 		int extent = pref;
 		if (sum_grow > 0 && ch->grow > 0)
@@ -916,7 +914,7 @@ render_widget(bd_id id)
 
 		/* blinking cursor */
 		if (focused) {
-			double t = lud_time() - (double)cursor_blink;
+			double t = be->time() - (double)cursor_blink;
 			if (((int)(t * 2.0)) % 2 == 0) {
 				float cx = vis_x + cursor_px - w->scroll_x;
 				fill_rect((int)cx, w->y + 2, 2, w->h - 4, w->fg);
@@ -925,76 +923,20 @@ render_widget(bd_id id)
 		break;
 	}
 
-	case BD_TERMINAL: {
-		if (!w->vt)
-			break;
-		struct vt_buf *buf = w->vt->buf;
-		int cols = vt_buf_cols(buf);
-		int rows = vt_buf_rows(buf);
-		int ox = w->x + w->pad;
-		int oy = w->y + w->pad;
-
-		fill_rect(w->x, w->y, w->w, w->h, w->bg);
-
-		int sb_count = vt_buf_scrollback_lines(buf);
-		int off = w->scroll_back;
-		if (off > sb_count)
-			off = sb_count;
-
-		for (int r = 0; r < rows; r++) {
-			int vline = sb_count - off + r;
-			struct vt_row *row;
-			if (vline < sb_count)
-				row = vt_buf_scrollback_row(buf,
-				    -(sb_count - vline));
-			else
-				row = vt_buf_row(buf, vline - sb_count);
-			if (!row)
-				continue;
-			float dy = (float)(oy + r * GLYPH_H);
-			for (int c = 0; c < cols; c++) {
-				struct vt_cell *cell = &row->cells[c];
-				if (cell->width == 0)
-					continue;
-				uint32_t fg = vt_color_rgba(&cell->fg,
-				    TERM_DEFAULT_FG);
-				uint32_t bg = vt_color_rgba(&cell->bg,
-				    TERM_DEFAULT_BG);
-				if (cell->attrs & VT_ATTR_BOLD && fg == TERM_DEFAULT_FG)
-					fg = TH_TEXT_HI;
-				if (cell->attrs & VT_ATTR_REVERSE) {
-					uint32_t tmp = fg; fg = bg; bg = tmp;
-				}
-				int ch = cell->codepoint < 256
-				    ? (int)cell->codepoint : '?';
-				if (ch == 0)
-					ch = ' ';
-				float dx = (float)(ox + c * GLYPH_W);
-				draw_chr(ch, dx, dy, fg, bg);
-			}
-		}
-
-		if (off == 0 && (w->vt->modes & VT_MODE_CURSOR_VIS)) {
-			int cr = w->vt->cursor_row;
-			int cc = w->vt->cursor_col;
-			if (cr >= 0 && cr < rows && cc >= 0 && cc < cols) {
-				float cx = (float)(ox + cc * GLYPH_W);
-				float cy = (float)(oy + cr * GLYPH_H);
-				fill_rect((int)cx, (int)cy, GLYPH_W, GLYPH_H,
-				    TERM_DEFAULT_FG);
-			}
-		}
-		break;
-	}
-
-	default:
-		if (w->bg & 0xFF)
+	default: {
+		const bd_widget_class *cls = class_of(w->type);
+		if (cls && cls->render)
+			cls->render(id, w->state);
+		else if (w->bg & 0xFF)
 			fill_rect(w->x, w->y, w->w, w->h, w->bg);
 		break;
 	}
+	}
 
-	if (w->type != BD_MENU && w->type != BD_INPUT_LINE &&
-	    w->type != BD_TERMINAL) {
+	const bd_widget_class *cls = class_of(w->type);
+	int leaf = (w->type == BD_MENU || w->type == BD_INPUT_LINE ||
+	    (cls && !cls->contains_children));
+	if (!leaf) {
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
 			render_widget(c);
@@ -1121,7 +1063,7 @@ layout_popup(bd_id id)
 		int px = w->x;
 		int py = w->y + w->h;
 
-		int ww = lud_width(), wh = lud_height();
+		int ww = be->width(), wh = be->height();
 		if (px + pw > ww) px = ww - pw;
 		if (px < 0) px = 0;
 		if (py + ph > wh) py = w->y - ph;
@@ -1153,7 +1095,7 @@ render_popup(bd_id id)
 	if (pin_hover)
 		fill_rect(px + 1, py + 1, pw - 2, PIN_ROW_H - 1, TH_HOVER);
 	{
-		lud_texture_t pt = w->menu_pinned ? pin_in_tex : pin_out_tex;
+		bd_texture pt = w->menu_pinned ? pin_in_tex : pin_out_tex;
 		float ptw = w->menu_pinned ? PIN_IN_W : PIN_OUT_W;
 		float pth = w->menu_pinned ? PIN_IN_H : PIN_OUT_H;
 		float pen_x = (float)(px + POPUP_PAD);
@@ -1220,12 +1162,12 @@ pin_menu(bd_id id)
 }
 
 static int
-handle_menu_event(const lud_event_t *ev)
+handle_menu_event(const bd_event *ev)
 {
 	switch (ev->type) {
-	case LUD_EV_MOUSE_MOVE:
-		mouse_x = ev->mouse_move.x;
-		mouse_y = ev->mouse_move.y;
+	case BD_EV_MOUSE_MOVE:
+		mouse_x = ev->x;
+		mouse_y = ev->y;
 		if (drag_menu != BD_NONE) {
 			struct widget *dm = &pool[drag_menu];
 			dm->popup_x = mouse_x - drag_off_x;
@@ -1244,18 +1186,18 @@ handle_menu_event(const lud_event_t *ev)
 		}
 		return 0;
 
-	case LUD_EV_MOUSE_UP:
+	case BD_EV_MOUSE_UP:
 		if (drag_menu != BD_NONE) {
 			drag_menu = BD_NONE;
 			return 1;
 		}
 		return 0;
 
-	case LUD_EV_MOUSE_DOWN: {
-		if (ev->mouse_button.button != LUD_MOUSE_LEFT)
+	case BD_EV_MOUSE_DOWN: {
+		if (ev->button != BD_MOUSE_LEFT)
 			return 0;
-		int mx = ev->mouse_button.x;
-		int my = ev->mouse_button.y;
+		int mx = ev->x;
+		int my = ev->y;
 		bd_id i;
 
 		for (i = 1; i < (bd_id)pool_next; i++) {
@@ -1369,7 +1311,7 @@ input_insert_char(bd_id id, unsigned codepoint)
 	w->cursor += n;
 	w->text_buf[w->text_len] = '\0';
 	w->sel_anchor = -1;
-	cursor_blink = (float)lud_time();
+	cursor_blink = (float)be->time();
 }
 
 static void
@@ -1395,24 +1337,24 @@ input_click(bd_id id, int mx)
 	}
 	w->cursor = best;
 	w->sel_anchor = -1;
-	cursor_blink = (float)lud_time();
+	cursor_blink = (float)be->time();
 }
 
 static int
 input_key(bd_id id, int key, unsigned mods)
 {
 	struct widget *w = &pool[id];
-	int shift = mods & LUD_MOD_SHIFT;
-	int ctrl = mods & LUD_MOD_CTRL;
+	int shift = mods & BD_MOD_SHIFT;
+	int ctrl = mods & BD_MOD_CTRL;
 	int old_cursor = w->cursor;
 
 	switch (key) {
-	case LUD_KEY_LEFT:
+	case BD_KEY_LEFT:
 		if (w->sel_anchor >= 0 && !shift) {
 			w->cursor = w->sel_anchor < w->cursor
 			    ? w->sel_anchor : w->cursor;
 			w->sel_anchor = -1;
-			cursor_blink = (float)lud_time();
+			cursor_blink = (float)be->time();
 			return 1;
 		}
 		if (ctrl)
@@ -1420,12 +1362,12 @@ input_key(bd_id id, int key, unsigned mods)
 		else
 			w->cursor = utf8_prev(w->text_buf, w->cursor);
 		break;
-	case LUD_KEY_RIGHT:
+	case BD_KEY_RIGHT:
 		if (w->sel_anchor >= 0 && !shift) {
 			w->cursor = w->sel_anchor > w->cursor
 			    ? w->sel_anchor : w->cursor;
 			w->sel_anchor = -1;
-			cursor_blink = (float)lud_time();
+			cursor_blink = (float)be->time();
 			return 1;
 		}
 		if (ctrl)
@@ -1435,14 +1377,14 @@ input_key(bd_id id, int key, unsigned mods)
 			w->cursor = utf8_next(w->text_buf, w->cursor,
 			    w->text_len);
 		break;
-	case LUD_KEY_HOME:
+	case BD_KEY_HOME:
 		w->cursor = 0;
 		break;
-	case LUD_KEY_END:
+	case BD_KEY_END:
 		w->cursor = w->text_len;
 		break;
 
-	case LUD_KEY_BACKSPACE:
+	case BD_KEY_BACKSPACE:
 		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
 			input_delete_selection(w);
 		} else if (w->cursor > 0) {
@@ -1455,9 +1397,9 @@ input_key(bd_id id, int key, unsigned mods)
 			w->text_buf[w->text_len] = '\0';
 		}
 		w->sel_anchor = -1;
-		cursor_blink = (float)lud_time();
+		cursor_blink = (float)be->time();
 		return 1;
-	case LUD_KEY_DELETE:
+	case BD_KEY_DELETE:
 		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
 			input_delete_selection(w);
 		} else if (w->cursor < w->text_len) {
@@ -1470,10 +1412,10 @@ input_key(bd_id id, int key, unsigned mods)
 			w->text_buf[w->text_len] = '\0';
 		}
 		w->sel_anchor = -1;
-		cursor_blink = (float)lud_time();
+		cursor_blink = (float)be->time();
 		return 1;
 
-	case LUD_KEY_ENTER:
+	case BD_KEY_ENTER:
 		if (w->on_click)
 			w->on_click(id, w->on_click_data);
 		w->text_buf[0] = '\0';
@@ -1481,16 +1423,16 @@ input_key(bd_id id, int key, unsigned mods)
 		w->cursor = 0;
 		w->sel_anchor = -1;
 		w->scroll_x = 0.0f;
-		cursor_blink = (float)lud_time();
+		cursor_blink = (float)be->time();
 		return 1;
-	case LUD_KEY_ESCAPE:
+	case BD_KEY_ESCAPE:
 		focus_id = BD_NONE;
 		return 1;
-	case LUD_KEY_A:
+	case BD_KEY_A:
 		if (ctrl) {
 			w->sel_anchor = 0;
 			w->cursor = w->text_len;
-			cursor_blink = (float)lud_time();
+			cursor_blink = (float)be->time();
 			return 1;
 		}
 		return 0;
@@ -1504,7 +1446,7 @@ input_key(bd_id id, int key, unsigned mods)
 	} else {
 		w->sel_anchor = -1;
 	}
-	cursor_blink = (float)lud_time();
+	cursor_blink = (float)be->time();
 	return 1;
 }
 
@@ -1513,38 +1455,34 @@ input_key(bd_id id, int key, unsigned mods)
 /* ------------------------------------------------------------------ */
 
 void
-bd_gui_init(void)
+bd_gui_init(const bd_backend *backend)
 {
-	font_tex = lud_load_texture("src/birdie/assets/font8x16.png",
-	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);
-	if (font_tex.id == 0)
-		fprintf(stderr, "bd: failed to load chrome font atlas\n");
-	gui_font = lud_load_vfont(
-	    "src/thirdparty/ludica/assets/fonts/dejavu-sans");
+	be = backend;
+
+	gui_font = be->load_font(BD_ASSET_GUI_FONT);
 	if (gui_font.id == 0)
 		fprintf(stderr, "bd: failed to load GUI font\n");
-	pin_out_tex = lud_load_texture("src/birdie/assets/pushpin/pushpin-out-14.png",
-	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);
-	pin_in_tex = lud_load_texture("src/birdie/assets/pushpin/pushpin-in-14.png",
-	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);
+	pin_out_tex = be->load_texture(BD_ASSET_PIN_OUT);
+	pin_in_tex = be->load_texture(BD_ASSET_PIN_IN);
 }
 
 void
 bd_gui_cleanup(void)
 {
 	if (gui_font.id != 0)
-		lud_destroy_vfont(gui_font);
+		be->destroy_font(gui_font);
 	if (pin_out_tex.id != 0)
-		lud_destroy_texture(pin_out_tex);
+		be->destroy_texture(pin_out_tex);
 	if (pin_in_tex.id != 0)
-		lud_destroy_texture(pin_in_tex);
-	if (font_tex.id != 0)
-		lud_destroy_texture(font_tex);
+		be->destroy_texture(pin_in_tex);
 	for (int i = 1; i < pool_next; i++) {
-		if (pool[i].vt_parser)
-			vt_parse_free(pool[i].vt_parser);
-		if (pool[i].vt)
-			vt_state_free(pool[i].vt);
+		if (!pool[i].alive)
+			continue;
+		const bd_widget_class *cls = class_of(pool[i].type);
+		if (cls && cls->destroy)
+			cls->destroy(i, pool[i].state);
+		free(pool[i].state);
+		pool[i].state = NULL;
 	}
 	memset(pool, 0, sizeof pool);
 	pool_next = 1;
@@ -1573,17 +1511,9 @@ bd_gui_layout(int win_w, int win_h)
 			continue;
 		if (wi->type == BD_MENU && wi->menu_open)
 			layout_popup(i);
-		if (wi->type == BD_TERMINAL && wi->vt) {
-			int nc = (wi->w - 2 * wi->pad) / GLYPH_W;
-			int nr = (wi->h - 2 * wi->pad) / GLYPH_H;
-			if (nc < 1) nc = 1;
-			if (nr < 1) nr = 1;
-			if (nc != wi->term_cols || nr != wi->term_rows) {
-				wi->term_cols = nc;
-				wi->term_rows = nr;
-				vt_state_resize(wi->vt, nr, nc);
-			}
-		}
+		const bd_widget_class *cls = class_of(wi->type);
+		if (cls && cls->layout)
+			cls->layout(i, wi->state, wi->w, wi->h);
 	}
 }
 
@@ -1592,28 +1522,27 @@ bd_gui_render(void)
 {
 	if (root == BD_NONE)
 		return;
-	int w = lud_width(), h = lud_height();
+	int w = be->width(), h = be->height();
 
-	lud_viewport(0, 0, w, h);
-	lud_clear(0.0f, 0.0f, 0.0f, 1.0f);
+	be->viewport(0, 0, w, h);
+	be->clear(0.0f, 0.0f, 0.0f, 1.0f);
 
 	/* layer 1: main widget tree */
-	lud_sprite_begin(0, 0, w, h);
+	be->sprite_begin(0, 0, w, h);
 	render_widget(root);
-	lud_sprite_end();
+	be->sprite_end();
 	flush_text(w, h);
 
 	/* layer 2: popup overlays */
-	lud_sprite_begin(0, 0, w, h);
+	be->sprite_begin(0, 0, w, h);
 	render_popups();
-	lud_sprite_end();
+	be->sprite_end();
 	flush_text(w, h);
 }
 
 int
-bd_gui_event(const void *evp)
+bd_gui_event(const bd_event *ev)
 {
-	const lud_event_t *ev = evp;
 	if (root == BD_NONE)
 		return 0;
 
@@ -1624,45 +1553,41 @@ bd_gui_event(const void *evp)
 	if (focus_id != BD_NONE &&
 	    pool[focus_id].alive &&
 	    pool[focus_id].type == BD_INPUT_LINE) {
-		if (ev->type == LUD_EV_CHAR && ev->ch.codepoint >= 32) {
-			input_insert_char(focus_id, ev->ch.codepoint);
+		if (ev->type == BD_EV_CHAR && ev->codepoint >= 32) {
+			input_insert_char(focus_id, ev->codepoint);
 			return 1;
 		}
-		if (ev->type == LUD_EV_KEY_DOWN)
-			return input_key(focus_id, ev->key.keycode,
-			    ev->modifiers);
+		if (ev->type == BD_EV_KEY_DOWN)
+			return input_key(focus_id, ev->key, ev->mods);
 	}
 
 	switch (ev->type) {
-	case LUD_EV_MOUSE_MOVE:
-		update_hover(root, ev->mouse_move.x, ev->mouse_move.y);
+	case BD_EV_MOUSE_MOVE:
+		update_hover(root, ev->x, ev->y);
 		return 0;
 
-	case LUD_EV_MOUSE_SCROLL: {
-		int mx = mouse_x, my = mouse_y;
+	case BD_EV_MOUSE_SCROLL: {
+		/* route to the extension widget under the cursor */
 		bd_id i;
 		for (i = 1; i < (bd_id)pool_next; i++) {
 			struct widget *tw = &pool[i];
-			if (!tw->alive || tw->type != BD_TERMINAL || !tw->vt)
+			if (!tw->alive)
 				continue;
-			if (!in_rect(mx, my, tw->x, tw->y, tw->w, tw->h))
+			const bd_widget_class *cls = class_of(tw->type);
+			if (!cls || !cls->event)
 				continue;
-			int lines = (int)(-ev->scroll.dy * 3.0f);
-			int sb_max = vt_buf_scrollback_lines(tw->vt->buf);
-			tw->scroll_back += lines;
-			if (tw->scroll_back < 0)
-				tw->scroll_back = 0;
-			if (tw->scroll_back > sb_max)
-				tw->scroll_back = sb_max;
-			return 1;
+			if (!in_rect(mouse_x, mouse_y, tw->x, tw->y, tw->w, tw->h))
+				continue;
+			if (cls->event(i, tw->state, ev))
+				return 1;
 		}
 		return 0;
 	}
 
-	case LUD_EV_MOUSE_DOWN:
-		if (ev->mouse_button.button == LUD_MOUSE_LEFT) {
-			int mx = ev->mouse_button.x;
-			int my = ev->mouse_button.y;
+	case BD_EV_MOUSE_DOWN:
+		if (ev->button == BD_MOUSE_LEFT) {
+			int mx = ev->x;
+			int my = ev->y;
 			bd_id hit = hit_interactive(root, mx, my);
 
 			if (hit != BD_NONE &&
@@ -1682,13 +1607,13 @@ bd_gui_event(const void *evp)
 		}
 		return 0;
 
-	case LUD_EV_MOUSE_UP:
-		if (ev->mouse_button.button == LUD_MOUSE_LEFT &&
+	case BD_EV_MOUSE_UP:
+		if (ev->button == BD_MOUSE_LEFT &&
 		    active_press != BD_NONE) {
 			struct widget *w = &pool[active_press];
 			w->pressed = 0;
 			if (w->on_click &&
-			    in_rect(ev->mouse_button.x, ev->mouse_button.y,
+			    in_rect(ev->x, ev->y,
 			        w->x, w->y, w->w, w->h))
 				w->on_click(active_press, w->on_click_data);
 			active_press = BD_NONE;
@@ -1699,23 +1624,4 @@ bd_gui_event(const void *evp)
 	default:
 		return 0;
 	}
-}
-
-/* ------------------------------------------------------------------ */
-/* public: terminal write                                             */
-/* ------------------------------------------------------------------ */
-
-void
-bd_terminal_write(bd_id id, const char *data, int len)
-{
-	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TERMINAL)
-		return;
-	struct widget *w = &pool[id];
-	if (!w->vt_parser || !data)
-		return;
-	if (len < 0)
-		len = (int)strlen(data);
-	vt_parse_feed(w->vt_parser, data, (size_t)len);
-	if (w->scroll_back > 0)
-		w->scroll_back = 0;
 }
