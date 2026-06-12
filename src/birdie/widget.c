@@ -34,24 +34,19 @@
 #define BD_ASSET_PIN_IN      "src/birdie/assets/pushpin/pushpin-in-14.png"
 #endif
 
-#define CHROME_FONT_SZ  14.0f
-#define CHROME_BASELINE 0.75f
-
 /* fallback intrinsic size for a child with no preferred dimension */
 #define DEFAULT_MIN_W   64
 #define DEFAULT_MIN_H   16
 
-/* flat dark theme — RGBA8 */
-#define TH_BG       0x2B2B2BFFu
-#define TH_PANEL    0x313335FFu
-#define TH_WIDGET   0x3C3F41FFu
-#define TH_HOVER    0x4C5052FFu
-#define TH_PRESS    0x27292AFFu
-#define TH_TEXT     0xBBBBBBFFu
-#define TH_TEXT_HI  0xFFFFFFFFu
-#define TH_BORDER   0x555555FFu
-#define TH_FOCUS    0x5599DDFFu
-#define TH_SELECT   0x264F78FFu
+/*
+ * Chrome theme, set by bd_gui_init(). Initialized to the compile-time
+ * defaults so widgets created before init (and the CHROME_* metric macros
+ * below) still resolve. CHROME_FONT_SZ / CHROME_BASELINE alias the live
+ * theme so existing call sites and derived macros read runtime values.
+ */
+static bd_theme theme = BD_THEME_DEFAULTS;
+#define CHROME_FONT_SZ  (theme.font_size)
+#define CHROME_BASELINE (theme.baseline)
 
 /* ------------------------------------------------------------------ */
 /* internal widget structure                                          */
@@ -506,19 +501,19 @@ defaults(struct widget *w, int type)
 	w->type = type;
 	w->visible = 1;
 	w->enabled = 1;
-	w->fg = TH_TEXT;
+	w->fg = theme.text;
 
 	switch (type) {
 	case BD_FRAME:
-		w->bg = TH_BG;
+		w->bg = theme.bg;
 		w->layout = BD_LAYOUT_COL;
 		break;
 	case BD_PANEL:
 		w->layout = BD_LAYOUT_COL;
 		break;
 	case BD_BUTTON:
-		w->bg = TH_WIDGET;
-		w->fg = TH_TEXT_HI;
+		w->bg = theme.widget;
+		w->fg = theme.text_hi;
 		w->pref_h = (int)CHROME_FONT_SZ + 8;
 		break;
 	case BD_LABEL:
@@ -528,8 +523,8 @@ defaults(struct widget *w, int type)
 		w->pref_h = (int)CHROME_FONT_SZ + 4;
 		break;
 	case BD_INPUT_LINE:
-		w->bg = TH_PRESS;
-		w->fg = TH_TEXT_HI;
+		w->bg = theme.press;
+		w->fg = theme.text_hi;
 		w->pref_h = (int)CHROME_FONT_SZ + 8;
 		w->pad = 4;
 		w->sel_anchor = -1;
@@ -848,11 +843,11 @@ render_widget(bd_id id)
 	case BD_BUTTON: {
 		uint32_t bg = w->bg;
 		if (w->pressed && w->hover)
-			bg = TH_PRESS;
+			bg = theme.press;
 		else if (w->hover)
-			bg = TH_HOVER;
+			bg = theme.hover;
 		fill_rect(w->x, w->y, w->w, w->h, bg);
-		stroke_rect(w->x, w->y, w->w, w->h, TH_BORDER);
+		stroke_rect(w->x, w->y, w->w, w->h, theme.border);
 		if (w->label) {
 			float tw = chrome_text_w(w->label);
 			float tx = (float)w->x + ((float)w->w - tw) * 0.5f;
@@ -865,7 +860,7 @@ render_widget(bd_id id)
 	case BD_MENU: {
 		uint32_t bg = 0;
 		if (w->menu_open || w->hover)
-			bg = TH_HOVER;
+			bg = theme.hover;
 		if (bg)
 			fill_rect(w->x, w->y, w->w, w->h, bg);
 		if (w->label) {
@@ -878,7 +873,7 @@ render_widget(bd_id id)
 
 	case BD_INPUT_LINE: {
 		int focused = (focus_id == id);
-		uint32_t border = focused ? TH_FOCUS : TH_BORDER;
+		uint32_t border = focused ? theme.focus : theme.border;
 		fill_rect(w->x, w->y, w->w, w->h, w->bg);
 		stroke_rect(w->x, w->y, w->w, w->h, border);
 
@@ -904,7 +899,7 @@ render_widget(bd_id id)
 			float sx0 = input_text_px(w->text_buf, s0) - w->scroll_x;
 			float sx1 = input_text_px(w->text_buf, s1) - w->scroll_x;
 			fill_rect((int)(vis_x + sx0), w->y + 2,
-			    (int)(sx1 - sx0), w->h - 4, TH_SELECT);
+			    (int)(sx1 - sx0), w->h - 4, theme.select);
 		}
 
 		/* text */
@@ -1086,14 +1081,14 @@ render_popup(bd_id id)
 	int px = w->popup_x, py = w->popup_y;
 	int pw = w->popup_w, ph = w->popup_h;
 
-	fill_rect(px, py, pw, ph, TH_PANEL);
-	stroke_rect(px, py, pw, ph, TH_BORDER);
+	fill_rect(px, py, pw, ph, theme.panel);
+	stroke_rect(px, py, pw, ph, theme.border);
 
 	/* pushpin row — pen advances through inline sprite + text */
 	int pin_hover = in_rect(mouse_x, mouse_y,
 	    px, py, pw, PIN_ROW_H);
 	if (pin_hover)
-		fill_rect(px + 1, py + 1, pw - 2, PIN_ROW_H - 1, TH_HOVER);
+		fill_rect(px + 1, py + 1, pw - 2, PIN_ROW_H - 1, theme.hover);
 	{
 		bd_texture pt = w->menu_pinned ? pin_in_tex : pin_out_tex;
 		float ptw = w->menu_pinned ? PIN_IN_W : PIN_OUT_W;
@@ -1103,24 +1098,24 @@ render_popup(bd_id id)
 		float sprite_y = (float)py + ((float)PIN_ROW_H - pth) * 0.5f;
 
 		pen_x += queue_sprite(pt, pen_x, sprite_y,
-		    ptw, pth, ptw, pth, TH_TEXT_HI);
+		    ptw, pth, ptw, pth, theme.text_hi);
 		pen_x += POPUP_PAD;
-		queue_text(w->label, pen_x, base_y, TH_TEXT);
+		queue_text(w->label, pen_x, base_y, theme.text);
 	}
 
 	/* separator */
-	fill_rect(px + 1, py + PIN_ROW_H, pw - 2, 1, TH_BORDER);
+	fill_rect(px + 1, py + PIN_ROW_H, pw - 2, 1, theme.border);
 
 	/* menu items */
 	bd_id c;
 	for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
 		struct widget *ch = &pool[c];
 		if (ch->hover)
-			fill_rect(ch->x, ch->y, ch->w, ch->h, TH_HOVER);
+			fill_rect(ch->x, ch->y, ch->w, ch->h, theme.hover);
 		if (ch->label) {
 			float tx = (float)(ch->x + POPUP_PAD);
 			float ty = chrome_baseline_y(ch->y, ch->h);
-			uint32_t fg = ch->enabled ? TH_TEXT_HI : TH_TEXT;
+			uint32_t fg = ch->enabled ? theme.text_hi : theme.text;
 			queue_text(ch->label, tx, ty, fg);
 		}
 	}
@@ -1455,9 +1450,11 @@ input_key(bd_id id, int key, unsigned mods)
 /* ------------------------------------------------------------------ */
 
 void
-bd_gui_init(const bd_backend *backend)
+bd_gui_init(const bd_backend *backend, const bd_theme *th)
 {
 	be = backend;
+	if (th)
+		theme = *th;
 
 	gui_font = be->load_font(BD_ASSET_GUI_FONT);
 	if (gui_font.id == 0)

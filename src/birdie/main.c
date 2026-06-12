@@ -2,6 +2,7 @@
 #include "bd_widget_vt.h"
 #include "bd_backend_ludica.h"
 #include "ludica.h"
+#include <stddef.h>
 
 static bd_id status_label;
 static bd_id terminal;
@@ -39,7 +40,7 @@ on_event(const lud_event_t *ev)
 static void
 init(void)
 {
-	bd_gui_init(&bd_backend_ludica);
+	bd_gui_init(&bd_backend_ludica, NULL);
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",

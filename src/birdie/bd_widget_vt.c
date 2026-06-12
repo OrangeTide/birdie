@@ -22,26 +22,17 @@
 #define FONT_COLS 32
 
 #define TERM_SCROLLBACK 2000
-#define TERM_DEFAULT_FG 0xAAAAAAFFu
-#define TERM_DEFAULT_BG 0x000000FFu
-#define TERM_BRIGHT_FG  0xFFFFFFFFu     /* bold brightening of default fg */
 
 #ifndef BD_ASSET_TERM_FONT
 #define BD_ASSET_TERM_FONT "src/birdie/assets/font8x16.png"
 #endif
-
-static const uint32_t ansi16[16] = {
-	0x000000FFu, 0xAA0000FFu, 0x00AA00FFu, 0xAA5500FFu,
-	0x0000AAFFu, 0xAA00AAFFu, 0x00AAAAFFu, 0xAAAAAAFFu,
-	0x555555FFu, 0xFF5555FFu, 0x55FF55FFu, 0xFFFF55FFu,
-	0x5555FFFFu, 0xFF55FFFFu, 0x55FFFFFFu, 0xFFFFFFFFu,
-};
 
 struct vt_widget {
 	struct vt_state  *vt;
 	struct vt_parse  *vt_parser;
 	int               cols, rows;
 	int               scroll_back;
+	bd_palette        pal;
 };
 
 static int        vt_type;      /* registered type id (0 = not yet registered) */
@@ -89,7 +80,7 @@ glyph(const bd_backend *b, int ch, float dx, float dy,
 
 /* Resolve a vt_color (default / 256-indexed / truecolor) to RGBA8. */
 static uint32_t
-color_rgba(const struct vt_color *c, uint32_t def)
+color_rgba(const struct vt_color *c, uint32_t def, const bd_palette *pal)
 {
 	switch (c->type) {
 	case VT_COLOR_DEFAULT:
@@ -97,7 +88,7 @@ color_rgba(const struct vt_color *c, uint32_t def)
 	case VT_COLOR_INDEXED: {
 		unsigned idx = c->index;
 		if (idx < 16)
-			return ansi16[idx];
+			return pal->ansi[idx];
 		if (idx < 232) {
 			idx -= 16;
 			int b = (idx % 6) * 51;
@@ -138,9 +129,10 @@ vt_init(bd_id id, void *state)
 	t->vt = vt_state_new(t->rows, t->cols, TERM_SCROLLBACK);
 	t->vt_parser = vt_parse_new(vt_ops_default(), t->vt);
 	t->scroll_back = 0;
+	t->pal = bd_palette_default();
 
 	/* class visual defaults; caller attributes (applied after init) win */
-	bd_set(id, BD_BG_C, TERM_DEFAULT_BG, BD_FG_C, TERM_DEFAULT_FG,
+	bd_set(id, BD_BG_C, t->pal.default_bg, BD_FG_C, t->pal.default_fg,
 	    BD_PAD_I, 2, BD_END);
 }
 
@@ -179,7 +171,7 @@ vt_render(bd_id id, void *state)
 	int cols = vt_buf_cols(buf);
 	int rows = vt_buf_rows(buf);
 
-	fill(b, x, y, w, h, TERM_DEFAULT_BG);
+	fill(b, x, y, w, h, t->pal.default_bg);
 
 	int sb_count = vt_buf_scrollback_lines(buf);
 	int off = t->scroll_back;
@@ -200,10 +192,13 @@ vt_render(bd_id id, void *state)
 			struct vt_cell *cell = &row->cells[c];
 			if (cell->width == 0)
 				continue;
-			uint32_t fg = color_rgba(&cell->fg, TERM_DEFAULT_FG);
-			uint32_t bg = color_rgba(&cell->bg, TERM_DEFAULT_BG);
-			if (cell->attrs & VT_ATTR_BOLD && fg == TERM_DEFAULT_FG)
-				fg = TERM_BRIGHT_FG;
+			uint32_t fg = color_rgba(&cell->fg, t->pal.default_fg,
+			    &t->pal);
+			uint32_t bg = color_rgba(&cell->bg, t->pal.default_bg,
+			    &t->pal);
+			if (cell->attrs & VT_ATTR_BOLD &&
+			    fg == t->pal.default_fg)
+				fg = t->pal.bold_fg;
 			if (cell->attrs & VT_ATTR_REVERSE) {
 				uint32_t tmp = fg; fg = bg; bg = tmp;
 			}
@@ -222,7 +217,7 @@ vt_render(bd_id id, void *state)
 		if (cr >= 0 && cr < rows && cc >= 0 && cc < cols) {
 			int cx = ox + cc * GLYPH_W;
 			int cy = oy + cr * GLYPH_H;
-			fill(b, cx, cy, GLYPH_W, GLYPH_H, TERM_DEFAULT_FG);
+			fill(b, cx, cy, GLYPH_W, GLYPH_H, t->pal.default_fg);
 		}
 	}
 }
@@ -309,4 +304,18 @@ bd_terminal_write(bd_id id, const char *data, int len)
 	vt_parse_feed(t->vt_parser, data, (size_t)len);
 	if (t->scroll_back > 0)
 		t->scroll_back = 0;
+}
+
+void
+bd_terminal_set_palette(bd_id id, const bd_palette *pal)
+{
+	if (!pal || bd_widget_type(id) != vt_type)
+		return;
+	struct vt_widget *t = bd_widget_state(id);
+	if (!t)
+		return;
+	t->pal = *pal;
+	/* keep the widget's bg/fg attributes in sync with the new defaults */
+	bd_set(id, BD_BG_C, t->pal.default_bg, BD_FG_C, t->pal.default_fg,
+	    BD_END);
 }

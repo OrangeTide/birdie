@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "bd_backend.h"
+#include "bd_theme.h"
 
 typedef unsigned int bd_id;
 #define BD_NONE ((bd_id)0)
@@ -95,9 +96,10 @@ bd_id       bd_first_child(bd_id id);
 bd_id       bd_next_sibling(bd_id id);
 
 /* GUI lifecycle — driven by the host's main loop. bd_gui_init() takes the
- * renderer/window backend the toolkit will draw through; bd_gui_event()
- * consumes neutral events the host translates from its native ones. */
-void bd_gui_init(const bd_backend *backend);
+ * renderer/window backend the toolkit will draw through and an optional chrome
+ * theme (NULL = bd_theme_default()); bd_gui_event() consumes neutral events
+ * the host translates from its native ones. */
+void bd_gui_init(const bd_backend *backend, const bd_theme *theme);
 void bd_gui_cleanup(void);
 void bd_gui_layout(int win_w, int win_h);
 void bd_gui_render(void);
