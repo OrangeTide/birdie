@@ -67,6 +67,22 @@ static const bd_backend stub = {
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
 
+/* ---- drag-recording extension widget (stands in for a slider/knob) ---- */
+static int rec_down, rec_move, rec_up;
+static int
+rec_event(bd_id id, void *state, const bd_event *ev)
+{
+	(void)id; (void)state;
+	if (ev->type == BD_EV_MOUSE_DOWN)      rec_down++;
+	else if (ev->type == BD_EV_MOUSE_MOVE) rec_move++;
+	else if (ev->type == BD_EV_MOUSE_UP)   rec_up++;
+	return 1;
+}
+static const bd_widget_class rec_class = {
+	.name = "rec", .state_size = 0, .event = rec_event,
+};
+static int rec_type;
+
 static bd_event
 mouse(int type, int x, int y)
 {
@@ -90,7 +106,10 @@ main(void)
 	    BD_LABEL_S, "Go", BD_PREF_H_I, 28,
 	    BD_ON_CLICK_F, on_click, BD_END);
 
-	check("widgets created", frame && term && btn);
+	rec_type = bd_register_widget_class(&rec_class);
+	bd_id rec = bd_create(frame, rec_type, BD_PREF_H_I, 40, BD_END);
+
+	check("widgets created", frame && term && btn && rec);
 
 	bd_gui_layout(800, 500);
 
@@ -110,6 +129,29 @@ main(void)
 	bd_gui_event(&d);
 	bd_gui_event(&u);
 	check("button click fired callback", clicked == 1);
+
+	/* drag the extension widget; capture must keep delivering moves even
+	 * after the pointer leaves its rect, and release on mouse up */
+	int rx, ry, rw, rh;
+	bd_widget_rect(rec, &rx, &ry, &rw, &rh);
+	int rcx = rx + rw/2, rcy = ry + rh/2;
+	bd_event rd  = mouse(BD_EV_MOUSE_DOWN, rcx, rcy);
+	bd_event rm1 = mouse(BD_EV_MOUSE_MOVE, rcx + 5, rcy + 5);   /* inside */
+	bd_event rm2 = mouse(BD_EV_MOUSE_MOVE, rcx + 9000, rcy);    /* far outside */
+	bd_event ru  = mouse(BD_EV_MOUSE_UP, rcx + 9000, rcy);
+	bd_gui_event(&rd);
+	bd_gui_event(&rm1);
+	bd_gui_event(&rm2);
+	bd_gui_event(&ru);
+	check("extension widget received mouse down", rec_down == 1);
+	check("captured drag delivers moves past the widget rect", rec_move == 2);
+	check("extension widget received mouse up", rec_up == 1);
+
+	/* after release, a move far away must NOT reach the widget */
+	int prev_move = rec_move;
+	bd_event after = mouse(BD_EV_MOUSE_MOVE, rcx + 9000, rcy);
+	bd_gui_event(&after);
+	check("capture released on mouse up", rec_move == prev_move);
 
 	/* terminal write: plain text + bold + 256-color SGR */
 	bd_terminal_write(term,

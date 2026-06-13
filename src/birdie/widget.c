@@ -98,6 +98,7 @@ static struct widget pool[MAX_WIDGETS];
 static int pool_next = 1;
 static bd_id root = BD_NONE;
 static bd_id active_press = BD_NONE;
+static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id active_menu = BD_NONE;
 static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
@@ -648,6 +649,10 @@ bd_destroy(bd_id id)
 
 	if (root == id)
 		root = BD_NONE;
+	if (active_press == id)
+		active_press = BD_NONE;
+	if (pointer_capture == id)
+		pointer_capture = BD_NONE;
 	w->alive = 0;
 }
 
@@ -977,6 +982,37 @@ hit_interactive(bd_id id, int mx, int my)
 	if ((w->on_click || w->type == BD_INPUT_LINE) && w->enabled)
 		return id;
 	return BD_NONE;
+}
+
+/*
+ * Topmost extension widget (a registered class with an event hook) under the
+ * point, children first. Lets value widgets such as sliders, knobs, and X-Y
+ * pads take pointer input the way buttons take clicks.
+ */
+static bd_id
+hit_extension(bd_id id, int mx, int my)
+{
+	struct widget *w = &pool[id];
+	if (!w->alive || !w->visible)
+		return BD_NONE;
+	if (!in_rect(mx, my, w->x, w->y, w->w, w->h))
+		return BD_NONE;
+	for (bd_id c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
+		bd_id r = hit_extension(c, mx, my);
+		if (r != BD_NONE)
+			return r;
+	}
+	const bd_widget_class *cls = class_of(w->type);
+	if (cls && cls->event && w->enabled)
+		return id;
+	return BD_NONE;
+}
+
+static int
+ext_event(bd_id id, const bd_event *ev)
+{
+	const bd_widget_class *cls = class_of(pool[id].type);
+	return (cls && cls->event) ? cls->event(id, pool[id].state, ev) : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1486,6 +1522,7 @@ bd_gui_cleanup(void)
 	root = BD_NONE;
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
+	pointer_capture = BD_NONE;
 	drag_menu = BD_NONE;
 }
 
@@ -1560,24 +1597,18 @@ bd_gui_event(const bd_event *ev)
 
 	switch (ev->type) {
 	case BD_EV_MOUSE_MOVE:
+		/* a captured extension widget keeps the pointer through a drag */
+		if (pointer_capture != BD_NONE) {
+			ext_event(pointer_capture, ev);
+			return 1;
+		}
 		update_hover(root, ev->x, ev->y);
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL: {
-		/* route to the extension widget under the cursor */
-		bd_id i;
-		for (i = 1; i < (bd_id)pool_next; i++) {
-			struct widget *tw = &pool[i];
-			if (!tw->alive)
-				continue;
-			const bd_widget_class *cls = class_of(tw->type);
-			if (!cls || !cls->event)
-				continue;
-			if (!in_rect(mouse_x, mouse_y, tw->x, tw->y, tw->w, tw->h))
-				continue;
-			if (cls->event(i, tw->state, ev))
-				return 1;
-		}
+		bd_id ext = hit_extension(root, mouse_x, mouse_y);
+		if (ext != BD_NONE && ext_event(ext, ev))
+			return 1;
 		return 0;
 	}
 
@@ -1596,6 +1627,14 @@ bd_gui_event(const bd_event *ev)
 
 			focus_id = BD_NONE;
 
+			/* a value widget grabs the pointer for the drag */
+			bd_id ext = hit_extension(root, mx, my);
+			if (ext != BD_NONE) {
+				pointer_capture = ext;
+				ext_event(ext, ev);
+				return 1;
+			}
+
 			if (hit != BD_NONE) {
 				pool[hit].pressed = 1;
 				active_press = hit;
@@ -1605,6 +1644,11 @@ bd_gui_event(const bd_event *ev)
 		return 0;
 
 	case BD_EV_MOUSE_UP:
+		if (pointer_capture != BD_NONE) {
+			ext_event(pointer_capture, ev);
+			pointer_capture = BD_NONE;
+			return 1;
+		}
 		if (ev->button == BD_MOUSE_LEFT &&
 		    active_press != BD_NONE) {
 			struct widget *w = &pool[active_press];
