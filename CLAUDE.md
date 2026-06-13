@@ -12,9 +12,15 @@ Birdie is a desktop MUD client written in C, using the ludica rendering framewor
 make                # debug build
 make RELEASE=1      # optimized (-O2, LTO)
 make clean
+make test           # headless GUI toolkit test (no window/ludica/X11)
+make dist           # bundle the GUI toolkit into a versioned ZIP
 ```
 
 Output: `_out/<triplet>/bin/birdie` (e.g. `_out/x86_64-linux-gnu/bin/birdie`). Also builds ludica tools: `ludica-launcher`, `ludica-mcp`, `ludica-mcp-bridge`, `font2slug`.
+
+`make test` compiles `test/test_gui.c` (a recording stub backend) with the toolkit sources and runs it, linking only libvt. It needs no display, so it runs in CI; a failed check fails the build.
+
+`make dist` stages the GUI toolkit (public headers, `widget.c`, the reference ludica backend, the VT extension, runtime assets, README) into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`. Override the version with `make dist GUI_VERSION=x.y.z` (default `0.1.0`). Both targets live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
 
 Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each directory has a `module.mk`; the top-level one controls which SUBDIRS are pulled in.
 
