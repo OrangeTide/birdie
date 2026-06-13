@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'module.mk'
+      - 'GNUmakefile'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'module.mk'
+      - 'GNUmakefile'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Headless GUI toolkit test. Needs only a C compiler and make (both
+  # preinstalled on the runner); the test links libvt, not ludica/X11.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run headless GUI test
+        run: make test
+
+  # Full application build, plus the dist bundle. Needs the GL/X11 dev
+  # libraries the ludica backend links against.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libegl-dev libgles-dev libx11-dev
+      - name: Build
+        run: make
+      - name: Build dist bundle
+        run: make dist
