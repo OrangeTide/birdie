@@ -6,3 +6,17 @@
 - post-0.1: let client backends choose texture filtering (linear vs nearest).
   bd_backend.load_texture currently hardcodes nearest in the ludica binding;
   add a filter parameter when a backend needs scaled/linear assets.
+
+- vector pushpin art to replace the fixed-size bitmap PNGs
+  (src/birdie/assets/pushpin/pushpin-{out,in}-*.png). Goal: art that scales
+  to any font metric instead of shipping discrete sizes.
+  - produce proper vector art as SVG: potrace the existing bitmaps, or
+    redraw from scratch, but it must read as the original bitmap when
+    rasterized to the same small size.
+  - tooling to convert the SVG into a form we can hardcode into birdie
+    (e.g. baked path/triangle data) and scale at runtime.
+  - drive the scale from the active font metrics, so pins match whichever
+    font the host configures. Birdie itself uses dejavu-sans chrome and the
+    font8x16 CP437 atlas today; downstream projects pick their own (e.g. one
+    consumer uses Monaspace), so the scaling must follow the host's font
+    rather than assume a specific one.
