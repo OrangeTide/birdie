@@ -53,22 +53,13 @@ dist :
 	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
 	@cp $(DIST_SRC)/assets/pushpin/pushpin-out-14.png \
 	    $(DIST_SRC)/assets/pushpin/pushpin-in-14.png $(DIST_STAGE)/assets/pushpin/
+	@cp $(DIST_SRC)/README.md $(DIST_STAGE)/
 	@printf '%s\n' \
 	    'birdie-gui $(GUI_VERSION)' \
 	    '' \
 	    'Portable retained-mode GUI toolkit (C). Source distribution.' \
-	    '' \
-	    'Layout:' \
-	    '  include/  public API headers' \
-	    '  src/      toolkit implementation + reference ludica backend' \
-	    '  assets/   runtime assets loaded by the widgets' \
-	    '' \
-	    'API headers:' \
-	    '  widget.h        app API (build UIs from widgets)' \
-	    '  widget_ext.h    extension API (define new widget types)' \
-	    '  bd_backend.h    renderer/window backend interface' \
-	    '  bd_theme.h      configurable chrome theme' \
-	    '  bd_widget_vt.h  terminal widget (extension)' \
+	    'See README.md for usage; include/ has the public API headers and' \
+	    'src/ the implementation plus the reference ludica backend.' \
 	    '' \
 	    'External dependencies (provide these yourself):' \
 	    '  ludica  reference backend src/bd_backend_ludica.c; also ships the' \
@@ -79,3 +70,20 @@ dist :
 	    > $(DIST_STAGE)/MANIFEST.txt
 	@cd $(OUTDIR) && zip -rq $(DIST_NAME).zip $(DIST_NAME)
 	@echo "dist: wrote $(DIST_ZIP)"
+
+# ----------------------------------------------------------------------
+# Headless unit test for the GUI toolkit (test/test_gui.c). Compiles the
+# toolkit sources together with a recording stub backend and runs them
+# with no window, no ludica, and no X11, so it works in CI. Links only
+# libvt. Exit status propagates, so a failing check fails the build.
+# ----------------------------------------------------------------------
+TEST_BIN := $(BUILDDIR)/test_gui
+
+.PHONY : test
+test : bd_vt
+	@mkdir -p $(BUILDDIR)
+	cc -Wall -W -Isrc/birdie -Isrc/libvt \
+	    test/test_gui.c src/birdie/widget.c src/birdie/bd_widget_vt.c \
+	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
+	@echo "running headless GUI test:"
+	@$(TEST_BIN)
