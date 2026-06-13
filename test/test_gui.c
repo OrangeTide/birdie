@@ -49,7 +49,8 @@ static void   be_vfont_draw(bd_font f,float x,float y,float s,
 { (void)f;(void)x;(void)y;(void)s;(void)r;(void)g;(void)b;(void)a;(void)t; n_vfont++; }
 static float  be_vfont_w(bd_font f,float s,const char *t)
 { (void)f;(void)s; return t ? (float)strlen(t) * 7.0f : 0.0f; }
-static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){1}; }
+static unsigned next_texid = 1;   /* distinct id per texture, like a real backend */
+static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
 static void   be_destroy_tex(bd_texture t){ (void)t; }
 static bd_font be_load_font(const char *p){ (void)p; return (bd_font){1}; }
 static void   be_destroy_font(bd_font f){ (void)f; }
@@ -65,7 +66,7 @@ static void be_update_mesh(bd_mesh m, const bd_vertex *v, int n)
 { (void)m; (void)v; (void)n; n_updatemesh++; }
 static void be_destroy_mesh(bd_mesh m){ (void)m; }
 static bd_texture be_make_tex(int w, int h, const void *px)
-{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){2}; }
+{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){next_texid++}; }
 static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
 { (void)t;(void)x;(void)y;(void)w;(void)h;(void)px; }
 static void be_use_shader(bd_shader s){ (void)s; }
@@ -194,31 +195,19 @@ main(void)
 	pal.ansi[1] = 0xE06C75FFu;
 	bd_terminal_set_palette(term, &pal);
 
-	/* render: stub records draw calls */
-	n_fill = n_tinted = n_vfont = 0;
+	/* rendering now flows through the toolkit renderer (bd_draw) onto the
+	 * GPU interface; bd_gui_init already created the shader + mesh and baked
+	 * the chrome font */
+	check("renderer initialized shader + mesh", n_shader == 1 && n_mesh == 1);
+	check("chrome font baked (real DejaVu): text width > 0",
+	    bd_draw_text_width("Quit") > 0.0f);
+	n_drawmesh = 0;
 	bd_gui_render();
-	check("render produced fills (chrome + term bg)", n_fill > 0);
-	check("render produced glyph quads (terminal text)", n_tinted > 0);
-	check("render queued vfont chrome text (button label)", n_vfont > 0);
+	check("render issued GPU draws (chrome + terminal)", n_drawmesh > 0);
 
 	/* write to a non-terminal must be a safe no-op */
 	bd_terminal_write(btn, "ignored", -1);
 	check("write to non-terminal is a no-op (no crash)", 1);
-
-	/* toolkit renderer (bd_draw) on the stub GPU interface */
-	int ok = bd_draw_init(&stub, NULL, 14.0f);   /* NULL font: text no-ops */
-	check("bd_draw_init created shader + mesh", ok && n_shader == 1 && n_mesh == 1);
-	bd_draw_begin(800, 500);
-	bd_draw_rect(10, 10, 100, 20, 0x334455FFu);
-	bd_draw_rect_lines(10, 10, 100, 20, 0x778899FFu);
-	bd_draw_sprite((bd_texture){7}, 0, 0, 16, 16, 0, 0, 1, 1, 0xFFFFFFFFu);
-	bd_draw_end();
-	check("bd_draw batched and drew (draw_mesh called)", n_drawmesh >= 1);
-	check("bd_draw text width is 0 without a font",
-	    bd_draw_text_width("hi") == 0.0f);
-	bd_draw_text("ignored", 0, 0, 0xFFFFFFFFu);  /* no font: no-op, no crash */
-	bd_draw_shutdown();
-	check("bd_draw shutdown (no crash)", 1);
 
 	bd_gui_cleanup();
 	check("cleanup completed", 1);

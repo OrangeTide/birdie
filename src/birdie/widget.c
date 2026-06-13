@@ -1,6 +1,7 @@
 #include "widget.h"
 #include "widget_ext.h"
 #include "bd_backend.h"
+#include "bd_draw.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,7 @@
  * tree layout.
  */
 #ifndef BD_ASSET_GUI_FONT
-#define BD_ASSET_GUI_FONT    "src/thirdparty/ludica/assets/fonts/dejavu-sans"
+#define BD_ASSET_GUI_FONT    "src/birdie/assets/fonts/DejaVuSans.ttf"
 #endif
 #ifndef BD_ASSET_PIN_OUT
 #define BD_ASSET_PIN_OUT     "src/birdie/assets/pushpin/pushpin-out-14.png"
@@ -104,7 +105,6 @@ static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
 static int mouse_x, mouse_y;
 static const bd_backend *be;    /* renderer/window backend, set by bd_gui_init */
-static bd_font gui_font;
 static bd_texture pin_out_tex;
 static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
@@ -171,35 +171,20 @@ bd_backend_get(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* color / drawing helpers                                            */
+/* drawing helpers (toolkit renderer)                                 */
 /* ------------------------------------------------------------------ */
-
-static inline void
-rgba(uint32_t c, float *r, float *g, float *b, float *a)
-{
-	*r = ((c >> 24) & 0xFF) / 255.0f;
-	*g = ((c >> 16) & 0xFF) / 255.0f;
-	*b = ((c >>  8) & 0xFF) / 255.0f;
-	*a = ( c        & 0xFF) / 255.0f;
-}
 
 static void
 fill_rect(int x, int y, int w, int h, uint32_t color)
 {
-	float r, g, b, a;
-	rgba(color, &r, &g, &b, &a);
-	if (a > 0.0f)
-		be->fill_rect((float)x, (float)y, (float)w, (float)h,
-		    r, g, b, a);
+	if (color & 0xFF)
+		bd_draw_rect((float)x, (float)y, (float)w, (float)h, color);
 }
 
 static void
 stroke_rect(int x, int y, int w, int h, uint32_t color)
 {
-	float r, g, b, a;
-	rgba(color, &r, &g, &b, &a);
-	be->stroke_rect((float)x, (float)y, (float)w, (float)h,
-	    r, g, b, a);
+	bd_draw_rect_lines((float)x, (float)y, (float)w, (float)h, color);
 }
 
 static inline int
@@ -209,13 +194,13 @@ in_rect(int px, int py, int rx, int ry, int rw, int rh)
 }
 
 /* ------------------------------------------------------------------ */
-/* proportional chrome text (vfont)                                   */
+/* proportional chrome text                                           */
 /* ------------------------------------------------------------------ */
 
 static float
 chrome_text_w(const char *s)
 {
-	return s ? be->vfont_text_width(gui_font, CHROME_FONT_SZ, s) : 0.0f;
+	return s ? bd_draw_text_width(s) : 0.0f;
 }
 
 static float
@@ -224,51 +209,24 @@ chrome_baseline_y(int wy, int wh)
 	return (float)wy + (float)wh * CHROME_BASELINE;
 }
 
-#define MAX_TEXT_DRAWS 256
-struct text_draw {
-	float x, y;
-	uint32_t color;
-	const char *text;
-};
-static struct text_draw text_buf[MAX_TEXT_DRAWS];
-static int text_count;
-
 static float
 queue_text(const char *text, float x, float y, uint32_t color)
 {
 	if (!text)
 		return 0.0f;
-	if (text_count < MAX_TEXT_DRAWS)
-		text_buf[text_count++] = (struct text_draw){x, y, color, text};
-	return chrome_text_w(text);
+	/* callers pass y as a baseline; bd_draw_text takes the line top */
+	bd_draw_text(text, x, y - bd_draw_ascent(), color);
+	return bd_draw_text_width(text);
 }
 
 static float
 queue_sprite(bd_texture tex, float x, float y,
     float w, float h, float sw, float sh, uint32_t color)
 {
-	float r, g, b, a;
-	rgba(color, &r, &g, &b, &a);
-	be->draw_tinted(tex, x, y, w, h,
-	    0.0f, 0.0f, sw, sh, r, g, b, a);
+	(void)sw;
+	(void)sh;
+	bd_draw_sprite(tex, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
 	return w;
-}
-
-static void
-flush_text(int vw, int vh)
-{
-	if (text_count == 0)
-		return;
-	be->vfont_begin(0, 0, (float)vw, (float)vh);
-	for (int i = 0; i < text_count; i++) {
-		struct text_draw *td = &text_buf[i];
-		float r, g, b, a;
-		rgba(td->color, &r, &g, &b, &a);
-		be->vfont_draw(gui_font, td->x, td->y, CHROME_FONT_SZ,
-		    r, g, b, a, td->text);
-	}
-	be->vfont_end();
-	text_count = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1492,9 +1450,8 @@ bd_gui_init(const bd_backend *backend, const bd_theme *th)
 	if (th)
 		theme = *th;
 
-	gui_font = be->load_font(BD_ASSET_GUI_FONT);
-	if (gui_font.id == 0)
-		fprintf(stderr, "bd: failed to load GUI font\n");
+	if (!bd_draw_init(be, BD_ASSET_GUI_FONT, theme.font_size))
+		fprintf(stderr, "bd: renderer init failed\n");
 	pin_out_tex = be->load_texture(BD_ASSET_PIN_OUT);
 	pin_in_tex = be->load_texture(BD_ASSET_PIN_IN);
 }
@@ -1502,8 +1459,7 @@ bd_gui_init(const bd_backend *backend, const bd_theme *th)
 void
 bd_gui_cleanup(void)
 {
-	if (gui_font.id != 0)
-		be->destroy_font(gui_font);
+	bd_draw_shutdown();
 	if (pin_out_tex.id != 0)
 		be->destroy_texture(pin_out_tex);
 	if (pin_in_tex.id != 0)
@@ -1562,16 +1518,14 @@ bd_gui_render(void)
 	be->clear(0.0f, 0.0f, 0.0f, 1.0f);
 
 	/* layer 1: main widget tree */
-	be->sprite_begin(0, 0, w, h);
+	bd_draw_begin(w, h);
 	render_widget(root);
-	be->sprite_end();
-	flush_text(w, h);
+	bd_draw_end();
 
 	/* layer 2: popup overlays */
-	be->sprite_begin(0, 0, w, h);
+	bd_draw_begin(w, h);
 	render_popups();
-	be->sprite_end();
-	flush_text(w, h);
+	bd_draw_end();
 }
 
 int

@@ -1,5 +1,6 @@
 #include "bd_widget_vt.h"
 #include "widget_ext.h"
+#include "bd_draw.h"
 #include "vt_state.h"
 #include "vt_parse.h"
 #include "vt_ops.h"
@@ -20,6 +21,8 @@
 #define GLYPH_W   8
 #define GLYPH_H   16
 #define FONT_COLS 32
+#define ATLAS_W   (FONT_COLS * GLYPH_W)   /* CP437 atlas: 32*8  = 256 px wide */
+#define ATLAS_H   128                     /* 256 glyphs / 32 cols = 8 rows * 16 */
 
 #define TERM_SCROLLBACK 2000
 
@@ -43,39 +46,25 @@ static int        vt_live;      /* live terminal count, governs font lifetime */
 /* drawing helpers (via the backend)                                  */
 /* ------------------------------------------------------------------ */
 
-static inline void
-rgba(uint32_t c, float *r, float *g, float *b, float *a)
+static void
+fill(int x, int y, int w, int h, uint32_t color)
 {
-	*r = ((c >> 24) & 0xFF) / 255.0f;
-	*g = ((c >> 16) & 0xFF) / 255.0f;
-	*b = ((c >>  8) & 0xFF) / 255.0f;
-	*a = ( c        & 0xFF) / 255.0f;
+	if (color & 0xFF)
+		bd_draw_rect((float)x, (float)y, (float)w, (float)h, color);
 }
 
 static void
-fill(const bd_backend *b, int x, int y, int w, int h, uint32_t color)
+glyph(int ch, float dx, float dy, uint32_t fg, uint32_t bg)
 {
-	float r, g, bl, a;
-	rgba(color, &r, &g, &bl, &a);
-	if (a > 0.0f)
-		b->fill_rect((float)x, (float)y, (float)w, (float)h, r, g, bl, a);
-}
-
-static void
-glyph(const bd_backend *b, int ch, float dx, float dy,
-    uint32_t fg, uint32_t bg)
-{
-	float r, g, bl, a;
 	int sx = (ch % FONT_COLS) * GLYPH_W;
 	int sy = (ch / FONT_COLS) * GLYPH_H;
 
-	if (bg & 0xFF) {
-		rgba(bg, &r, &g, &bl, &a);
-		b->fill_rect(dx, dy, GLYPH_W, GLYPH_H, r, g, bl, a);
-	}
-	rgba(fg, &r, &g, &bl, &a);
-	b->draw_tinted(vt_font, dx, dy, GLYPH_W, GLYPH_H,
-	    (float)sx, (float)sy, GLYPH_W, GLYPH_H, r, g, bl, a);
+	if (bg & 0xFF)
+		bd_draw_rect(dx, dy, GLYPH_W, GLYPH_H, bg);
+	bd_draw_sprite(vt_font, dx, dy, GLYPH_W, GLYPH_H,
+	    sx / (float)ATLAS_W, sy / (float)ATLAS_H,
+	    (sx + GLYPH_W) / (float)ATLAS_W, (sy + GLYPH_H) / (float)ATLAS_H,
+	    fg);
 }
 
 /* Resolve a vt_color (default / 256-indexed / truecolor) to RGBA8. */
@@ -160,7 +149,6 @@ vt_render(bd_id id, void *state)
 	if (!t->vt)
 		return;
 
-	const bd_backend *b = bd_backend_get();
 	int x, y, w, h;
 	bd_widget_rect(id, &x, &y, &w, &h);
 	int pad = bd_get_i(id, BD_PAD_I);
@@ -171,7 +159,7 @@ vt_render(bd_id id, void *state)
 	int cols = vt_buf_cols(buf);
 	int rows = vt_buf_rows(buf);
 
-	fill(b, x, y, w, h, t->pal.default_bg);
+	fill(x, y, w, h, t->pal.default_bg);
 
 	int sb_count = vt_buf_scrollback_lines(buf);
 	int off = t->scroll_back;
@@ -207,7 +195,7 @@ vt_render(bd_id id, void *state)
 			if (ch == 0)
 				ch = ' ';
 			float dx = (float)(ox + c * GLYPH_W);
-			glyph(b, ch, dx, dy, fg, bg);
+			glyph(ch, dx, dy, fg, bg);
 		}
 	}
 
@@ -217,7 +205,7 @@ vt_render(bd_id id, void *state)
 		if (cr >= 0 && cr < rows && cc >= 0 && cc < cols) {
 			int cx = ox + cc * GLYPH_W;
 			int cy = oy + cr * GLYPH_H;
-			fill(b, cx, cy, GLYPH_W, GLYPH_H, t->pal.default_fg);
+			fill(cx, cy, GLYPH_W, GLYPH_H, t->pal.default_fg);
 		}
 	}
 }
