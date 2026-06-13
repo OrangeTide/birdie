@@ -11,6 +11,7 @@
 #include "widget.h"
 #include "widget_ext.h"
 #include "bd_widget_vt.h"
+#include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -53,6 +54,30 @@ static void   be_destroy_tex(bd_texture t){ (void)t; }
 static bd_font be_load_font(const char *p){ (void)p; return (bd_font){1}; }
 static void   be_destroy_font(bd_font f){ (void)f; }
 
+/* ---- GPU interface recorders (v0.2) ---- */
+static int n_shader, n_mesh, n_drawmesh, n_updatemesh, n_maketex;
+static bd_shader be_make_shader(const char *v, const char *f)
+{ (void)v; (void)f; n_shader++; return (bd_shader){1}; }
+static void be_destroy_shader(bd_shader s){ (void)s; }
+static bd_mesh be_make_mesh(const bd_vertex *v, int n, int dyn)
+{ (void)v; (void)n; (void)dyn; n_mesh++; return (bd_mesh){1}; }
+static void be_update_mesh(bd_mesh m, const bd_vertex *v, int n)
+{ (void)m; (void)v; (void)n; n_updatemesh++; }
+static void be_destroy_mesh(bd_mesh m){ (void)m; }
+static bd_texture be_make_tex(int w, int h, const void *px)
+{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){2}; }
+static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
+{ (void)t;(void)x;(void)y;(void)w;(void)h;(void)px; }
+static void be_use_shader(bd_shader s){ (void)s; }
+static void be_uni_i(bd_shader s,const char *n,int v){ (void)s;(void)n;(void)v; }
+static void be_uni_f(bd_shader s,const char *n,float v){ (void)s;(void)n;(void)v; }
+static void be_uni_2(bd_shader s,const char *n,float x,float y){ (void)s;(void)n;(void)x;(void)y; }
+static void be_uni_3(bd_shader s,const char *n,float x,float y,float z){ (void)s;(void)n;(void)x;(void)y;(void)z; }
+static void be_uni_4(bd_shader s,const char *n,float x,float y,float z,float w){ (void)s;(void)n;(void)x;(void)y;(void)z;(void)w; }
+static void be_uni_m(bd_shader s,const char *n,const float m[16]){ (void)s;(void)n;(void)m; }
+static void be_bind_tex(bd_texture t,int u){ (void)t;(void)u; }
+static void be_draw_mesh(bd_mesh m){ (void)m; n_drawmesh++; }
+
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
 	.clear=be_clear, .sprite_begin=be_sprite_begin, .sprite_end=be_sprite_end,
@@ -61,6 +86,12 @@ static const bd_backend stub = {
 	.vfont_text_width=be_vfont_w, .load_texture=be_load_tex,
 	.destroy_texture=be_destroy_tex, .load_font=be_load_font,
 	.destroy_font=be_destroy_font,
+	.make_shader=be_make_shader, .destroy_shader=be_destroy_shader,
+	.make_mesh=be_make_mesh, .update_mesh=be_update_mesh, .destroy_mesh=be_destroy_mesh,
+	.make_texture=be_make_tex, .update_texture=be_update_tex,
+	.use_shader=be_use_shader, .set_uniform_int=be_uni_i, .set_uniform_float=be_uni_f,
+	.set_uniform_vec2=be_uni_2, .set_uniform_vec3=be_uni_3, .set_uniform_vec4=be_uni_4,
+	.set_uniform_mat4=be_uni_m, .bind_texture=be_bind_tex, .draw_mesh=be_draw_mesh,
 };
 
 /* ---- click callback ---- */
@@ -173,6 +204,21 @@ main(void)
 	/* write to a non-terminal must be a safe no-op */
 	bd_terminal_write(btn, "ignored", -1);
 	check("write to non-terminal is a no-op (no crash)", 1);
+
+	/* toolkit renderer (bd_draw) on the stub GPU interface */
+	int ok = bd_draw_init(&stub, NULL, 14.0f);   /* NULL font: text no-ops */
+	check("bd_draw_init created shader + mesh", ok && n_shader == 1 && n_mesh == 1);
+	bd_draw_begin(800, 500);
+	bd_draw_rect(10, 10, 100, 20, 0x334455FFu);
+	bd_draw_rect_lines(10, 10, 100, 20, 0x778899FFu);
+	bd_draw_sprite((bd_texture){7}, 0, 0, 16, 16, 0, 0, 1, 1, 0xFFFFFFFFu);
+	bd_draw_end();
+	check("bd_draw batched and drew (draw_mesh called)", n_drawmesh >= 1);
+	check("bd_draw text width is 0 without a font",
+	    bd_draw_text_width("hi") == 0.0f);
+	bd_draw_text("ignored", 0, 0, 0xFFFFFFFFu);  /* no font: no-op, no crash */
+	bd_draw_shutdown();
+	check("bd_draw shutdown (no crash)", 1);
 
 	bd_gui_cleanup();
 	check("cleanup completed", 1);

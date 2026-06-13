@@ -1,0 +1,46 @@
+#ifndef BD_DRAW_H
+#define BD_DRAW_H
+
+#include "bd_backend.h"
+#include <stdint.h>
+
+/*
+ * Toolkit renderer. Builds chrome and text on top of the backend GPU
+ * interface (bd_backend.h): one default shader (textured * vertex color), one
+ * dynamic quad batch, one stb_truetype glyph atlas. Colors are packed RGBA8
+ * (0xRRGGBBAA), matching the widget layer. Coordinates are pixels, origin
+ * top-left.
+ *
+ * Extension widgets that want custom effects (e.g. shaded knobs) bypass these
+ * helpers and talk to the backend GPU interface directly via bd_backend_get().
+ *
+ * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
+ */
+
+/* Create the renderer on a backend. font_path is a TTF/OTF baked at font_px
+ * for chrome text; pass NULL to run without text (text calls become no-ops).
+ * Returns 1 on success, 0 if the shader or mesh could not be created. */
+int  bd_draw_init(const bd_backend *be, const char *font_path, float font_px);
+void bd_draw_shutdown(void);
+
+/* Frame: begin a batch for a window of win_w x win_h pixels, end flushes it.
+ * Quads emitted between them are batched and drawn in order. */
+void bd_draw_begin(int win_w, int win_h);
+void bd_draw_end(void);
+
+/* Solid fill / one-pixel outline. */
+void bd_draw_rect(float x, float y, float w, float h, uint32_t rgba);
+void bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba);
+
+/* Tinted textured quad. Source rect is normalized texture coords [0,1]. */
+void bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
+                    float u0, float v0, float u1, float v1, uint32_t rgba);
+
+/* Chrome text at the baseline-independent top-left pen position (x,y is the
+ * top of the line). No-op if the renderer was created without a font. */
+void  bd_draw_text(const char *s, float x, float y, uint32_t rgba);
+float bd_draw_text_width(const char *s);
+float bd_draw_line_height(void);   /* baked font ascent+descent+gap, pixels */
+float bd_draw_ascent(void);        /* baked font ascent, pixels */
+
+#endif

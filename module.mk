@@ -82,8 +82,8 @@ TEST_BIN := $(BUILDDIR)/test_gui
 .PHONY : test
 test : bd_vt
 	@mkdir -p $(BUILDDIR)
-	cc -Wall -W -Isrc/birdie -Isrc/libvt \
+	cc -Wall -W -Isrc/birdie -Isrc/libvt -Isrc/thirdparty/stb \
 	    test/test_gui.c src/birdie/widget.c src/birdie/bd_widget_vt.c \
-	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
+	    src/birdie/bd_draw.c $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
 	@echo "running headless GUI test:"
 	@$(TEST_BIN)
