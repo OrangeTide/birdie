@@ -44,10 +44,19 @@ report(const char *msg)
 static void on_btn(bd_id id, void *arg)   { (void)id; report((const char *)arg); }
 
 static void
+on_quit_confirm(bd_id n, int button, void *arg)
+{
+	(void)n; (void)arg;
+	if (button == 0)            /* "Quit" */
+		running = 0;
+}
+
+static void
 on_quit(bd_id id, void *arg)
 {
 	(void)id; (void)arg;
-	running = 0;
+	bd_notice_open("Quit the widget gallery?", "Quit\nCancel",
+		on_quit_confirm, NULL);
 }
 
 /* Close the window the Close button lives in: walk up to its top-level frame
@@ -372,6 +381,9 @@ main(void)
 	build_ui();
 	if (getenv("GALLERY_AUTODLG"))   /* open a second window for testing */
 		on_new_window(BD_NONE, NULL);
+	if (getenv("GALLERY_AUTONOTICE"))   /* show a modal notice for a shot */
+		bd_notice_open("Disconnect from Aardwolf?", "Disconnect\nCancel",
+			on_quit_confirm, NULL);
 
 	while (running) {
 		win_event wev;

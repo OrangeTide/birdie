@@ -96,8 +96,12 @@ geometry (`BD_PREF_W_I`, `BD_GROW_I`, `BD_PAD_I`, `BD_GAP_I`), layout
 (`BD_LAYOUT_I` with `BD_LAYOUT_ROW`/`COL`/`FIXED`), text (`BD_LABEL_S`), color
 (`BD_FG_C`, `BD_BG_C`), and callbacks (`BD_ON_CLICK_F`). Built-in types include
 `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`,
-`BD_MULTILINE`, `BD_LIST`, `BD_TAB_BAR`, `BD_SCROLLBAR`, and `BD_INPUT_LINE`.
-`BD_SCROLLBAR` is a standalone scrollbar (orientation follows its shape;
+`BD_MULTILINE`, `BD_LIST`, `BD_TAB_BAR`, `BD_SCROLLBAR`, `BD_NOTICE`, and
+`BD_INPUT_LINE`. `BD_NOTICE` is a modal alert/confirm:
+`bd_notice_open(message, "Yes\nNo", cb, arg)` shows a centered panel over a
+dimmed backdrop and blocks the rest of the UI; the callback gets the chosen
+button index (-1 for Escape) and it closes. `BD_SCROLLBAR` is a standalone
+scrollbar (orientation follows its shape;
 `bd_scrollbar_set(id, pos, frac)` / `bd_scrollbar_value`; drag fires
 `BD_ON_CLICK_F`). `BD_TAB_BAR` is a
 row of skeuomorphic folder tabs (labels via `BD_LABEL_S`/`bd_tabbar_set_tabs`;

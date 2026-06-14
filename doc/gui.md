@@ -160,8 +160,9 @@ What is built:
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
   `BD_MENU` (+ pinnable pushpins), `BD_TEXT` (single-line field),
   `BD_MULTILINE` (multi-line editor), `BD_LIST` (scrolling/selectable list),
-  `BD_TAB_BAR` (skeuomorphic folder tabs), `BD_SCROLLBAR`, `BD_INPUT_LINE`, and
-  the `BD_TERMINAL` extension (libvt). Flexbox row/col + fixed layout.
+  `BD_TAB_BAR` (skeuomorphic folder tabs), `BD_SCROLLBAR`, `BD_NOTICE` (modal
+  alert/confirm), `BD_INPUT_LINE`, and the `BD_TERMINAL` extension (libvt).
+  Flexbox row/col + fixed layout. The v1.0 core widget set is complete.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
@@ -172,8 +173,8 @@ What is built:
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 
-Not yet built: `BD_NOTICE` (still enum-only); IME/compose; clipboard;
-multitouch; pen. These are tracked in the roadmap and widget-set sections.
+Not yet built: IME/compose; clipboard; multitouch; pen; key-up/repeat. These
+are tracked in the roadmap section.
 
 ## v1.0 widget set
 
@@ -192,7 +193,7 @@ are extensions (`widget_ext.h`) and so are not in this core set.
 | `BD_LIST`        | scrolling list (MUD list, log sink list)            | yes  |
 | `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | yes  |
 | `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
-| `BD_NOTICE`      | modal confirmation / alert                          | no   |
+| `BD_NOTICE`      | modal confirmation / alert                          | yes  |
 | `BD_TAB_BAR`     | tabs for multiple concurrent MUD sessions           | yes  |
 | `BD_TERMINAL`    | the MUD output widget (custom renderer)             | yes  |
 | `BD_INPUT_LINE`  | the MUD command input (history, completion)         | yes  |

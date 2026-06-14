@@ -101,6 +101,9 @@ static const bd_backend mwstub = {
 static int text_committed;
 static void on_text_commit(bd_id id, void *a){ (void)id; (void)a; text_committed++; }
 
+static int notice_btn = -2;
+static void on_notice(bd_id n, int b, void *a){ (void)n; (void)a; notice_btn = b; }
+
 /* per-window click counters */
 static int click_w1, click_w2;
 static void on_click_w1(bd_id id, void *a){ (void)id; (void)a; click_w1++; }
@@ -822,6 +825,48 @@ main(void)
 	bd_scrollbar_set(sb, 0.5f, 0.25f);
 	check("bd_scrollbar_set sets the value", bd_scrollbar_value(sb) == 0.5f);
 	bd_gui_render();   /* exercises the scrollbar render path */
+	bd_gui_cleanup();
+
+	/* ---- BD_NOTICE modal dialog ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id nrf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id gobtn = bd_create(nrf, BD_BUTTON, BD_LABEL_S, "Go", BD_PREF_H_I, 28,
+	    BD_ON_CLICK_F, on_click, BD_END);
+	bd_gui_layout(800, 600);
+
+	notice_btn = -2;
+	bd_id ntc = bd_notice_open("Disconnect from the server?", "Yes\nNo",
+	    on_notice, NULL);
+	check("notice opens", ntc != BD_NONE);
+
+	/* modality: a click on the underlying button is swallowed */
+	int gbx, gby, gbw, gbh;
+	bd_widget_rect(gobtn, &gbx, &gby, &gbw, &gbh);
+	int gc = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=gbx+gbw/2, .y=gby+gbh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=gbx+gbw/2, .y=gby+gbh/2 });
+	check("modal notice blocks the UI behind it", clicked == gc);
+
+	/* render lays out the notice buttons; then click "Yes" (index 0) */
+	bd_gui_render();
+	bd_id yes = bd_first_child(ntc);
+	int yx, yy, yw, yh;
+	bd_widget_rect(yes, &yx, &yy, &yw, &yh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=yx+yw/2, .y=yy+yh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=yx+yw/2, .y=yy+yh/2 });
+	check("notice button fires the callback with its index", notice_btn == 0);
+
+	/* notice closed -> the UI is interactive again */
+	int gc2 = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=gbx+gbw/2, .y=gby+gbh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=gbx+gbw/2, .y=gby+gbh/2 });
+	check("UI is interactive after the notice closes", clicked == gc2 + 1);
+
+	/* Escape cancels a notice with index -1 */
+	notice_btn = -2;
+	bd_notice_open("Quit?", "Quit\nCancel", on_notice, NULL);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape cancels the notice (-1)", notice_btn == -1);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);

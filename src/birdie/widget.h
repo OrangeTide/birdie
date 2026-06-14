@@ -137,6 +137,16 @@ void bd_tabbar_set_active(bd_id id, int index);
 void  bd_scrollbar_set(bd_id id, float pos, float frac);
 float bd_scrollbar_value(bd_id id);
 
+/* BD_NOTICE: a modal confirmation/alert. bd_notice_open() shows a centered
+ * panel over a dimmed backdrop with `message` and one button per '\n'-separated
+ * label in `buttons` (NULL/"" defaults to "OK"); while it is up, input to the
+ * rest of the UI is blocked. The callback runs with the chosen button index
+ * (or -1 for Escape) and the notice is then closed automatically. */
+typedef void (*bd_notice_cb)(bd_id notice, int button, void *arg);
+bd_id bd_notice_open(const char *message, const char *buttons,
+                     bd_notice_cb cb, void *arg);
+void  bd_notice_close(bd_id notice);
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a

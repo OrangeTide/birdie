@@ -122,6 +122,10 @@ static float cursor_blink;
 static bd_id list_last_id = BD_NONE;
 static int   list_last_row = -1;
 static double list_last_time;
+/* BD_NOTICE modal overlay (one at a time) */
+static bd_id        active_notice = BD_NONE;
+static bd_notice_cb notice_cb;
+static void        *notice_arg;
 
 /* Single-line editable text widgets share the same edit/render/focus paths.
  * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT is
@@ -2171,6 +2175,9 @@ bd_gui_cleanup(void)
 	pointer_capture = BD_NONE;
 	drag_menu = BD_NONE;
 	focus_id = BD_NONE;
+	active_notice = BD_NONE;
+	notice_cb = NULL;
+	notice_arg = NULL;
 }
 
 /* Place one top-level frame and its tree at the origin of the given size. */
@@ -2217,6 +2224,98 @@ bd_gui_layout(int win_w, int win_h)
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/* BD_NOTICE modal overlay                                            */
+/* ------------------------------------------------------------------ */
+
+#define NOTICE_PAD 16
+#define NOTICE_GAP 12
+
+/* Lay the notice and its buttons out centered in a w x h window. */
+static void
+layout_notice(int w, int h)
+{
+	struct widget *nw = &pool[active_notice];
+	int lh = ml_line_h();
+
+	/* message size (text_buf, '\n'-separated) */
+	int msg_w = 0, lines = 0, pos = 0;
+	int mlen = nw->text_len;
+	while (pos <= mlen) {
+		int le = ml_line_end(nw->text_buf, mlen, pos);
+		float lw = ml_span_px(nw->text_buf, pos, le);
+		if ((int)lw > msg_w) msg_w = (int)lw;
+		lines++;
+		if (le >= mlen) break;
+		pos = le + 1;
+	}
+	int msg_h = lines * lh;
+
+	/* button sizes */
+	int bh = (int)CHROME_FONT_SZ + 10;
+	int btn_total = 0, nbtn = 0;
+	for (bd_id c = nw->first_child; c != BD_NONE; c = pool[c].next_sib) {
+		int bw = (int)chrome_text_w(pool[c].label) + 28;
+		pool[c].w = bw;
+		pool[c].h = bh;
+		btn_total += bw;
+		nbtn++;
+	}
+	if (nbtn > 1)
+		btn_total += (nbtn - 1) * 8;
+
+	int content_w = msg_w > btn_total ? msg_w : btn_total;
+	int nwid = content_w + 2 * NOTICE_PAD;
+	int nhei = NOTICE_PAD + msg_h + NOTICE_GAP + bh + NOTICE_PAD;
+	int nx = (w - nwid) / 2, ny = (h - nhei) / 2;
+	nw->x = nx; nw->y = ny; nw->w = nwid; nw->h = nhei;
+
+	/* lay the buttons in a centered row at the bottom */
+	int bx = nx + (nwid - btn_total) / 2;
+	int by = ny + nhei - NOTICE_PAD - bh;
+	for (bd_id c = nw->first_child; c != BD_NONE; c = pool[c].next_sib) {
+		pool[c].x = bx;
+		pool[c].y = by;
+		bx += pool[c].w + 8;
+	}
+}
+
+static void
+render_notice(int w, int h)
+{
+	if (active_notice == BD_NONE || !pool[active_notice].alive)
+		return;
+	layout_notice(w, h);
+	struct widget *nw = &pool[active_notice];
+
+	bd_draw_begin(w, h);
+	bd_draw_rect(0, 0, w, h, 0x00000099u);                 /* dim backdrop */
+	fill_rect(nw->x, nw->y, nw->w, nw->h, theme.panel);    /* panel */
+	stroke_rect(nw->x, nw->y, nw->w, nw->h, theme.border);
+
+	/* message lines */
+	int lh = ml_line_h();
+	int pos = 0, li = 0, mlen = nw->text_len;
+	while (pos <= mlen) {
+		int le = ml_line_end(nw->text_buf, mlen, pos);
+		char tmp[1024];
+		int n = le - pos;
+		if (n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+		if (n > 0) {
+			memcpy(tmp, nw->text_buf + pos, n);
+			tmp[n] = '\0';
+			bd_draw_text(tmp, (float)(nw->x + NOTICE_PAD),
+			    (float)(nw->y + NOTICE_PAD + li * lh), theme.text);
+		}
+		if (le >= mlen) break;
+		pos = le + 1; li++;
+	}
+
+	for (bd_id c = nw->first_child; c != BD_NONE; c = pool[c].next_sib)
+		render_widget(c);
+	bd_draw_end();
+}
+
 /* Render one top-level frame's tree plus the popups it owns into the currently
  * bound draw target of size w x h. */
 static void
@@ -2251,10 +2350,14 @@ bd_gui_render(void)
 			be->window_begin(id);
 			render_frame(f, be->window_width(id),
 			    be->window_height(id));
+			if (i == 0)   /* modal notice overlays the primary window */
+				render_notice(be->window_width(id),
+				    be->window_height(id));
 			be->window_swap(id);
 		}
 	} else {
 		render_frame(root, be->width(), be->height());
+		render_notice(be->width(), be->height());
 	}
 }
 
@@ -2410,11 +2513,123 @@ bd_scrollbar_value(bd_id id)
 	return pool[id].scroll_y;
 }
 
+void
+bd_notice_close(bd_id notice)
+{
+	if (notice == BD_NONE)
+		return;
+	if (active_notice == notice) {
+		active_notice = BD_NONE;
+		notice_cb = NULL;
+		notice_arg = NULL;
+	}
+	bd_destroy(notice);
+}
+
+/* internal: a notice button carries its index in on_click_data */
+static void
+notice_button_clicked(bd_id btn, void *data)
+{
+	int idx = (int)(intptr_t)data;
+	bd_id n = pool[btn].parent;
+	bd_notice_cb cb = notice_cb;
+	void *arg = notice_arg;
+	bd_notice_close(n);            /* clears globals, destroys the subtree */
+	if (cb)
+		cb(n, idx, arg);
+}
+
+bd_id
+bd_notice_open(const char *message, const char *buttons,
+    bd_notice_cb cb, void *arg)
+{
+	bd_id n = bd_create(BD_NONE, BD_NOTICE, BD_END);
+	if (n == BD_NONE)
+		return BD_NONE;
+
+	struct widget *nw = &pool[n];
+	int mlen = message ? (int)strlen(message) : 0;
+	if (mlen >= (int)sizeof(nw->text_buf))
+		mlen = (int)sizeof(nw->text_buf) - 1;
+	if (mlen > 0)
+		memcpy(nw->text_buf, message, (size_t)mlen);
+	nw->text_buf[mlen] = '\0';
+	nw->text_len = mlen;
+
+	const char *bs = (buttons && buttons[0]) ? buttons : "OK";
+	int blen = (int)strlen(bs), p = 0, i = 0;
+	while (p <= blen) {
+		int e = p;
+		while (e < blen && bs[e] != '\n') e++;
+		bd_id b = bd_create(n, BD_BUTTON, BD_END);
+		if (b != BD_NONE) {
+			int ln = e - p;
+			if (ln >= (int)sizeof(pool[b].text_buf))
+				ln = (int)sizeof(pool[b].text_buf) - 1;
+			memcpy(pool[b].text_buf, bs + p, (size_t)ln);
+			pool[b].text_buf[ln] = '\0';
+			pool[b].label = pool[b].text_buf;   /* owned, persistent */
+			bd_set(b, BD_ON_CLICK_F, notice_button_clicked,
+			    BD_ON_CLICK_P, (void *)(intptr_t)i, BD_END);
+		}
+		i++;
+		if (e >= blen) break;
+		p = e + 1;
+	}
+
+	notice_cb = cb;
+	notice_arg = arg;
+	active_notice = n;
+	return n;
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
 	if (root == BD_NONE)
 		return 0;
+
+	/* a modal notice swallows all input except its own buttons */
+	if (active_notice != BD_NONE && pool[active_notice].alive) {
+		switch (ev->type) {
+		case BD_EV_MOUSE_MOVE:
+			update_hover(active_notice, ev->x, ev->y);
+			return 1;
+		case BD_EV_MOUSE_DOWN:
+			if (ev->button == BD_MOUSE_LEFT) {
+				bd_id hit = hit_interactive(active_notice,
+				    ev->x, ev->y);
+				if (hit != BD_NONE) {
+					pool[hit].pressed = 1;
+					active_press = hit;
+				}
+			}
+			return 1;
+		case BD_EV_MOUSE_UP:
+			if (ev->button == BD_MOUSE_LEFT && active_press != BD_NONE) {
+				struct widget *b = &pool[active_press];
+				bd_id bid = active_press;
+				b->pressed = 0;
+				active_press = BD_NONE;
+				if (b->on_click && in_rect(ev->x, ev->y,
+				    b->x, b->y, b->w, b->h))
+					b->on_click(bid, b->on_click_data);
+			}
+			return 1;
+		case BD_EV_KEY_DOWN:
+			if (ev->key == BD_KEY_ESCAPE) {
+				bd_id n = active_notice;
+				bd_notice_cb cb = notice_cb;
+				void *arg = notice_arg;
+				bd_notice_close(n);
+				if (cb)
+					cb(n, -1, arg);
+			}
+			return 1;
+		default:
+			return 1;
+		}
+	}
 
 	/* the top-level frame this event is destined for (its own window) */
 	bd_id frame = frame_for_window(ev->window);
