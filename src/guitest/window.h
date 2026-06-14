@@ -66,6 +66,7 @@ enum {
     WIN_KEY_ENTER,
     WIN_KEY_ESCAPE,
     WIN_KEY_TAB,
+    WIN_KEY_F2,
 };
 
 /* Flattened event. Only the fields relevant to `type` are valid. */

@@ -16,7 +16,7 @@
  * so selection and saved positions survive a refresh when indices shift.
  *
  * Status: selection (single / Ctrl-toggle / Shift-range), drag-move,
- * rubber-band, and keyboard navigation work; in-place rename and list/details
+ * rubber-band, keyboard navigation, and in-place rename work; list/details
  * view modes are still to come (see bd_widget_explorer.c).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
@@ -33,12 +33,14 @@ typedef struct bd_explorer_item {
 	void       *user;     /* app payload */
 } bd_explorer_item;
 
-/* The data source. count()/get() are required; set_pos() is optional (NULL =
- * positions are not persisted, only kept for the session). */
+/* The data source. count()/get() are required; set_pos() and set_name() are
+ * optional. set_pos persists a dragged icon's position; set_name receives the
+ * new label after an in-place rename (NULL = rename disabled). */
 typedef struct bd_explorer_model {
 	int  (*count)(void *ctx);
 	void (*get)(void *ctx, int index, bd_explorer_item *out);
 	void (*set_pos)(void *ctx, uint64_t key, int x, int y);
+	void (*set_name)(void *ctx, uint64_t key, const char *name);
 	void *ctx;
 } bd_explorer_model;
 
@@ -74,5 +76,12 @@ void bd_explorer_select(bd_id id, uint64_t key, int add);
 
 /* Set the icon edge length in pixels (cell size scales with it). */
 void bd_explorer_set_icon_size(bd_id id, int px);
+
+/* Begin an in-place rename of the item with `key`: an editable field opens
+ * over its label, pre-filled with the current name. Enter commits (via
+ * model.set_name), Escape cancels, and clicking elsewhere commits. No-op if
+ * the model has no set_name hook or the key is not present. The widget also
+ * starts a rename of the cursor item on F2. */
+void bd_explorer_begin_rename(bd_id id, uint64_t key);
 
 #endif

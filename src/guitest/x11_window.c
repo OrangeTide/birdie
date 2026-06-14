@@ -348,6 +348,7 @@ map_key(KeySym sym)
     case XK_Return:    return WIN_KEY_ENTER;
     case XK_Escape:    return WIN_KEY_ESCAPE;
     case XK_Tab:       return WIN_KEY_TAB;
+    case XK_F2:        return WIN_KEY_F2;
     default:           return WIN_KEY_UNKNOWN;
     }
 }

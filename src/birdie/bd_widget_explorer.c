@@ -15,13 +15,15 @@
  * activate, right-click context callback, wheel scroll, drag-move of the
  * selection (committing via model.set_pos + moved()), rubber-band rectangle
  * selection (Ctrl = additive), keyboard navigation (arrows / Home / End /
- * Enter / Ctrl-A, Shift extends), a focus ring, and the accessor API. The
- * widget takes keyboard focus when clicked.
+ * Enter / Ctrl-A, Shift extends), a focus ring, in-place rename (F2 or
+ * bd_explorer_begin_rename(); a small UTF-8 line editor committing via
+ * model.set_name), and the accessor API. The widget takes keyboard focus when
+ * clicked.
  *
  * TODO (the interaction still to fill in):
  *   - scissor-clip the scrolled content to the widget bounds
- *   - Tab focus traversal between widgets (a toolkit-wide v0.3 item)
  *   - label truncation / ellipsis
+ *   - list/details view modes
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -63,6 +65,13 @@ struct explorer {
 	uint64_t *band_base;
 	int       band_base_n;
 	int       band_x0, band_y0, band_x1, band_y1;
+
+	/* in-place rename */
+	int       editing;
+	uint64_t  edit_key;
+	char      edit_buf[256];     /* UTF-8 */
+	int       edit_len;          /* bytes used */
+	int       edit_cursor;       /* byte offset of the caret */
 };
 
 enum { DRAG_NONE = 0, DRAG_PENDING, DRAG_MOVE, DRAG_BAND };
@@ -430,6 +439,169 @@ band_update(bd_id id, struct explorer *e, int px, int py)
 }
 
 /* ------------------------------------------------------------------ */
+/* in-place rename (a small UTF-8 single-line editor)                 */
+/* ------------------------------------------------------------------ */
+
+static int utf8_is_cont(unsigned char c) { return (c & 0xC0) == 0x80; }
+
+static int
+utf8_prev(const char *s, int pos)
+{
+	if (pos <= 0)
+		return 0;
+	pos--;
+	while (pos > 0 && utf8_is_cont((unsigned char)s[pos]))
+		pos--;
+	return pos;
+}
+
+static int
+utf8_next(const char *s, int len, int pos)
+{
+	if (pos >= len)
+		return len;
+	pos++;
+	while (pos < len && utf8_is_cont((unsigned char)s[pos]))
+		pos++;
+	return pos;
+}
+
+static int
+utf8_encode(unsigned cp, char *out)
+{
+	if (cp < 0x80) {
+		out[0] = (char)cp;
+		return 1;
+	}
+	if (cp < 0x800) {
+		out[0] = (char)(0xC0 | (cp >> 6));
+		out[1] = (char)(0x80 | (cp & 0x3F));
+		return 2;
+	}
+	if (cp < 0x10000) {
+		out[0] = (char)(0xE0 | (cp >> 12));
+		out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+		out[2] = (char)(0x80 | (cp & 0x3F));
+		return 3;
+	}
+	out[0] = (char)(0xF0 | (cp >> 18));
+	out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+	out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+	out[3] = (char)(0x80 | (cp & 0x3F));
+	return 4;
+}
+
+static void
+rename_begin(struct explorer *e, uint64_t key)
+{
+	if (!e->model.set_name)
+		return;
+	int idx = index_of_key(e, key);
+	if (idx < 0)
+		return;
+	bd_explorer_item it = {0};
+	e->model.get(e->model.ctx, idx, &it);
+	int n = it.label ? (int)strlen(it.label) : 0;
+	if (n > (int)sizeof e->edit_buf - 1)
+		n = (int)sizeof e->edit_buf - 1;
+	if (n)
+		memcpy(e->edit_buf, it.label, (size_t)n);
+	e->edit_buf[n] = '\0';
+	e->edit_len = n;
+	e->edit_cursor = n;
+	e->edit_key = key;
+	e->editing = 1;
+}
+
+static void
+rename_commit(struct explorer *e)
+{
+	if (!e->editing)
+		return;
+	e->editing = 0;
+	e->edit_buf[e->edit_len] = '\0';
+	if (e->model.set_name)
+		e->model.set_name(e->model.ctx, e->edit_key, e->edit_buf);
+}
+
+static void
+rename_insert(struct explorer *e, unsigned cp)
+{
+	char tmp[4];
+	int nb = utf8_encode(cp, tmp);
+	if (e->edit_len + nb >= (int)sizeof e->edit_buf)
+		return;
+	memmove(e->edit_buf + e->edit_cursor + nb, e->edit_buf + e->edit_cursor,
+	    (size_t)(e->edit_len - e->edit_cursor));
+	memcpy(e->edit_buf + e->edit_cursor, tmp, (size_t)nb);
+	e->edit_len += nb;
+	e->edit_cursor += nb;
+}
+
+static void
+rename_erase(struct explorer *e, int from, int to)
+{
+	memmove(e->edit_buf + from, e->edit_buf + to,
+	    (size_t)(e->edit_len - to));
+	e->edit_len -= (to - from);
+	if (e->edit_cursor > e->edit_len)
+		e->edit_cursor = e->edit_len;
+}
+
+/* Handle one event while the rename editor is active; always consumes it. */
+static int
+rename_key(struct explorer *e, const bd_event *ev)
+{
+	if (ev->type == BD_EV_CHAR && ev->codepoint >= 32) {
+		rename_insert(e, ev->codepoint);
+		return 1;
+	}
+	if (ev->type != BD_EV_KEY_DOWN)
+		return 1;
+	switch (ev->key) {
+	case BD_KEY_ENTER:  rename_commit(e); break;
+	case BD_KEY_ESCAPE: e->editing = 0; break;   /* cancel, discard */
+	case BD_KEY_BACKSPACE:
+		if (e->edit_cursor > 0)
+			rename_erase(e, utf8_prev(e->edit_buf, e->edit_cursor),
+			    e->edit_cursor);
+		break;
+	case BD_KEY_DELETE:
+		if (e->edit_cursor < e->edit_len)
+			rename_erase(e, e->edit_cursor,
+			    utf8_next(e->edit_buf, e->edit_len, e->edit_cursor));
+		break;
+	case BD_KEY_LEFT:
+		e->edit_cursor = utf8_prev(e->edit_buf, e->edit_cursor);
+		break;
+	case BD_KEY_RIGHT:
+		e->edit_cursor = utf8_next(e->edit_buf, e->edit_len, e->edit_cursor);
+		break;
+	case BD_KEY_HOME: e->edit_cursor = 0; break;
+	case BD_KEY_END:  e->edit_cursor = e->edit_len; break;
+	default: break;
+	}
+	return 1;
+}
+
+/* On-screen rect of the item with `key`, or 0 if not found / not laid out. */
+static int
+rect_of_key(bd_id id, struct explorer *e, uint64_t key,
+    int *rx, int *ry, int *rw, int *rh)
+{
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	int slot = 0;
+	for (int i = 0; i < n; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		item_rect(id, e, &it, &slot, rx, ry, rw, rh);
+		if (it.key == key)
+			return 1;
+	}
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* class hooks                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -535,6 +707,25 @@ explorer_render(bd_id id, void *state)
 		bd_draw_rect(bx, by, bw, bh, fill);
 		bd_draw_rect_lines(bx, by, bw, bh, th->focus);
 	}
+
+	/* in-place rename editor over the item's label */
+	if (e->editing) {
+		int rx, ry, rw, rh;
+		if (rect_of_key(id, e, e->edit_key, &rx, &ry, &rw, &rh)) {
+			int by = ry + CELL_PAD + e->icon_size;
+			int bh = (int)bd_draw_line_height() + 4;
+			bd_draw_rect(rx, by, rw, bh, th->press);
+			bd_draw_rect_lines(rx, by, rw, bh, th->focus);
+			bd_draw_text(e->edit_buf, rx + 2, by + 2, th->text_hi);
+
+			char save = e->edit_buf[e->edit_cursor];
+			e->edit_buf[e->edit_cursor] = '\0';
+			float cw = bd_draw_text_width(e->edit_buf);
+			e->edit_buf[e->edit_cursor] = save;
+			bd_draw_rect(rx + 2 + (int)cw, by + 2, 1,
+			    (int)bd_draw_line_height(), th->text_hi);
+		}
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -546,6 +737,10 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 {
 	struct explorer *e = state;
 
+	/* the rename editor swallows keyboard input while active */
+	if (e->editing && (ev->type == BD_EV_CHAR || ev->type == BD_EV_KEY_DOWN))
+		return rename_key(e, ev);
+
 	switch (ev->type) {
 	case BD_EV_MOUSE_SCROLL:
 		e->scroll_y -= (int)(ev->scroll_dy * (float)cell_h(e));
@@ -554,6 +749,8 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		return 1;
 
 	case BD_EV_MOUSE_DOWN: {
+		if (e->editing)              /* clicking away commits the rename */
+			rename_commit(e);
 		uint64_t key = 0;
 		int idx = hit_item(id, e, ev->x, ev->y, &key);
 
@@ -705,6 +902,10 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		case BD_KEY_DOWN:  ni = (ci < 0) ? 0 : ci + cols; break;
 		case BD_KEY_HOME:  ni = 0;                        break;
 		case BD_KEY_END:   ni = n - 1;                    break;
+		case BD_KEY_F2:
+			if (e->cursor)
+				rename_begin(e, e->cursor);
+			return 1;
 		case BD_KEY_ENTER:
 			if (ci >= 0 && e->cb.activate) {
 				bd_explorer_item it = {0};
@@ -836,4 +1037,14 @@ bd_explorer_set_icon_size(bd_id id, int px)
 	struct explorer *e = bd_widget_state(id);
 	if (e && px > 0)
 		e->icon_size = px;
+}
+
+void
+bd_explorer_begin_rename(bd_id id, uint64_t key)
+{
+	if (bd_widget_type(id) != explorer_type)
+		return;
+	struct explorer *e = bd_widget_state(id);
+	if (e)
+		rename_begin(e, key);
 }

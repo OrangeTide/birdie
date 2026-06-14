@@ -139,6 +139,14 @@ static int exp_selchg_n;
 static void exp_selchg(bd_id w, void *ctx){ (void)w; (void)ctx; exp_selchg_n++; }
 static int exp_act_n; static uint64_t exp_act_key;
 static void exp_act(bd_id w, uint64_t key, void *user){ (void)w; (void)user; exp_act_n++; exp_act_key = key; }
+static int exp_name_n; static uint64_t exp_name_key; static char exp_name_buf[64];
+static void
+exp_set_name(void *ctx, uint64_t key, const char *name)
+{
+	(void)ctx;
+	exp_name_n++; exp_name_key = key;
+	snprintf(exp_name_buf, sizeof exp_name_buf, "%s", name);
+}
 
 /* ---- click callback ---- */
 static int clicked;
@@ -433,7 +441,8 @@ main(void)
 	/* ---- explorer: drag-move and rubber-band selection ---- */
 	bd_gui_init(&stub, NULL);
 	bd_explorer_model emodel = {
-	    .count = exp_count, .get = exp_get, .set_pos = exp_set_pos };
+	    .count = exp_count, .get = exp_get, .set_pos = exp_set_pos,
+	    .set_name = exp_set_name };
 	bd_explorer_cb ecb = { .moved = exp_moved, .selection_changed = exp_selchg,
 	    .activate = exp_act };
 
@@ -517,6 +526,31 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
 	check("Enter activates the cursor item",
 	    exp_act_n == 1 && exp_act_key == 100);
+
+	/* in-place rename: begin, type, Enter commits via set_name */
+	bd_explorer_begin_rename(expl, 100);   /* item "a" */
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='b' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='c' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("rename commits the edited name via set_name",
+	    exp_name_n == 1 && exp_name_key == 100 &&
+	    strcmp(exp_name_buf, "abc") == 0);
+
+	/* Escape cancels without committing */
+	bd_explorer_begin_rename(expl, 101);
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='z' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape cancels rename (no commit)", exp_name_n == 1);
+
+	/* F2 starts a rename of the cursor item */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_F2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='!' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("F2 renames the cursor item",
+	    exp_name_n == 2 && exp_name_key == 100 &&
+	    strcmp(exp_name_buf, "a!") == 0);
 
 	bd_gui_render();   /* exercises the band/selection render path */
 	bd_gui_cleanup();

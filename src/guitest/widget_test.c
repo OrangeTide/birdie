@@ -107,8 +107,8 @@ on_xy(bd_id id, void *arg, float x, float y)
 	report(b);
 }
 
-/* ---- a small explorer model (drag the icons to rearrange) ---- */
-static struct srv { uint64_t key; const char *name; int x, y; } servers[] = {
+/* ---- a small explorer model (drag to rearrange, F2 to rename) ---- */
+static struct srv { uint64_t key; char name[24]; int x, y; } servers[] = {
 	{ 1, "Aardwolf",   -1, -1 }, { 2, "BatMUD",   -1, -1 },
 	{ 3, "Discworld",  -1, -1 }, { 4, "Lensmoor", -1, -1 },
 	{ 5, "Nanvaent",   -1, -1 }, { 6, "Threshold",-1, -1 },
@@ -132,6 +132,14 @@ srv_set_pos(void *ctx, uint64_t key, int x, int y)
 	(void)ctx;
 	for (int i = 0; i < srv_count(NULL); i++)
 		if (servers[i].key == key) { servers[i].x = x; servers[i].y = y; }
+}
+static void
+srv_set_name(void *ctx, uint64_t key, const char *name)
+{
+	(void)ctx;
+	for (int i = 0; i < srv_count(NULL); i++)
+		if (servers[i].key == key)
+			snprintf(servers[i].name, sizeof servers[i].name, "%s", name);
 }
 static void
 srv_activate(bd_id w, uint64_t key, void *user)
@@ -161,13 +169,15 @@ on_new_window(bd_id id, void *arg)
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1,
 		BD_PAD_I, 8, BD_GAP_I, 6, BD_END);
 	bd_create(body, BD_LABEL,
-		BD_LABEL_S, "Servers (drag to arrange, rubber-band to select)",
+		BD_LABEL_S, "Servers (drag to arrange, F2 to rename)",
 		BD_PREF_H_I, 18, BD_END);
-	bd_explorer_create(body,
+	bd_id ex = bd_explorer_create(body,
 		&(bd_explorer_model){ .count = srv_count, .get = srv_get,
-			.set_pos = srv_set_pos },
+			.set_pos = srv_set_pos, .set_name = srv_set_name },
 		&(bd_explorer_cb){ .activate = srv_activate },
 		BD_GROW_I, 1, BD_END);
+	if (getenv("GALLERY_AUTORENAME"))   /* open the rename editor for a shot */
+		bd_explorer_begin_rename(ex, 1);
 
 	bd_id bar = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,

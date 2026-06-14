@@ -74,6 +74,7 @@ enum {
 	BD_KEY_ENTER,
 	BD_KEY_ESCAPE,
 	BD_KEY_TAB,
+	BD_KEY_F2,
 };
 
 /* Flattened event. Only the fields relevant to `type` are valid. */

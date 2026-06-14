@@ -347,9 +347,12 @@ the latter additive with Ctrl), double-click activate, right-click context,
 wheel scroll, **drag-move** (commit via `set_pos` + `moved()`),
 **rubber-band** selection (Ctrl = additive), and **keyboard navigation**
 (click to focus, then arrows / Home / End to move the cursor, Shift to extend
-the range, Ctrl-A select all, Enter activate; a focus ring marks the cursor).
-Still to come: in-place rename, scissor clipping, list/details modes.
-Exhibited in the widget gallery's "New Window" dialog.
+the range, Ctrl-A select all, Enter activate; a focus ring marks the cursor),
+and **in-place rename** (F2 or `bd_explorer_begin_rename()` opens a small
+UTF-8 line editor over the label; Enter commits via `model.set_name`, Escape
+cancels, clicking away commits). Still to come: scissor clipping,
+list/details view modes. Exhibited in the widget gallery's "New Window"
+dialog (drag to arrange, F2 to rename).
 
 Keyboard focus: the toolkit routes key events to a focused extension widget
 and gives a widget keyboard focus when it is clicked (the same path that
