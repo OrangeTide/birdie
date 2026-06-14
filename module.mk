@@ -36,7 +36,7 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 # `make dist GUI_VERSION=x.y.z`. Still external: libvt (terminal widget) and,
 # for the ludica backend, ludica itself.
 # ----------------------------------------------------------------------
-GUI_VERSION ?= 0.3.0
+GUI_VERSION ?= 0.3.1
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip
