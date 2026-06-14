@@ -240,8 +240,10 @@ window_create(const char *title, int width, int height)
         XISetMask(mask, XI_TouchBegin);
         XISetMask(mask, XI_TouchUpdate);
         XISetMask(mask, XI_TouchEnd);
-        /* stylus arrives as XI motion/buttons carrying pressure valuators;
-         * core mouse events still flow, so non-pen XI events are ignored */
+        /* Stylus arrives as XI motion/buttons carrying pressure valuators.
+         * Selecting these on the master pointer suppresses core mouse delivery
+         * to this client, so win_poll() must translate non-pen XI events into
+         * WIN_EV_MOUSE_* itself; it does. */
         XISetMask(mask, XI_Motion);
         XISetMask(mask, XI_ButtonPress);
         XISetMask(mask, XI_ButtonRelease);
@@ -758,10 +760,37 @@ win_poll(win_event *ev)
                 handled = 1;
             } else if (s && (t == XI_Motion || t == XI_ButtonPress
                 || t == XI_ButtonRelease)) {
-                /* Only a device with a pressure valuator is a stylus; plain
-                 * mouse XI events are left to the core MotionNotify path. */
+                /* A device with a pressure valuator is a stylus. Selecting XI2
+                 * button/motion on the master pointer makes the X server stop
+                 * delivering core ButtonPress/ButtonRelease/MotionNotify to
+                 * this client for that device, so the XI path is now the sole
+                 * source of plain mouse input too: translate non-pen events
+                 * into WIN_EV_MOUSE_* here rather than dropping them. */
                 struct pen_dev *p = pen_dev_get(de->sourceid);
-                if (p->is_pen) {
+                if (!p->is_pen) {
+                    memset(ev, 0, sizeof(*ev));
+                    ev->window = s->id;
+                    ev->mods = map_mods(de->mods.effective);
+                    ev->x = (int)de->event_x;
+                    ev->y = (int)de->event_y;
+                    if (t == XI_Motion) {
+                        ev->type = WIN_EV_MOUSE_MOVE;
+                        handled = 1;
+                    } else if (de->detail == 1 || de->detail == 2
+                        || de->detail == 3) {
+                        ev->button = (de->detail == 1) ? WIN_MOUSE_LEFT
+                            : (de->detail == 2) ? WIN_MOUSE_MIDDLE
+                            : WIN_MOUSE_RIGHT;
+                        ev->type = (t == XI_ButtonPress) ? WIN_EV_MOUSE_DOWN
+                            : WIN_EV_MOUSE_UP;
+                        handled = 1;
+                    } else if (t == XI_ButtonPress
+                        && (de->detail == 4 || de->detail == 5)) {
+                        ev->type = WIN_EV_MOUSE_SCROLL;
+                        ev->scroll_dy = (de->detail == 4) ? 1.0f : -1.0f;
+                        handled = 1;
+                    }
+                } else {
                     double raw;
                     if (t == XI_ButtonPress && de->detail == 1)
                         p->down = 1;
