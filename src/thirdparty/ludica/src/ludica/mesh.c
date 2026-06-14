@@ -3,14 +3,28 @@
 #include <GLES2/gl2.h>
 #include <string.h>
 
+/* Instanced-draw entry points are GLES3 core; declare them here so this
+ * GLES2-default unit can call them when a GLES3 context is active. */
+#ifndef glDrawArraysInstanced
+extern void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
+                                  GLsizei instancecount);
+#endif
+#ifndef glDrawElementsInstanced
+extern void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+                                    const void *indices, GLsizei instancecount);
+#endif
+
 #define MAX_MESHES 64
 
 typedef struct {
 	int used;
 	GLuint vbo;
 	GLuint ibo;
-	int vertex_count;
-	int index_count;
+	int vertex_count;       /* logical count used by lud_draw */
+	int index_count;        /* logical count used by lud_draw */
+	int vertex_cap;         /* vertices the vbo can hold */
+	int index_cap;          /* indices the ibo can hold */
+	GLenum usage;
 	GLenum primitive;
 	int num_attrs;
 	struct {
@@ -69,7 +83,6 @@ lud_make_mesh(const lud_mesh_desc_t *desc)
 {
 	lud_mesh_t out = {0};
 	mesh_slot_t *s;
-	GLenum usage;
 	int idx, i;
 
 	idx = alloc_slot();
@@ -82,32 +95,33 @@ lud_make_mesh(const lud_mesh_desc_t *desc)
 	memset(s, 0, sizeof(*s));
 	s->used = 1;
 	s->vertex_count = desc->vertex_count;
+	s->vertex_cap = desc->vertex_count;
 	s->vertex_stride = desc->vertex_stride;
 	s->primitive = translate_primitive(desc->primitive);
 	s->num_attrs = desc->num_attrs;
+	s->usage = translate_usage(desc->usage);
 
 	for (i = 0; i < desc->num_attrs && i < LUD_MAX_VERTEX_ATTRS; i++) {
 		s->attrs[i].size = desc->layout[i].size;
 		s->attrs[i].offset = desc->layout[i].offset;
 	}
 
-	usage = translate_usage(desc->usage);
-
 	/* Vertex buffer */
 	glGenBuffers(1, &s->vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
 	glBufferData(GL_ARRAY_BUFFER,
 	             desc->vertex_count * desc->vertex_stride,
-	             desc->vertices, usage);
+	             desc->vertices, s->usage);
 
 	/* Index buffer (optional) */
 	if (desc->indices && desc->index_count > 0) {
 		s->index_count = desc->index_count;
+		s->index_cap = desc->index_count;
 		glGenBuffers(1, &s->ibo);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ibo);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER,
 		             desc->index_count * (int)sizeof(unsigned short),
-		             desc->indices, usage);
+		             desc->indices, s->usage);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
 
@@ -127,8 +141,74 @@ lud_destroy_mesh(lud_mesh_t mesh)
 	memset(s, 0, sizeof(*s));
 }
 
+void
+lud_update_mesh(lud_mesh_t mesh, int first_vertex, int vertex_count,
+                const void *vertices)
+{
+	mesh_slot_t *s = get_slot(mesh);
+	int need, off, len;
+
+	if (!s || vertex_count <= 0 || !vertices || first_vertex < 0)
+		return;
+
+	need = first_vertex + vertex_count;
+	off = first_vertex * s->vertex_stride;
+	len = vertex_count * s->vertex_stride;
+
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	if (need > s->vertex_cap) {
+		/* Grow: orphan the buffer at the new size, then upload.
+		 * A growing update replaces the whole buffer; vertices
+		 * before first_vertex become undefined. */
+		glBufferData(GL_ARRAY_BUFFER, need * s->vertex_stride,
+		             NULL, s->usage);
+		s->vertex_cap = need;
+		glBufferSubData(GL_ARRAY_BUFFER, off, len, vertices);
+	} else {
+		glBufferSubData(GL_ARRAY_BUFFER, off, len, vertices);
+	}
+	if (need > s->vertex_count)
+		s->vertex_count = need;
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void
+lud_update_mesh_indices(lud_mesh_t mesh, int first_index, int index_count,
+                        const void *indices)
+{
+	mesh_slot_t *s = get_slot(mesh);
+	int need, off, len;
+	const int isz = (int)sizeof(unsigned short);
+
+	if (!s || index_count <= 0 || !indices || first_index < 0)
+		return;
+
+	need = first_index + index_count;
+	off = first_index * isz;
+	len = index_count * isz;
+
+	/* Allow promoting a non-indexed mesh to indexed. */
+	if (!s->ibo)
+		glGenBuffers(1, &s->ibo);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ibo);
+	if (need > s->index_cap) {
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, need * isz,
+		             NULL, s->usage);
+		s->index_cap = need;
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, off, len, indices);
+	} else {
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, off, len, indices);
+	}
+	if (need > s->index_count)
+		s->index_count = need;
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+/* Draw the mesh once (instances == 0) or instances>0 times via the GLES3
+ * instanced entry points. The shader varies instances by gl_InstanceID. */
 static void
-bind_and_draw(mesh_slot_t *s, int first, int count)
+bind_and_draw(mesh_slot_t *s, int first, int count, int instances)
 {
 	int i;
 
@@ -143,13 +223,20 @@ bind_and_draw(mesh_slot_t *s, int first, int count)
 
 	if (s->index_count > 0 && s->ibo) {
 		int n = count > 0 ? count : s->index_count;
+		const void *ofs = (const void *)(long)(first * (int)sizeof(unsigned short));
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ibo);
-		glDrawElements(s->primitive, n, GL_UNSIGNED_SHORT,
-		               (const void *)(long)(first * (int)sizeof(unsigned short)));
+		if (instances > 0)
+			glDrawElementsInstanced(s->primitive, n, GL_UNSIGNED_SHORT,
+			                        ofs, instances);
+		else
+			glDrawElements(s->primitive, n, GL_UNSIGNED_SHORT, ofs);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	} else {
 		int n = count > 0 ? count : s->vertex_count;
-		glDrawArrays(s->primitive, first, n);
+		if (instances > 0)
+			glDrawArraysInstanced(s->primitive, first, n, instances);
+		else
+			glDrawArrays(s->primitive, first, n);
 	}
 
 	for (i = 0; i < s->num_attrs; i++)
@@ -163,7 +250,7 @@ lud_draw(lud_mesh_t mesh)
 {
 	mesh_slot_t *s = get_slot(mesh);
 	if (!s) return;
-	bind_and_draw(s, 0, 0);
+	bind_and_draw(s, 0, 0, 0);
 }
 
 void
@@ -171,5 +258,23 @@ lud_draw_range(lud_mesh_t mesh, int first, int count)
 {
 	mesh_slot_t *s = get_slot(mesh);
 	if (!s) return;
-	bind_and_draw(s, first, count);
+	bind_and_draw(s, first, count, 0);
+}
+
+void
+lud_draw_instanced(lud_mesh_t mesh, int instance_count)
+{
+	static int warned;
+	mesh_slot_t *s = get_slot(mesh);
+
+	if (!s || instance_count <= 0)
+		return;
+	if (lud__state.gles_version < 3) {
+		if (!warned) {
+			lud_err("lud_draw_instanced requires GLES3; ignored");
+			warned = 1;
+		}
+		return;
+	}
+	bind_and_draw(s, 0, 0, instance_count);
 }

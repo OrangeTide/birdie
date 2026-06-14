@@ -122,6 +122,27 @@ void             lud_destroy_shader(lud_shader_t shd);
 lud_mesh_t    lud_make_mesh(const lud_mesh_desc_t *desc);
 void             lud_destroy_mesh(lud_mesh_t mesh);
 
+/* Queue a resource for deletion at the end of the current frame instead of
+ * immediately. Use when unloading something (a streamed cell's mesh, a
+ * freed texture) that a draw earlier in this same frame may still
+ * reference; the handle stays valid until the frame's draws are issued.
+ * ludica runs the queued deletes automatically each frame. */
+void lud_destroy_mesh_deferred(lud_mesh_t mesh);
+void lud_destroy_texture_deferred(lud_texture_t tex);
+
+/* Update mesh data in place; the mesh should be created with
+ * LUD_USAGE_DYNAMIC or LUD_USAGE_STREAM. Writes `*_count` elements starting
+ * at `first_*` into the existing buffer. If the write extends past the
+ * current allocation the buffer grows (reallocates): a growing update
+ * replaces the whole buffer, so data before `first_*` becomes undefined.
+ * lud_draw's element count grows to cover the highest index written but
+ * never shrinks; use lud_draw_range to draw fewer. lud_update_mesh_indices
+ * can also promote a non-indexed mesh to indexed. Indices are uint16. */
+void lud_update_mesh(lud_mesh_t mesh, int first_vertex, int vertex_count,
+                     const void *vertices);
+void lud_update_mesh_indices(lud_mesh_t mesh, int first_index, int index_count,
+                             const void *indices);
+
 lud_texture_t lud_make_texture(const lud_texture_desc_t *desc);
 void             lud_destroy_texture(lud_texture_t tex);
 
@@ -187,6 +208,12 @@ void lud_update_texture(lud_texture_t tex, int x, int y, int w, int h,
 
 void lud_draw(lud_mesh_t mesh);
 void lud_draw_range(lud_mesh_t mesh, int first, int count);
+
+/* Draw the whole mesh `instance_count` times in one call (GLES3 only).
+ * The vertex shader varies each instance via gl_InstanceID (e.g. indexing
+ * a uniform array of transforms). On a GLES2 context this logs once and
+ * does nothing. */
+void lud_draw_instanced(lud_mesh_t mesh, int instance_count);
 
 /* --- Texture queries --- */
 

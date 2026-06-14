@@ -61,9 +61,10 @@ receives input events (key, mouse, gamepad, resize, focus).
 ### Graphics API (`ludica_gfx.h`)
 
 - Shaders: `lud_make_shader()`, `lud_apply_shader()`, `lud_uniform_*()`, `lud_destroy_shader()`
-- Meshes: `lud_make_mesh()`, `lud_draw()`, `lud_draw_range()`, `lud_destroy_mesh()`
+- Meshes: `lud_make_mesh()`, `lud_update_mesh()`/`lud_update_mesh_indices()` (in-place, growable; DYNAMIC/STREAM usage), `lud_draw()`, `lud_draw_range()`, `lud_draw_instanced()` (GLES3; vary by `gl_InstanceID`), `lud_destroy_mesh()`
 - Render state: `lud_depth_test()`, `lud_depth_func()`, `lud_depth_mask()`, `lud_cull()`, `lud_front_face()`, `lud_blend()`, `lud_scissor()`/`lud_scissor_off()`, `lud_read_pixels()` (RGBA, for color-id picking), `lud_flush()` — for 3D drawing; keeps apps off raw `<GLES2/gl2.h>`
 - Textures: `lud_make_texture()`, `lud_load_texture()`, `lud_bind_texture()`, `lud_update_texture()`, `lud_destroy_texture()`
+- Deferred destroy: `lud_destroy_mesh_deferred()`, `lud_destroy_texture_deferred()` — delete at end of frame (safe to retire a resource a draw earlier this frame still uses); ludica flushes the queue each frame
 - Render targets: `lud_make_render_target()`, `lud_bind_render_target()`, `lud_render_target_texture()`, `lud_destroy_render_target()` — offscreen render-to-texture (post-processing, color-id picking)
 - Sprites: `lud_sprite_begin()`, `lud_sprite_draw()`, `lud_sprite_end()`
 - Fonts: `lud_make_default_font()`, `lud_draw_text()`
@@ -80,6 +81,14 @@ receives input events (key, mouse, gamepad, resize, focus).
 
 - `lud_anim_init()`, `lud_anim_play()`, `lud_anim_update()`
 - `lud_anim_frame()`, `lud_anim_finished()`
+
+### Arena Allocator (`ludica_arena.h`)
+
+Linear bump allocator over one fixed buffer; no per-allocation free,
+reset or free the whole thing at once. For job scratch, per-frame
+temporaries, and procgen buffers. Aggregated into `ludica.h`.
+
+- `lud_arena_init(&a, size)`, `lud_arena_alloc(&a, size)` (aligned, NULL when full), `lud_arena_reset(&a)`, `lud_arena_free(&a)`
 
 ### GLES Version Architecture
 
@@ -132,6 +141,9 @@ Key constants: `LUD_KEY_A`..`LUD_KEY_Z`, `LUD_KEY_ESCAPE`,
 
 Polled: `lud_key_down()`, `lud_mouse_pos()`, `lud_mouse_button_down()`,
 `lud_gamepad_axis()`, `lud_gamepad_button_down()`.
+
+Gamepad axes have a rescaled dead zone (default 0.15), tunable via
+`lud_gamepad_set_deadzone()` / `lud_gamepad_deadzone()`.
 
 ## Adding a New Sample Program
 

@@ -62,28 +62,35 @@ static void be_uni_mat4 (bd_shader s, const char *n, const float m[16])
 { lud_uniform_mat4((lud_shader_t){s.id}, n, m); }
 
 /* ---- draw ----
- * ludica has no in-place mesh update, so a vertex draw streams a throwaway
- * mesh. Cheap enough for UI batches; lud_draw uses the currently applied
- * shader. */
+ * One persistent DYNAMIC mesh, updated in place each batch (v26.06.1
+ * lud_update_mesh grows it as needed) and drawn with lud_draw_range so only
+ * the current `count` vertices render. lud_draw uses the applied shader. */
+static lud_mesh_t batch_mesh;
+
 static void
 be_draw_verts(const bd_vertex *verts, int count)
 {
-	lud_mesh_desc_t desc = {
-		.vertices = verts,
-		.vertex_count = count,
-		.vertex_stride = (int)sizeof(bd_vertex),
-		.layout = {
-			{ 2, (int)offsetof(bd_vertex, x) },
-			{ 2, (int)offsetof(bd_vertex, u) },
-			{ 4, (int)offsetof(bd_vertex, r) },
-		},
-		.num_attrs = 3,
-		.usage = LUD_USAGE_STREAM,
-		.primitive = LUD_PRIM_TRIANGLES,
-	};
-	lud_mesh_t m = lud_make_mesh(&desc);
-	lud_draw(m);
-	lud_destroy_mesh(m);
+	if (count <= 0)
+		return;
+	if (batch_mesh.id == 0) {
+		lud_mesh_desc_t desc = {
+			.vertices = verts,
+			.vertex_count = count,
+			.vertex_stride = (int)sizeof(bd_vertex),
+			.layout = {
+				{ 2, (int)offsetof(bd_vertex, x) },
+				{ 2, (int)offsetof(bd_vertex, u) },
+				{ 4, (int)offsetof(bd_vertex, r) },
+			},
+			.num_attrs = 3,
+			.usage = LUD_USAGE_DYNAMIC,
+			.primitive = LUD_PRIM_TRIANGLES,
+		};
+		batch_mesh = lud_make_mesh(&desc);
+	} else {
+		lud_update_mesh(batch_mesh, 0, count, verts);
+	}
+	lud_draw_range(batch_mesh, 0, count);
 }
 
 /* ---- textures ---- */

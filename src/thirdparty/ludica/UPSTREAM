@@ -1,6 +1,6 @@
 name: ludica
 url: https://github.com/OrangeTide/ludica.git
-ref: main
-commit: 23061443c6bc0d27472d3553c41249aae0fcc4e2
-describe: v26.06.0
-synced_at: 2026-06-13T21:36:22Z
+ref: v26.06.1
+commit: 4f551a2c368244794f12cb0dcbf59b663edb42ad
+describe: v26.06.1
+synced_at: 2026-06-14T00:12:51Z
