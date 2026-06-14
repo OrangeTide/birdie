@@ -278,6 +278,30 @@ maps an id back to its frame. Leave the hooks NULL and `multi_window = 0` for a
 single-window host, the default. Keyboard focus moves on click and on
 Tab / Shift-Tab; `bd_focused()` reports it.
 
+## Bundled X11/GLES backend and gallery
+
+`backend-gles/` is a ready-to-use raw X11 + EGL + OpenGL ES 3 backend
+(`window.h`, `x11_window.c`, `bd_backend_gles.{c,h}`) plus a standalone widget
+gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
+example. Build it (Linux; needs libvt for the terminal widget) with the asset paths
+pointed at the bundle's `assets/` (the compiled-in defaults assume birdie's
+source tree):
+
+```sh
+cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
+   -DBD_ASSET_GUI_FONT='"assets/fonts/DejaVuSans.ttf"' \
+   -DBD_ASSET_TERM_FONT='"assets/font8x16.png"' \
+   -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
+   -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
+   backend-gles/widget_test.c backend-gles/x11_window.c \
+   backend-gles/bd_backend_gles.c \
+   src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
+   src/bd_widget_explorer.c <libvt.a> \
+   -lX11 -lEGL -lGLESv2 -lm -o gallery
+```
+
+Run `./gallery` from the bundle root so those relative asset paths resolve.
+
 ## Dependencies
 
 - A **GLES-capable backend**. ludica (the reference, `bd_backend_ludica.c`)

@@ -27,30 +27,48 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 	$(LUDICA)/tools/glsl2h $< > $@
 
 # ----------------------------------------------------------------------
-# Source distribution of the GUI toolkit.
+# Source distribution of the GUI toolkit (birdie-gui).
 #
-# `make dist` bundles the toolkit's public API, implementation, reference
-# ludica backend, VT extension, and runtime assets into a versioned ZIP
-# under $(OUTDIR). Override the version with `make dist GUI_VERSION=x.y.z`.
-# The bundle is source-only; consumers supply ludica (reference backend +
-# GUI font) and libvt (terminal widget) themselves.
+# `make dist` bundles the toolkit's public API, implementation, both reference
+# backends (ludica and raw X11/EGL/GLES), all extension widgets, the standalone
+# widget gallery, the vendored stb single-headers, and runtime assets into a
+# versioned ZIP under $(OUTDIR). Override the version with
+# `make dist GUI_VERSION=x.y.z`. Still external: libvt (terminal widget) and,
+# for the ludica backend, ludica itself.
 # ----------------------------------------------------------------------
 GUI_VERSION ?= 0.2.0
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip
 DIST_SRC    := src/birdie
+DIST_GLES   := src/guitest
+DIST_STB    := src/thirdparty/stb
 
-DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_widget_vt.h
-DIST_SOURCES := widget.c bd_widget_vt.c bd_backend_ludica.c bd_backend_ludica.h
+# public API headers
+DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
+                bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h
+# toolkit implementation + reference ludica backend
+DIST_SOURCES := widget.c bd_draw.c bd_widget_vt.c bd_widget_value.c \
+                bd_widget_explorer.c bd_backend_ludica.c bd_backend_ludica.h
+# raw X11/EGL/GLES reference backend + widget gallery (Linux)
+DIST_GLES_FILES := window.h x11_window.c bd_backend_gles.c bd_backend_gles.h \
+                   widget_test.c
+# vendored single-file libraries the toolkit includes
+DIST_STB_FILES := stb_truetype.h stb_image.h
 
 .PHONY : dist
 dist :
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
-	@mkdir -p $(DIST_STAGE)/include $(DIST_STAGE)/src $(DIST_STAGE)/assets/pushpin
+	@mkdir -p $(DIST_STAGE)/include $(DIST_STAGE)/src \
+	    $(DIST_STAGE)/backend-gles $(DIST_STAGE)/thirdparty/stb \
+	    $(DIST_STAGE)/assets/fonts $(DIST_STAGE)/assets/pushpin
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_HEADERS)) $(DIST_STAGE)/include/
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_SOURCES)) $(DIST_STAGE)/src/
+	@cp $(addprefix $(DIST_GLES)/,$(DIST_GLES_FILES)) $(DIST_STAGE)/backend-gles/
+	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
 	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
+	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
+	    $(DIST_SRC)/assets/fonts/DejaVuSans.LICENSE.txt $(DIST_STAGE)/assets/fonts/
 	@cp $(DIST_SRC)/assets/pushpin/pushpin-out-14.png \
 	    $(DIST_SRC)/assets/pushpin/pushpin-in-14.png $(DIST_STAGE)/assets/pushpin/
 	@cp $(DIST_SRC)/README.md $(DIST_STAGE)/
@@ -58,13 +76,19 @@ dist :
 	    'birdie-gui $(GUI_VERSION)' \
 	    '' \
 	    'Portable retained-mode GUI toolkit (C). Source distribution.' \
-	    'See README.md for usage; include/ has the public API headers and' \
-	    'src/ the implementation plus the reference ludica backend.' \
+	    'See README.md for usage.' \
+	    '' \
+	    '  include/        public API headers' \
+	    '  src/            toolkit implementation + reference ludica backend' \
+	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
+	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
+	    '  assets/         chrome TTF (+ license), CP437 terminal atlas, pushpins' \
 	    '' \
 	    'External dependencies (provide these yourself):' \
-	    '  ludica  reference backend src/bd_backend_ludica.c; also ships the' \
-	    '          GUI vector font. For SDL/raylib/GLFW, implement bd_backend.' \
-	    '  libvt   terminal widget src/bd_widget_vt.c.' \
+	    '  libvt   required by the terminal widget (src/bd_widget_vt.c).' \
+	    '  ludica  only for the ludica backend (src/bd_backend_ludica.c). The' \
+	    '          backend-gles/ backend needs X11 + EGL + GLESv2 instead, and' \
+	    '          no ludica. For another host, implement bd_backend.' \
 	    '' \
 	    'Made by a machine. PUBLIC DOMAIN (CC0-1.0)' \
 	    > $(DIST_STAGE)/MANIFEST.txt

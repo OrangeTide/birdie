@@ -3,19 +3,6 @@
   - src/thirdparty/ludica/src/imgui
   - src/samples/
 
-- before cutting a GUI dist / 0.2: the `make dist` file lists in module.mk are
-  stale. Add the v0.2 files (bd_draw.{c,h}, bd_widget_value.{c,h}), the vendored
-  stb_truetype.h, and the chrome TTF (DejaVuSans.ttf) to the staging, and bump
-  GUI_VERSION. The current bundle is missing the renderer + value widgets and
-  won't compile standalone.
-  - also add bd_widget_explorer.{c,h} (v0.3 explorer widget) once it is past
-    the skeleton stage.
-  - also bundle the GLES reference backend + widget gallery (src/guitest/:
-    window.h, x11_window.c, bd_backend_gles.{c,h}, widget_test.c) and the
-    vendored stb_image.h, so the dist ships a working non-ludica backend and
-    a widget showcase, not just headers+sources. Include a small build snippet
-    (the `make widget-test` cc line) in the dist README.
-
 - post-0.1: let client backends choose texture filtering (linear vs nearest).
   bd_backend.load_texture currently hardcodes nearest in the ludica binding;
   add a filter parameter when a backend needs scaled/linear assets.
