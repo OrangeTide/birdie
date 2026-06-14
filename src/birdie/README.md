@@ -239,8 +239,8 @@ bd_editor_clear_styles(ed);
 ```
 
 The renderer draws runs segment by segment: per-run fg/bg, underline,
-strikeout, faux-bold, and super/subscript. Italic is stored but drawn upright
-(true shear needs renderer support).
+strikeout, true bold/italic (separate baked faces; see Fonts), and
+super/subscript.
 
 ## Defining a widget type
 
@@ -331,6 +331,9 @@ source tree):
 ```sh
 cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
    -DBD_ASSET_GUI_FONT='"assets/fonts/DejaVuSans.ttf"' \
+   -DBD_ASSET_GUI_FONT_BOLD='"assets/fonts/DejaVuSans-Bold.ttf"' \
+   -DBD_ASSET_GUI_FONT_ITALIC='"assets/fonts/DejaVuSans-Oblique.ttf"' \
+   -DBD_ASSET_GUI_FONT_BOLDITALIC='"assets/fonts/DejaVuSans-BoldOblique.ttf"' \
    -DBD_ASSET_TERM_FONT='"assets/font8x16.png"' \
    -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
    -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
@@ -348,12 +351,15 @@ Run `./gallery` from the bundle root so those relative asset paths resolve.
 - A **GLES-capable backend**. ludica (the reference, `bd_backend_ludica.c`)
   provides the window and GLES context; SDL, raylib, GLFW, or ANGLE can too.
 - **libvt** is required by the terminal widget (`bd_widget_vt.c`).
-- Vendored: **stb_truetype** (text rasterization) and a TTF the toolkit bakes
-  for chrome text.
+- Vendored: **stb_truetype** (text rasterization) and four chrome TTFs the
+  toolkit bakes — regular plus bold / oblique / bold-oblique for true
+  bold/italic. `bd_draw_text_styled(s, x, y, rgba, BD_FONT_BOLD|BD_FONT_ITALIC)`
+  selects a face; a missing variant TTF falls back to regular.
 
-The assets the toolkit loads (`assets/` — the chrome TTF, the terminal's CP437
+The assets the toolkit loads (`assets/` — the chrome TTFs, the terminal's CP437
 atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
-`bd_widget_vt.c`, or overridden with `-DBD_ASSET_*`.
+`bd_draw.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*` (the four
+font variants are `BD_ASSET_GUI_FONT`, `_BOLD`, `_ITALIC`, `_BOLDITALIC`).
 
 ## License
 

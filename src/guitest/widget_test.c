@@ -189,7 +189,10 @@ on_new_window(bd_id id, void *arg)
 	/* header field: bold underlined accent */
 	bd_editor_style_span(med, 0, 3,
 		(bd_rich_style){ BD_RT_BOLD | BD_RT_UNDERLINE, 0x7FB2FFFFu, 0 });
-	/* the "playing" row: dark text on amber */
+	/* title row: true italic */
+	bd_editor_highlight_row(med, 1,
+		(bd_rich_style){ BD_RT_ITALIC, 0xC8C8C8FFu, 0 });
+	/* the "playing" row: bold dark text on amber */
 	bd_editor_highlight_row(med, 3,
 		(bd_rich_style){ BD_RT_BOLD, 0x202020FFu, 0xFFD54AFFu });
 

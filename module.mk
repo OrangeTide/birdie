@@ -70,6 +70,9 @@ dist :
 	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
 	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
 	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
+	    $(DIST_SRC)/assets/fonts/DejaVuSans-Bold.ttf \
+	    $(DIST_SRC)/assets/fonts/DejaVuSans-Oblique.ttf \
+	    $(DIST_SRC)/assets/fonts/DejaVuSans-BoldOblique.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans.LICENSE.txt $(DIST_STAGE)/assets/fonts/
 	@cp $(DIST_SRC)/assets/pushpin/pushpin-out-14.png \
 	    $(DIST_SRC)/assets/pushpin/pushpin-in-14.png $(DIST_STAGE)/assets/pushpin/

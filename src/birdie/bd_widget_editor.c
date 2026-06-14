@@ -216,8 +216,19 @@ e_style_eq(bd_rich_style a, bd_rich_style b)
 /* measuring                                                          */
 /* ------------------------------------------------------------------ */
 
+/* bd_draw font flags for a style */
+static int
+e_font(bd_rich_style st)
+{
+	int f = 0;
+	if (st.flags & BD_RT_BOLD)   f |= BD_FONT_BOLD;
+	if (st.flags & BD_RT_ITALIC) f |= BD_FONT_ITALIC;
+	return f;
+}
+
+/* width of buf[a,b) drawn in `font` */
 static float
-e_span_px(const struct editor *e, int a, int b)
+e_seg_w(const struct editor *e, int a, int b, int font)
 {
 	char tmp[1024];
 	int n = b - a;
@@ -225,7 +236,24 @@ e_span_px(const struct editor *e, int a, int b)
 	if (n >= (int)sizeof tmp) n = (int)sizeof tmp - 1;
 	memcpy(tmp, e->buf + a, (size_t)n);
 	tmp[n] = '\0';
-	return bd_draw_text_width(tmp);
+	return bd_draw_text_width_styled(tmp, font);
+}
+
+/* style-aware width of buf[a,b): segment by run, measure each in its face */
+static float
+e_span_px(const struct editor *e, int a, int b)
+{
+	float w = 0.0f;
+	int p = a;
+	while (p < b) {
+		bd_rich_style st = e_style_at(e, p);
+		int q = e_next(e->buf, b, p);
+		while (q < b && e_style_eq(e_style_at(e, q), st))
+			q = e_next(e->buf, b, q);
+		w += e_seg_w(e, p, q, e_font(st));
+		p = q;
+	}
+	return w;
 }
 
 static int
@@ -235,7 +263,7 @@ e_col_at_px(const struct editor *e, int start, int end, float target)
 	float w = 0.0f;
 	while (pos < end) {
 		int nx = e_next(e->buf, end, pos);
-		float cw = e_span_px(e, pos, nx);
+		float cw = e_seg_w(e, pos, nx, e_font(e_style_at(e, pos)));
 		if (w + cw * 0.5f >= target) return pos;
 		w += cw;
 		pos = nx;
@@ -292,7 +320,8 @@ editor_draw_line(struct editor *e, int a, int b, float x0, int top,
 		if (n >= (int)sizeof tmp) n = (int)sizeof tmp - 1;
 		memcpy(tmp, e->buf + seg, (size_t)n);
 		tmp[n] = '\0';
-		float w = bd_draw_text_width(tmp);
+		int font = e_font(st);             /* true bold/italic face */
+		float w = bd_draw_text_width_styled(tmp, font);
 
 		uint32_t fg = st.fg ? st.fg : th->text;
 		int y = top;
@@ -301,9 +330,7 @@ editor_draw_line(struct editor *e, int a, int b, float x0, int top,
 
 		if (st.bg)
 			bd_draw_rect(penx, (float)top, w, (float)lh, st.bg);
-		bd_draw_text(tmp, penx, (float)y, fg);
-		if (st.flags & BD_RT_BOLD)      /* faux-bold: double-strike */
-			bd_draw_text(tmp, penx + 1.0f, (float)y, fg);
+		bd_draw_text_styled(tmp, penx, (float)y, fg, font);
 		if (st.flags & BD_RT_UNDERLINE)
 			bd_draw_rect(penx, (float)(y + lh - 2), w, 1.0f, fg);
 		if (st.flags & BD_RT_STRIKE)

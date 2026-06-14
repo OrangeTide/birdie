@@ -55,12 +55,27 @@ static bd_texture cur_tex;
 static int        batch_active;
 static float      win_w, win_h;
 
-/* font */
-static int              have_font;
-static bd_texture       atlas;
-static stbtt_packedchar packed[FONT_COUNT];
-static float            font_ascent;
-static float            font_line_h;
+/* fonts: four baked faces indexed by BD_FONT_BOLD|BD_FONT_ITALIC. A missing
+ * variant TTF falls back to the regular face (index 0). */
+struct face {
+	int              have;
+	bd_texture       atlas;
+	stbtt_packedchar packed[FONT_COUNT];
+};
+static struct face faces[4];
+static float        font_ascent;
+static float        font_line_h;
+
+/* default variant paths; override with -DBD_ASSET_GUI_FONT_* at build time */
+#ifndef BD_ASSET_GUI_FONT_BOLD
+#define BD_ASSET_GUI_FONT_BOLD       "src/birdie/assets/fonts/DejaVuSans-Bold.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_ITALIC
+#define BD_ASSET_GUI_FONT_ITALIC     "src/birdie/assets/fonts/DejaVuSans-Oblique.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_BOLDITALIC
+#define BD_ASSET_GUI_FONT_BOLDITALIC "src/birdie/assets/fonts/DejaVuSans-BoldOblique.ttf"
+#endif
 
 static inline void
 unpack(uint32_t c, float *r, float *g, float *b, float *a)
@@ -131,23 +146,29 @@ read_file(const char *path, long *len)
 	return buf;
 }
 
+/* Bake one face from `path` into faces[slot]. metrics=1 sets the shared
+ * ascent/line height (use the regular face). Silent if the file is missing. */
 static void
-bake_font(const char *path, float px)
+bake_font(const char *path, float px, int slot, int metrics)
 {
 	long len;
 	unsigned char *ttf = read_file(path, &len);
 	if (!ttf) {
-		fprintf(stderr, "bd_draw: cannot read font '%s'\n", path);
+		if (metrics)   /* the regular face is required; variants are optional */
+			fprintf(stderr, "bd_draw: cannot read font '%s'\n", path);
 		return;
 	}
 
-	stbtt_fontinfo info;
-	if (stbtt_InitFont(&info, ttf, stbtt_GetFontOffsetForIndex(ttf, 0))) {
-		int asc, desc, gap;
-		stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
-		float s = stbtt_ScaleForPixelHeight(&info, px);
-		font_ascent = asc * s;
-		font_line_h = (asc - desc + gap) * s;
+	if (metrics) {
+		stbtt_fontinfo info;
+		if (stbtt_InitFont(&info, ttf,
+		    stbtt_GetFontOffsetForIndex(ttf, 0))) {
+			int asc, desc, gap;
+			stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
+			float s = stbtt_ScaleForPixelHeight(&info, px);
+			font_ascent = asc * s;
+			font_line_h = (asc - desc + gap) * s;
+		}
 	}
 
 	unsigned char *cov = malloc(ATLAS_DIM * ATLAS_DIM);
@@ -157,7 +178,7 @@ bake_font(const char *path, float px)
 		stbtt_PackBegin(&pc, cov, ATLAS_DIM, ATLAS_DIM, 0, 1, NULL);
 		stbtt_PackSetOversampling(&pc, 1, 1);
 		if (!stbtt_PackFontRange(&pc, ttf, 0, px, FONT_FIRST,
-		    FONT_COUNT, packed))
+		    FONT_COUNT, faces[slot].packed))
 			fprintf(stderr, "bd_draw: glyph atlas overflow\n");
 		stbtt_PackEnd(&pc);
 
@@ -165,12 +186,22 @@ bake_font(const char *path, float px)
 			rgba[i*4+0] = 255; rgba[i*4+1] = 255;
 			rgba[i*4+2] = 255; rgba[i*4+3] = cov[i];
 		}
-		atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
-		have_font = (atlas.id != 0);
+		faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
+		faces[slot].have = (faces[slot].atlas.id != 0);
 	}
 	free(cov);
 	free(rgba);
 	free(ttf);
+}
+
+/* the baked face for a style, falling back to the regular face */
+static const struct face *
+face_for(int style)
+{
+	int i = style & (BD_FONT_BOLD | BD_FONT_ITALIC);
+	if (i < 0 || i > 3 || !faces[i].have)
+		i = 0;
+	return &faces[i];
 }
 
 /* ------------------------------------------------------------------ */
@@ -190,8 +221,12 @@ bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
 	white = be->make_texture(1, 1, &wpix);
 	cur_tex = white;
 
-	if (font_path)
-		bake_font(font_path, font_px);
+	if (font_path) {
+		bake_font(font_path, font_px, 0, 1);              /* regular */
+		bake_font(BD_ASSET_GUI_FONT_BOLD, font_px, 1, 0);
+		bake_font(BD_ASSET_GUI_FONT_ITALIC, font_px, 2, 0);
+		bake_font(BD_ASSET_GUI_FONT_BOLDITALIC, font_px, 3, 0);
+	}
 	return 1;
 }
 
@@ -200,11 +235,13 @@ bd_draw_shutdown(void)
 {
 	if (!be)
 		return;
-	if (have_font)
-		be->destroy_texture(atlas);
+	for (int i = 0; i < 4; i++)
+		if (faces[i].have) {
+			be->destroy_texture(faces[i].atlas);
+			faces[i].have = 0;
+		}
 	be->destroy_texture(white);
 	be->destroy_shader(shader);
-	have_font = 0;
 	be = NULL;
 }
 
@@ -257,9 +294,10 @@ bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
 }
 
 void
-bd_draw_text(const char *s, float x, float y, uint32_t rgba)
+bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style)
 {
-	if (!have_font || !s)
+	const struct face *f = face_for(style);
+	if (!f->have || !s)
 		return;
 	float px = x, py = y + font_ascent;
 	for (; *s; s++) {
@@ -267,17 +305,18 @@ bd_draw_text(const char *s, float x, float y, uint32_t rgba)
 		if (cp < FONT_FIRST || cp >= FONT_FIRST + FONT_COUNT)
 			cp = '?';
 		stbtt_aligned_quad q;
-		stbtt_GetPackedQuad(packed, ATLAS_DIM, ATLAS_DIM,
+		stbtt_GetPackedQuad(f->packed, ATLAS_DIM, ATLAS_DIM,
 		    cp - FONT_FIRST, &px, &py, &q, 1);
-		quad(atlas, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0,
+		quad(f->atlas, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0,
 		    q.s0, q.t0, q.s1, q.t1, rgba);
 	}
 }
 
 float
-bd_draw_text_width(const char *s)
+bd_draw_text_width_styled(const char *s, int style)
 {
-	if (!have_font || !s)
+	const struct face *f = face_for(style);
+	if (!f->have || !s)
 		return 0.0f;
 	float px = 0, py = 0;
 	for (; *s; s++) {
@@ -285,11 +324,16 @@ bd_draw_text_width(const char *s)
 		if (cp < FONT_FIRST || cp >= FONT_FIRST + FONT_COUNT)
 			cp = '?';
 		stbtt_aligned_quad q;
-		stbtt_GetPackedQuad(packed, ATLAS_DIM, ATLAS_DIM,
+		stbtt_GetPackedQuad(f->packed, ATLAS_DIM, ATLAS_DIM,
 		    cp - FONT_FIRST, &px, &py, &q, 1);
 	}
 	return px;
 }
+
+void  bd_draw_text(const char *s, float x, float y, uint32_t rgba)
+{ bd_draw_text_styled(s, x, y, rgba, 0); }
+float bd_draw_text_width(const char *s)
+{ return bd_draw_text_width_styled(s, 0); }
 
 float bd_draw_line_height(void) { return font_line_h; }
 float bd_draw_ascent(void)      { return font_ascent; }
