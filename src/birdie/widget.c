@@ -118,6 +118,15 @@ static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
 static float cursor_blink;
 
+/* Single-line editable text widgets share the same edit/render/focus paths.
+ * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT is
+ * a plain form field (Enter commits but keeps the text). */
+static int
+is_text_field(int type)
+{
+	return type == BD_INPUT_LINE || type == BD_TEXT;
+}
+
 /* ------------------------------------------------------------------ */
 /* extension widget-class registry                                    */
 /* ------------------------------------------------------------------ */
@@ -355,7 +364,7 @@ apply_s(struct widget *w, int attr, const char *val)
 	switch (attr) {
 	case BD_LABEL_S:
 		w->label = val;
-		if (w->type == BD_INPUT_LINE && val) {
+		if (is_text_field(w->type) && val) {
 			int n = (int)strlen(val);
 			if (n >= (int)sizeof(w->text_buf))
 				n = (int)sizeof(w->text_buf) - 1;
@@ -495,6 +504,7 @@ defaults(struct widget *w, int type)
 	case BD_MENU:
 		w->pref_h = (int)CHROME_FONT_SZ + 4;
 		break;
+	case BD_TEXT:
 	case BD_INPUT_LINE:
 		w->bg = theme.press;
 		w->fg = theme.text_hi;
@@ -759,7 +769,7 @@ bd_get_s(bd_id id, int attr)
 		return NULL;
 	switch (attr) {
 	case BD_LABEL_S:
-		if (pool[id].type == BD_INPUT_LINE)
+		if (is_text_field(pool[id].type))
 			return pool[id].text_buf;
 		return pool[id].label;
 	case BD_NAME_S:  return pool[id].acc_name;
@@ -927,6 +937,7 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_TEXT:
 	case BD_INPUT_LINE: {
 		int focused = (focus_id == id);
 		uint32_t border = focused ? theme.focus : theme.border;
@@ -985,7 +996,7 @@ render_widget(bd_id id)
 	}
 
 	const bd_widget_class *cls = class_of(w->type);
-	int leaf = (w->type == BD_MENU || w->type == BD_INPUT_LINE ||
+	int leaf = (w->type == BD_MENU || is_text_field(w->type) ||
 	    (cls && !cls->contains_children));
 	if (!leaf) {
 		bd_id c;
@@ -1030,7 +1041,7 @@ hit_interactive(bd_id id, int mx, int my)
 	}
 	if (found != BD_NONE)
 		return found;
-	if ((w->on_click || w->type == BD_INPUT_LINE) && w->enabled)
+	if ((w->on_click || is_text_field(w->type)) && w->enabled)
 		return id;
 	return BD_NONE;
 }
@@ -1505,11 +1516,15 @@ input_key(bd_id id, int key, unsigned mods)
 	case BD_KEY_ENTER:
 		if (w->on_click)
 			w->on_click(id, w->on_click_data);
-		w->text_buf[0] = '\0';
-		w->text_len = 0;
-		w->cursor = 0;
-		w->sel_anchor = -1;
-		w->scroll_x = 0.0f;
+		/* the MUD command line submits and clears; a plain text field
+		 * commits but keeps its contents */
+		if (w->type == BD_INPUT_LINE) {
+			w->text_buf[0] = '\0';
+			w->text_len = 0;
+			w->cursor = 0;
+			w->sel_anchor = -1;
+			w->scroll_x = 0.0f;
+		}
 		cursor_blink = (float)be->time();
 		return 1;
 	case BD_KEY_ESCAPE:
@@ -1674,7 +1689,7 @@ is_focusable(bd_id id)
 	struct widget *w = &pool[id];
 	if (!w->alive || !w->visible || !w->enabled)
 		return 0;
-	if (w->type == BD_INPUT_LINE)
+	if (is_text_field(w->type))
 		return 1;
 	if (w->type == BD_BUTTON)
 		return w->on_click != NULL;
@@ -1750,7 +1765,7 @@ bd_gui_event(const bd_event *ev)
 	/* keyboard events for focused input line */
 	if (focus_id != BD_NONE &&
 	    pool[focus_id].alive &&
-	    pool[focus_id].type == BD_INPUT_LINE) {
+	    is_text_field(pool[focus_id].type)) {
 		if (ev->type == BD_EV_CHAR && ev->codepoint >= 32) {
 			input_insert_char(focus_id, ev->codepoint);
 			return 1;
@@ -1814,7 +1829,7 @@ bd_gui_event(const bd_event *ev)
 			bd_id hit = hit_interactive(frame, mx, my);
 
 			if (hit != BD_NONE &&
-			    pool[hit].type == BD_INPUT_LINE) {
+			    is_text_field(pool[hit].type)) {
 				focus_id = hit;
 				input_click(hit, mx);
 				return 1;

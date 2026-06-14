@@ -97,6 +97,9 @@ static const bd_backend mwstub = {
 	.window_width=mw_w, .window_height=mw_h, .window_set_title=mw_title,
 };
 
+static int text_committed;
+static void on_text_commit(bd_id id, void *a){ (void)id; (void)a; text_committed++; }
+
 /* per-window click counters */
 static int click_w1, click_w2;
 static void on_click_w1(bd_id id, void *a){ (void)id; (void)a; click_w1++; }
@@ -235,8 +238,8 @@ main(void)
 	bd_widget_rect(btn, &bx, &by, &bw, &bh);
 	check("button got nonzero geometry", bw > 0 && bh > 0);
 
-	int tx, ty, tw, tht;
-	bd_widget_rect(term, &tx, &ty, &tw, &tht);
+	int tfld, ty, tw, tht;
+	bd_widget_rect(term, &tfld, &ty, &tw, &tht);
 	check("terminal grew to fill width", tw > 0 && tht > 0);
 
 	/* synthesize a click on the button center */
@@ -585,6 +588,38 @@ main(void)
 	check("Enter activates the focused button", clicked == before + 1);
 	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint=' ' });
 	check("Space activates the focused button", clicked == before + 2);
+	bd_gui_cleanup();
+
+	/* ---- BD_TEXT single-line field ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id txf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id tedit = bd_create(txf, BD_TEXT, BD_PREF_H_I, 24,
+	    BD_ON_CLICK_F, on_text_commit, BD_END);
+	bd_gui_layout(800, 600);
+
+	int txx, txy, txw, txh;
+	bd_widget_rect(tedit, &txx, &txy, &txw, &txh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
+	check("clicking a BD_TEXT focuses it", bd_focused() == tedit);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='h' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='i' });
+	check("typing into BD_TEXT updates its text",
+	    strcmp(bd_get_s(tedit, BD_LABEL_S), "hi") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter commits BD_TEXT (fires callback, keeps text)",
+	    text_committed == 1 && strcmp(bd_get_s(tedit, BD_LABEL_S), "hi") == 0);
+
+	bd_set(tedit, BD_LABEL_S, "xyz", BD_END);
+	check("bd_set BD_LABEL_S replaces BD_TEXT contents",
+	    strcmp(bd_get_s(tedit, BD_LABEL_S), "xyz") == 0);
+
+	bd_event tabx = { .type=BD_EV_KEY_DOWN, .key=BD_KEY_TAB };
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=0, .y=0 });
+	bd_gui_event(&tabx);
+	check("Tab reaches the BD_TEXT field", bd_focused() == tedit);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
