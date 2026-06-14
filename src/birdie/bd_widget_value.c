@@ -198,6 +198,8 @@ static const char *KNOB_FRAG =
 	"out vec4 frag;\n"
 	"uniform float u_value;\n"
 	"uniform int u_marks;\n"     /* number of evenly spaced dial dots (0 = none) */
+	"uniform int u_dimples;\n"   /* jog finger-dimples (0 = none, knob mode) */
+	"uniform float u_indicator;\n" /* 1 = draw the indicator line, 0 = jog */
 	"#define SWEEP 4.712389\n"   /* 270 degrees (typical audio/panel pot) */
 	"float h(float x){ return fract(sin(x * 12.9898) * 43758.5453); }\n"
 	"void main(){\n"
@@ -235,15 +237,31 @@ static const char *KNOB_FRAG =
 	"    alum += smoothstep(0.03, 0.0, abs(r - (R - 0.045))) * 0.16;\n"
 	"    col = mix(col, alum, body);\n"
 	"    alpha = max(alpha, body);\n"
-	"    /* indicator */\n"
-	"    float a = (u_value - 0.5) * SWEEP;\n"
-	"    vec2 dir = vec2(sin(a), -cos(a));\n"
-	"    float along = dot(p, dir);\n"
-	"    float perp = length(p - dir * along);\n"
-	"    float ind = smoothstep(0.044, 0.028, perp) *\n"
-	"                smoothstep(0.08, 0.11, along) *\n"
-	"                smoothstep(0.70, 0.67, along) * body;\n"
-	"    col = mix(col, vec3(0.98, 0.26, 0.05), ind);\n"
+	"    /* indicator (absolute knob only) */\n"
+	"    if (u_indicator > 0.5) {\n"
+	"        float a = (u_value - 0.5) * SWEEP;\n"
+	"        vec2 dir = vec2(sin(a), -cos(a));\n"
+	"        float along = dot(p, dir);\n"
+	"        float perp = length(p - dir * along);\n"
+	"        float ind = smoothstep(0.044, 0.028, perp) *\n"
+	"                    smoothstep(0.08, 0.11, along) *\n"
+	"                    smoothstep(0.70, 0.67, along) * body;\n"
+	"        col = mix(col, vec3(0.98, 0.26, 0.05), ind);\n"
+	"    }\n"
+	"    /* jog finger-dimples (relative mode), rotated by u_value */\n"
+	"    for (int i = 0; i < 8; i++) {\n"
+	"        if (i >= u_dimples) break;\n"
+	"        float ai = u_value + float(i) * 6.2831853 / float(max(u_dimples, 1));\n"
+	"        vec2 dp = vec2(sin(ai), -cos(ai)) * 0.46;\n"
+	"        vec2 dl = p - dp;\n"
+	"        float d = length(dl);\n"
+	"        float dimR = 0.15;\n"
+	"        float inside = smoothstep(dimR, dimR - 0.05, d) * body;\n"
+	"        float lit = clamp(0.5 + dl.y / dimR * 0.8, 0.0, 1.0);\n"  /* lower wall lit */
+	"        col = mix(col, col * (0.40 + 0.55 * lit), inside);\n"
+	"        col += smoothstep(0.035, 0.0, abs(d - dimR)) *\n"
+	"               (-dl.y / dimR) * 0.20 * body;\n"            /* lit top rim */
+	"    }\n"
 	"    /* dial dots: u_marks evenly spaced over the sweep */\n"
 	"    for (int i = 0; i < 64; i++) {\n"
 	"        if (i >= u_marks) break;\n"
@@ -263,6 +281,9 @@ struct knob {
 	float       value;
 	int         dial;
 	int         hex;
+	int         relative;       /* endless jog dial */
+	int         dimples;
+	float       phase;          /* accumulated rotation (relative mode) */
 	bd_value_cb cb;
 	void       *arg;
 	float       drag_v0;        /* value at drag start */
@@ -392,11 +413,14 @@ knob_render(bd_id id, void *state)
 	be->use_shader(knob_shader);
 	be->set_uniform_vec2(knob_shader, "u_res",
 	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
-	be->set_uniform_float(knob_shader, "u_value", knob_norm(k));
-	be->set_uniform_int(knob_shader, "u_marks", knob_marks(k));
+	be->set_uniform_float(knob_shader, "u_value",
+	    k->relative ? k->phase : knob_norm(k));
+	be->set_uniform_int(knob_shader, "u_marks", k->relative ? 0 : knob_marks(k));
+	be->set_uniform_int(knob_shader, "u_dimples", k->relative ? k->dimples : 0);
+	be->set_uniform_float(knob_shader, "u_indicator", k->relative ? 0.0f : 1.0f);
 	be->draw_verts(q, 6);
 
-	if (k->dial == BD_DIAL_LABELS)
+	if (!k->relative && k->dial == BD_DIAL_LABELS)
 		knob_labels(k, fx + fs * 0.5f, fy + fs * 0.5f, fs * 0.5f * 0.92f);
 }
 
@@ -410,6 +434,14 @@ knob_event(bd_id id, void *state, const bd_event *ev)
 		return 1;
 	}
 	if (ev->type == BD_EV_MOUSE_MOVE) {
+		if (k->relative) {
+			int d = k->drag_y0 - ev->y;       /* up = + */
+			k->drag_y0 = ev->y;
+			k->phase += (float)d * 0.02f;     /* spin the dimples */
+			if (d != 0 && k->cb)
+				k->cb(id, k->arg, (float)d * 0.01f);
+			return 1;
+		}
 		float t = (k->drag_v0 - k->min) / (k->max - k->min) +
 		    (float)(k->drag_y0 - ev->y) / 150.0f;
 		float v = knob_snap(k, k->min + t * (k->max - k->min));
@@ -453,6 +485,8 @@ bd_knob_create(bd_id parent, const bd_knob_desc *desc, ...)
 		k->step = desc->step;
 		k->dial = desc->dial;
 		k->hex = desc->hex;
+		k->relative = desc->relative;
+		k->dimples = desc->dimples > 0 ? desc->dimples : 3;
 		k->cb = desc->cb;
 		k->arg = desc->arg;
 		k->value = knob_snap(k, desc->value);
@@ -676,4 +710,366 @@ bd_toggle_get(bd_id id)
 		return 0;
 	struct toggle *t = bd_widget_state(id);
 	return t ? t->on : 0;
+}
+
+/* ================================================================== */
+/* scroll wheel: a ribbed jog cylinder, relative output               */
+/* ================================================================== */
+
+/*
+ * A ribbed cylinder seen edge-on. The short axis is shaded as a cylinder
+ * (bright center, dark sides); along the spin axis the ribs bunch toward the
+ * ends (perspective) and scroll by u_phase. u_vert picks the axis.
+ */
+static const char *WHEEL_FRAG =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"out vec4 frag;\n"
+	"uniform vec2 u_size;\n"
+	"uniform float u_phase;\n"
+	"uniform float u_vert;\n"
+	"float sdbox(vec2 p, vec2 b, float r){\n"
+	"    vec2 d = abs(p) - b + r;\n"
+	"    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;\n"
+	"}\n"
+	"void main(){\n"
+	"    vec2 q = v_uv * u_size;\n"
+	"    float aa = 1.3;\n"
+	"    float bd = sdbox(q - u_size * 0.5, u_size * 0.5 - 1.0, 4.0);\n"
+	"    float body = smoothstep(aa, -aa, bd);\n"
+	"    float across = u_vert > 0.5 ? v_uv.x : v_uv.y;\n"
+	"    float along  = u_vert > 0.5 ? v_uv.y : v_uv.x;\n"
+	"    float cyl = sin(across * 3.14159265);\n"           /* 0 sides .. 1 center */
+	"    vec3 col = mix(vec3(0.06, 0.06, 0.07), vec3(0.5, 0.5, 0.52), cyl * cyl);\n"
+	"    /* ridges: even around the wheel, projected through asin so they bunch\n"
+	"       toward the ends (forced perspective) and scroll with u_phase */\n"
+	"    float a = along - 0.5;\n"
+	"    float theta = asin(clamp(a * 2.0, -1.0, 1.0));\n"
+	"    float s = sin((theta * 8.0 + u_phase) * 6.2831853);\n"
+	"    col *= 0.42 + 0.58 * (0.5 + 0.5 * s);\n"            /* deep grooves */
+	"    col += pow(max(0.0, s), 4.0) * 0.40 * cyl;\n"       /* lit crests */
+	"    col *= 0.45 + 0.55 * clamp(cos(a * 3.14159265), 0.0, 1.0);\n"  /* end fade */
+	"    col += cyl * cyl * 0.10;\n"                          /* center sheen */
+	"    frag = vec4(col, body);\n"
+	"}\n";
+
+struct wheel {
+	int         vert;
+	float       phase;
+	bd_value_cb cb;
+	void       *arg;
+	int         drag_last;
+};
+
+static int       wheel_type;
+static bd_shader wheel_shader;
+
+static void
+ensure_wheel_shader(void)
+{
+	if (wheel_shader.id == 0)
+		wheel_shader = bd_backend_get()->make_shader(KNOB_VERT, WHEEL_FRAG);
+}
+
+static void
+wheel_init(bd_id id, void *state)
+{
+	struct wheel *wl = state;
+	wl->vert = 1;
+	bd_set(id, BD_PREF_W_I, 30, BD_PREF_H_I, 60, BD_END);
+}
+
+static void
+wheel_render(bd_id id, void *state)
+{
+	struct wheel *wl = state;
+	ensure_wheel_shader();
+	const bd_backend *be = bd_backend_get();
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	float fx = (float)x, fy = (float)y, fw = (float)w, fh = (float)h;
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fh, 0, 1, 1, 1, 1, 1 },
+	};
+	bd_draw_flush();
+	be->use_shader(wheel_shader);
+	be->set_uniform_vec2(wheel_shader, "u_res",
+	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
+	be->set_uniform_vec2(wheel_shader, "u_size", fw, fh);
+	be->set_uniform_float(wheel_shader, "u_phase", wl->phase);
+	be->set_uniform_float(wheel_shader, "u_vert", wl->vert ? 1.0f : 0.0f);
+	be->draw_verts(q, 6);
+}
+
+static int
+wheel_event(bd_id id, void *state, const bd_event *ev)
+{
+	struct wheel *wl = state;
+	if (ev->type == BD_EV_MOUSE_DOWN) {
+		wl->drag_last = wl->vert ? ev->y : ev->x;
+		return 1;
+	}
+	if (ev->type == BD_EV_MOUSE_MOVE) {
+		int cur = wl->vert ? ev->y : ev->x;
+		int d = cur - wl->drag_last;
+		wl->drag_last = cur;
+		float dir = wl->vert ? -(float)d : (float)d;  /* up / right = + */
+		wl->phase += dir * 0.015f;
+		if (d != 0 && wl->cb)
+			wl->cb(id, wl->arg, dir * 0.01f);
+		return 1;
+	}
+	return 0;
+}
+
+static const bd_widget_class wheel_class = {
+	.name = "wheel",
+	.state_size = sizeof(struct wheel),
+	.init = wheel_init,
+	.render = wheel_render,
+	.event = wheel_event,
+};
+
+bd_id
+bd_wheel_create(bd_id parent, int orient, bd_value_cb cb, void *arg, ...)
+{
+	if (wheel_type == 0)
+		wheel_type = bd_register_widget_class(&wheel_class);
+
+	va_list ap;
+	va_start(ap, arg);
+	bd_id id = bd_create_va(parent, wheel_type, ap);
+	va_end(ap);
+
+	struct wheel *wl = bd_widget_state(id);
+	if (wl) {
+		wl->vert = (orient == BD_VERTICAL);
+		wl->cb = cb;
+		wl->arg = arg;
+	}
+	return id;
+}
+
+/* ================================================================== */
+/* X-Y pad: a recessed surface with a draggable chrome puck           */
+/* ================================================================== */
+
+static const char *XYPAD_FRAG =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"out vec4 frag;\n"
+	"uniform vec2 u_size;\n"
+	"uniform vec2 u_pos;\n"        /* puck position in uv space */
+	"uniform float u_circle;\n"
+	"float sdbox(vec2 p, vec2 b, float r){\n"
+	"    vec2 d = abs(p) - b + r;\n"
+	"    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;\n"
+	"}\n"
+	"float hsh(float x){ return fract(sin(x * 12.9898) * 43758.5453); }\n"
+	"void main(){\n"
+	"    vec2 q = v_uv * u_size;\n"
+	"    vec2 c = u_size * 0.5;\n"
+	"    float S = min(u_size.x, u_size.y);\n"
+	"    float aa = 1.3;\n"
+	"    float field = u_circle > 0.5\n"
+	"        ? smoothstep(aa, -aa, length(q - c) - (S * 0.5 - 1.0))\n"
+	"        : smoothstep(aa, -aa, sdbox(q - c, u_size * 0.5 - 1.0, 6.0));\n"
+	"    vec3 col = vec3(0.11, 0.12, 0.14) * (0.82 + 0.32 * v_uv.y);\n"
+	"    float alpha = field;\n"
+	"    vec2 pp = u_pos * u_size;\n"
+	"    col += (smoothstep(1.5, 0.0, abs(q.x - pp.x)) +\n"
+	"            smoothstep(1.5, 0.0, abs(q.y - pp.y))) * 0.05 * field;\n"
+	"    float pr = S * 0.13;\n"
+	"    float ds = length(q - pp - vec2(0.0, 2.0)) - pr;\n"
+	"    col = mix(col, col * 0.5, smoothstep(3.0, -1.0, ds) * 0.4 * field);\n"
+	"    vec2 lp = (q - pp) / pr;\n"
+	"    float lr = length(lp);\n"
+	"    float puck = smoothstep(0.08, -0.02, lr - 1.0);\n"
+	"    vec3 al = vec3(0.60, 0.61, 0.63);\n"
+	"    vec2 rd = lr > 0.001 ? lp / lr : vec2(1.0, 0.0);\n"
+	"    vec3 Hh = normalize(normalize(vec3(-0.4, -0.5, 0.55)) + vec3(0.0, 0.0, 1.0));\n"
+	"    float ht = dot(Hh, vec3(-rd.y, rd.x, 0.0)) / 0.85;\n"
+	"    float hb = dot(Hh, vec3(rd.x, rd.y, 0.0)) / 0.18;\n"
+	"    float hn = dot(Hh, vec3(0.0, 0.0, 1.0));\n"
+	"    al += exp(-2.0 * (ht * ht + hb * hb) / (1.0 + hn)) * 0.42 + 0.06;\n"
+	"    al = mix(al, al * 0.5, smoothstep(0.82, 1.0, lr));\n"
+	"    col = mix(col, al, puck);\n"
+	"    alpha = max(alpha, puck);\n"
+	"    frag = vec4(col, alpha);\n"
+	"}\n";
+
+struct xypad {
+	int      shape;
+	int      spring;
+	float    x, y;          /* [0,1], y up */
+	bd_xy_cb cb;
+	void    *arg;
+};
+
+static int       xypad_type;
+static bd_shader xypad_shader;
+
+static void
+ensure_xypad_shader(void)
+{
+	if (xypad_shader.id == 0)
+		xypad_shader = bd_backend_get()->make_shader(KNOB_VERT, XYPAD_FRAG);
+}
+
+/* the centered square region the pad occupies within its rect */
+static void
+xypad_square(bd_id id, int *sx, int *sy, int *ss)
+{
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	int s = w < h ? w : h;
+	*sx = x + (w - s) / 2;
+	*sy = y + (h - s) / 2;
+	*ss = s;
+}
+
+static void
+xypad_clamp(const struct xypad *p, float *x, float *y)
+{
+	if (p->shape == BD_XY_CIRCLE) {
+		float dx = *x - 0.5f, dy = *y - 0.5f;
+		float r = sqrtf(dx * dx + dy * dy);
+		if (r > 0.5f) {
+			dx *= 0.5f / r;
+			dy *= 0.5f / r;
+		}
+		*x = 0.5f + dx;
+		*y = 0.5f + dy;
+	} else {
+		*x = *x < 0.0f ? 0.0f : (*x > 1.0f ? 1.0f : *x);
+		*y = *y < 0.0f ? 0.0f : (*y > 1.0f ? 1.0f : *y);
+	}
+}
+
+static void
+xypad_init(bd_id id, void *state)
+{
+	struct xypad *p = state;
+	p->shape = BD_XY_SQUARE;
+	p->x = 0.5f;
+	p->y = 0.5f;
+	bd_set(id, BD_PREF_W_I, 76, BD_PREF_H_I, 76, BD_END);
+}
+
+static void
+xypad_render(bd_id id, void *state)
+{
+	struct xypad *p = state;
+	ensure_xypad_shader();
+	const bd_backend *be = bd_backend_get();
+	int sx, sy, ss;
+	xypad_square(id, &sx, &sy, &ss);
+	float fx = (float)sx, fy = (float)sy, fs = (float)ss;
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fs, 0, 1, 1, 1, 1, 1 },
+	};
+	bd_draw_flush();
+	be->use_shader(xypad_shader);
+	be->set_uniform_vec2(xypad_shader, "u_res",
+	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
+	be->set_uniform_vec2(xypad_shader, "u_size", fs, fs);
+	be->set_uniform_vec2(xypad_shader, "u_pos", p->x, 1.0f - p->y);
+	be->set_uniform_float(xypad_shader, "u_circle",
+	    p->shape == BD_XY_CIRCLE ? 1.0f : 0.0f);
+	be->draw_verts(q, 6);
+}
+
+static int
+xypad_event(bd_id id, void *state, const bd_event *ev)
+{
+	struct xypad *p = state;
+	if (ev->type == BD_EV_MOUSE_DOWN || ev->type == BD_EV_MOUSE_MOVE) {
+		int sx, sy, ss;
+		xypad_square(id, &sx, &sy, &ss);
+		float x = (float)(ev->x - sx) / (float)ss;
+		float y = 1.0f - (float)(ev->y - sy) / (float)ss;
+		xypad_clamp(p, &x, &y);
+		p->x = x;
+		p->y = y;
+		if (p->cb)
+			p->cb(id, p->arg, x, y);
+		return 1;
+	}
+	if (ev->type == BD_EV_MOUSE_UP && p->spring) {
+		p->x = 0.5f;
+		p->y = 0.5f;
+		if (p->cb)
+			p->cb(id, p->arg, 0.5f, 0.5f);
+		return 1;
+	}
+	return 0;
+}
+
+static const bd_widget_class xypad_class = {
+	.name = "xypad",
+	.state_size = sizeof(struct xypad),
+	.init = xypad_init,
+	.render = xypad_render,
+	.event = xypad_event,
+};
+
+bd_id
+bd_xypad_create(bd_id parent, const bd_xypad_desc *desc, ...)
+{
+	if (xypad_type == 0)
+		xypad_type = bd_register_widget_class(&xypad_class);
+
+	va_list ap;
+	va_start(ap, desc);
+	bd_id id = bd_create_va(parent, xypad_type, ap);
+	va_end(ap);
+
+	struct xypad *p = bd_widget_state(id);
+	if (p && desc) {
+		p->shape = desc->shape;
+		p->spring = desc->spring;
+		p->x = desc->x;
+		p->y = desc->y;
+		p->cb = desc->cb;
+		p->arg = desc->arg;
+		xypad_clamp(p, &p->x, &p->y);
+	}
+	return id;
+}
+
+void
+bd_xypad_get(bd_id id, float *x, float *y)
+{
+	if (bd_widget_type(id) != xypad_type)
+		return;
+	struct xypad *p = bd_widget_state(id);
+	if (p) {
+		if (x) *x = p->x;
+		if (y) *y = p->y;
+	}
+}
+
+void
+bd_xypad_set(bd_id id, float x, float y)
+{
+	if (bd_widget_type(id) != xypad_type)
+		return;
+	struct xypad *p = bd_widget_state(id);
+	if (p) {
+		p->x = x;
+		p->y = y;
+		xypad_clamp(p, &p->x, &p->y);
+	}
 }

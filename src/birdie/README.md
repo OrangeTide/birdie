@@ -113,31 +113,53 @@ bd_terminal_set_palette(terminal, &pal);
 
 ## Value widgets
 
-The toolkit ships interactive value controls in `bd_widget_value.h`, built on
-the extension API. They drag to change, fire a `bd_value_cb`, and match the
-chrome theme.
+The toolkit ships a family of interactive controls in `bd_widget_value.h`,
+built on the extension API. They drag to change, fire a callback, and match the
+chrome theme; the rotary ones are drawn in fragment shaders sharing a
+brushed-aluminum look.
 
 ```c
 #include "bd_widget_value.h"
 
-/* horizontal slider, value normalized to [0,1] */
+/* slider — horizontal or vertical, value normalized to [0,1] */
 bd_slider_create(row, BD_HORIZONTAL, 0.5f, on_change, NULL, BD_GROW_I, 1, BD_END);
 
-/* knob with a value range, optional step, and a dial plate */
+/* knob — a value range, optional step, and a dial plate */
 bd_knob_create(row, &(bd_knob_desc){
     .min = 0, .max = 127, .value = 64,
     .dial = BD_DIAL_LABELS, .hex = 1,    /* MIDI-CC style hex labels */
     .cb = on_change,
 }, BD_PREF_W_I, 120, BD_END);
+
+/* jog dial — the knob's endless/relative mode (emits drag deltas, dimples,
+   no indicator) */
+bd_knob_create(row, &(bd_knob_desc){ .relative = 1, .dimples = 3,
+    .cb = on_jog }, BD_PREF_W_I, 84, BD_END);
+
+/* toggle — a skeuomorphic on/off slide switch */
+bd_toggle_create(row, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
+
+/* scroll wheel — a ribbed jog cylinder, relative output */
+bd_wheel_create(row, BD_VERTICAL, on_spin, NULL, BD_PREF_W_I, 30, BD_END);
+
+/* X-Y pad — two values in [0,1], square or circular (joystick) limit */
+bd_xypad_create(row, &(bd_xypad_desc){ .shape = BD_XY_CIRCLE, .spring = 1,
+    .x = 0.5f, .y = 0.5f, .cb = on_xy }, BD_PREF_W_I, 76, BD_END);
 ```
 
-The knob is drawn entirely in a fragment shader: a brushed-aluminum face with
-an anisotropic circular highlight and an orange-red indicator over a 270-degree
-sweep. `.step` quantizes the value into detents, turning the knob into an
-N-way rotary switch, and the dial plate
-(`BD_DIAL_DOTS` / `BD_DIAL_BALANCE` / `BD_DIAL_LABELS` / `BD_DIAL_NONE`) sets the
-markings. `bd_knob_get`/`bd_knob_set` and the callback all use the real
-`[min,max]` value.
+| Widget | Create | Output |
+|---|---|---|
+| Slider | `bd_slider_create(parent, orient, value, cb, arg, ...)` | absolute `[0,1]`; `bd_slider_get/set` |
+| Knob | `bd_knob_create(parent, &bd_knob_desc, ...)` | absolute `[min,max]`; `bd_knob_get/set`. `.step` = N-way rotary switch; `.dial` = `BD_DIAL_DOTS`/`BALANCE`/`LABELS`/`NONE` |
+| Jog dial | `bd_knob_create` with `.relative = 1` | relative deltas; `.dimples` finger grips, no indicator |
+| Toggle | `bd_toggle_create(parent, on, cb, arg, ...)` | boolean; `bd_toggle_get/set` |
+| Scroll wheel | `bd_wheel_create(parent, orient, cb, arg, ...)` | relative spin deltas |
+| X-Y pad | `bd_xypad_create(parent, &bd_xypad_desc, ...)` | two values `[0,1]`; `bd_xypad_get/set`. `.shape` square/circle, `.spring` |
+
+The knob is drawn in a fragment shader: a brushed-aluminum face with an
+anisotropic circular highlight and an orange-red indicator over a 270-degree
+sweep. The toggle, wheel, X-Y pad puck, and jog dial reuse that metal shading
+(`bd_widget_value.c` is the reference for shader-drawn widgets).
 
 ## Defining a widget type
 

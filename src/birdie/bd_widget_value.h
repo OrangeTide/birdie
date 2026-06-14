@@ -51,7 +51,13 @@ typedef struct bd_knob_desc {
 	float       value;      /* initial value, in [min,max] */
 	int         dial;       /* BD_DIAL_* dial-plate style */
 	int         hex;        /* BD_DIAL_LABELS in hexadecimal (e.g. MIDI CC) */
-	bd_value_cb cb;         /* change callback; reports the value in [min,max] */
+	int         relative;   /* endless jog dial: emits drag deltas instead of an
+	                           absolute value, with finger dimples and no
+	                           indicator. min/max/step/dial are ignored; the
+	                           callback receives the delta. */
+	int         dimples;    /* jog finger-dimples when relative (default 3) */
+	bd_value_cb cb;         /* change callback; the value in [min,max], or the
+	                           delta when relative */
 	void       *arg;
 } bd_knob_desc;
 
@@ -70,6 +76,34 @@ typedef void (*bd_toggle_cb)(bd_id id, void *arg, int on);
 bd_id bd_toggle_create(bd_id parent, int on, bd_toggle_cb cb, void *arg, ...);
 void  bd_toggle_set(bd_id id, int on);
 int   bd_toggle_get(bd_id id);
+
+/*
+ * A relative scroll/jog wheel: a ribbed cylinder you drag to spin. The
+ * callback receives the spin delta (not an absolute value); a BD_VERTICAL wheel
+ * spins up/down, a BD_HORIZONTAL one left/right.
+ */
+bd_id bd_wheel_create(bd_id parent, int orient, bd_value_cb cb, void *arg, ...);
+
+/*
+ * An X-Y pad: a recessed surface with a draggable chrome puck giving two
+ * values in [0,1] (0.5,0.5 = center). The limit shape is a square or a circle
+ * (joystick); a joystick can spring back to center on release.
+ */
+enum { BD_XY_SQUARE = 0, BD_XY_CIRCLE };
+
+typedef void (*bd_xy_cb)(bd_id id, void *arg, float x, float y);
+
+typedef struct bd_xypad_desc {
+	int      shape;    /* BD_XY_SQUARE or BD_XY_CIRCLE */
+	int      spring;   /* return the puck to center on release (joystick) */
+	float    x, y;     /* initial position, each [0,1] */
+	bd_xy_cb cb;
+	void    *arg;
+} bd_xypad_desc;
+
+bd_id bd_xypad_create(bd_id parent, const bd_xypad_desc *desc, ...);
+void  bd_xypad_get(bd_id id, float *x, float *y);
+void  bd_xypad_set(bd_id id, float x, float y);
 
 #endif
 

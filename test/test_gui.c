@@ -84,6 +84,12 @@ static void on_knob_test(bd_id id, void *arg, float t)
 static int toggle_calls, toggle_last;
 static void on_toggle_test(bd_id id, void *arg, int on)
 { (void)id; (void)arg; toggle_calls++; toggle_last = on; }
+static int wheel_calls; static float wheel_acc;
+static void on_wheel_test(bd_id id, void *arg, float d)
+{ (void)id; (void)arg; wheel_calls++; wheel_acc += d; }
+static int xy_calls; static float xy_x, xy_y;
+static void on_xy_test(bd_id id, void *arg, float x, float y)
+{ (void)id; (void)arg; xy_calls++; xy_x = x; xy_y = y; }
 
 /* ---- drag-recording extension widget (stands in for a slider/knob) ---- */
 static int rec_down, rec_move, rec_up;
@@ -137,6 +143,11 @@ main(void)
 	    BD_PREF_H_I, 56, BD_END);
 	bd_id tg = bd_toggle_create(frame, 0, on_toggle_test, NULL,
 	    BD_PREF_H_I, 26, BD_END);
+	bd_id wh = bd_wheel_create(frame, BD_VERTICAL, on_wheel_test, NULL,
+	    BD_PREF_H_I, 60, BD_END);
+	bd_id xy = bd_xypad_create(frame, &(bd_xypad_desc){
+	    .shape = BD_XY_CIRCLE, .x = 0.5f, .y = 0.5f, .cb = on_xy_test },
+	    BD_PREF_H_I, 76, BD_END);
 
 	check("widgets created", frame && term && btn && rec && sld && knb);
 
@@ -222,6 +233,20 @@ main(void)
 	bd_knob_set(ksw, 99.0f);
 	check("rotary switch clamps to max (6)", bd_knob_get(ksw) == 6.0f);
 
+	/* jog dial: relative drag emits deltas (no absolute value) */
+	knob_calls = 0;
+	bd_id jog = bd_knob_create(frame, &(bd_knob_desc){
+	    .relative = 1, .dimples = 3, .cb = on_knob_test },
+	    BD_PREF_H_I, 84, BD_END);
+	bd_gui_layout(800, 500);
+	int jx, jy, jw, jh;
+	bd_widget_rect(jog, &jx, &jy, &jw, &jh);
+	bd_event jd = mouse(BD_EV_MOUSE_DOWN, jx + jw / 2, jy + jh / 2);
+	bd_event jm = mouse(BD_EV_MOUSE_MOVE, jx + jw / 2, jy + jh / 2 - 20);
+	bd_gui_event(&jd);
+	bd_gui_event(&jm);
+	check("jog dial drag emits a delta", knob_calls > 0);
+
 	/* toggle: click flips, set/get */
 	check("toggle initial off", bd_toggle_get(tg) == 0);
 	int tgx, tgy, tgw, tgh;
@@ -234,6 +259,33 @@ main(void)
 	    bd_toggle_get(tg) == 1 && toggle_calls == 1 && toggle_last == 1);
 	bd_toggle_set(tg, 0);
 	check("toggle set off", bd_toggle_get(tg) == 0);
+
+	/* scroll wheel: vertical drag up emits a positive (relative) delta */
+	int whx, why, whw, whh;
+	bd_widget_rect(wh, &whx, &why, &whw, &whh);
+	bd_event whd = mouse(BD_EV_MOUSE_DOWN, whx + whw / 2, why + whh / 2);
+	bd_event whm = mouse(BD_EV_MOUSE_MOVE, whx + whw / 2, why + whh / 2 - 30);
+	bd_gui_event(&whd);
+	bd_gui_event(&whm);
+	check("wheel drag up emits positive delta",
+	    wheel_calls > 0 && wheel_acc > 0.0f);
+
+	/* X-Y pad: drag sets x,y; circle limit clamps to the unit circle */
+	check("xypad initial center", xy_x == 0.0f && xy_y == 0.0f);  /* not fired yet */
+	int pdx, pdy, pdw, pdh;
+	bd_widget_rect(xy, &pdx, &pdy, &pdw, &pdh);
+	int ps = pdw < pdh ? pdw : pdh;
+	int psx = pdx + (pdw - ps) / 2, psy = pdy + (pdh - ps) / 2;
+	bd_event xyd = mouse(BD_EV_MOUSE_DOWN, psx + ps / 4, psy + ps / 4);
+	bd_gui_event(&xyd);
+	check("xypad drag reports a position + callback",
+	    xy_calls > 0 && xy_x < 0.5f && xy_y > 0.5f);   /* upper-left quadrant */
+	bd_xypad_set(xy, 2.0f, 2.0f);   /* far corner: circle clamps inside */
+	float gx, gy;
+	bd_xypad_get(xy, &gx, &gy);
+	float dxc = gx - 0.5f, dyc = gy - 0.5f;
+	check("xypad circle clamps to unit radius",
+	    dxc * dxc + dyc * dyc <= 0.25f + 0.001f);
 
 	/* terminal write: plain text + bold + 256-color SGR */
 	bd_terminal_write(term,

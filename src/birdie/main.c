@@ -54,6 +54,28 @@ on_toggle(bd_id id, void *arg, int on)
 		BD_END);
 }
 
+static void
+on_wheel(bd_id id, void *arg, float d)
+{
+	(void)id;
+	(void)arg;
+	static float acc;
+	static char buf[32];
+	acc += d;
+	snprintf(buf, sizeof buf, "Spin: %+.2f", acc);
+	bd_set(status_label, BD_LABEL_S, buf, BD_END);
+}
+
+static void
+on_xy(bd_id id, void *arg, float x, float y)
+{
+	(void)id;
+	(void)arg;
+	static char buf[32];
+	snprintf(buf, sizeof buf, "X-Y: %.2f, %.2f", x, y);
+	bd_set(status_label, BD_LABEL_S, buf, BD_END);
+}
+
 static int
 on_event(const lud_event_t *ev)
 {
@@ -141,6 +163,13 @@ init(void)
 		.min = 0, .max = 6, .step = 1, .value = 2,
 		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
 	bd_toggle_create(krow, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
+	bd_wheel_create(krow, BD_VERTICAL, on_wheel, NULL, BD_PREF_W_I, 30, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.relative = 1, .dimples = 3, .cb = on_wheel },  /* jog dial */
+		BD_PREF_W_I, 84, BD_END);
+	bd_xypad_create(krow, &(bd_xypad_desc){
+		.shape = BD_XY_CIRCLE, .spring = 1, .x = 0.5f, .y = 0.5f,
+		.cb = on_xy }, BD_PREF_W_I, 76, BD_END);
 
 	/* button bar */
 	bd_id bar = bd_create(frame, BD_PANEL,
