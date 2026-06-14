@@ -530,6 +530,53 @@ BD_LABEL_S)`, set with `bd_set`. `BD_MULTILINE` (prefs notes, script editing)
 is still to do. Both will pick up the IME preedit/commit path above when it
 lands.
 
+### Editor widget (rich-text, row-oriented)
+
+A higher-level text editor built as a **composition over `BD_MULTILINE`** (the
+plain multi-line field above, still to do): the multiline supplies editable
+text with caret, selection, and scrolling; the editor adds an API suited to
+programmatic editing plus a rich-text styling layer. An extension
+(`widget_ext`), not a core widget.
+
+Driving use case (smoltrek): a window to edit a small text-based music file
+(**ABC notation**) and play it back, with the styling layer marking the row or
+note currently sounding. The same layer gives **code syntax highlighting** for
+free, which is the reason to base highlighting on rich text rather than a
+one-off highlight channel.
+
+**API (sketch).** Row-oriented, since both ABC and code are line structured:
+
+- set text: `set_text(all)`, `insert_row(n, s)`, `replace_row(n, s)`,
+  `delete_row(n)`
+- read text: `text()`, `row_count()`, `row_text(n)`
+- lock: `set_locked(on)` — read-only (caret/selection and highlighting still
+  work; keystroke edits and the row mutators are rejected). Lets the host edit
+  programmatically while the user only views, e.g. during playback.
+- highlight: apply a style to a whole row, or to a `[row, col0..col1]` span;
+  `clear_highlights()`. Highlighting is just setting style runs (below).
+
+**Rich-text model.** Styles are a small set — bold, italic, underline,
+strikeout, superscript, subscript, foreground color, background color — encoded
+as a flag bitmask plus two colors. They are stored as **style runs** layered
+over the plain text: a sorted list of `(start, end, style)` spans, so the text
+buffer itself stays plain (cheap editing; runs shift with inserts/deletes or
+are simply recomputed). The application owns styling: a syntax highlighter
+tokenizes on change and re-emits runs; the ABC player sets a run on the active
+row/note. The editor's `highlight()` calls are a convenience over the run list.
+
+**Rendering implications.** The text renderer must draw per-run fg/bg and
+styles. fg/bg, underline, strikeout, and super/subscript are cheap (vertex
+color, extra line quads, a baseline offset + scale). **Bold and italic** need
+either additional baked font faces (a bold and an oblique TTF) or synthetic
+emboldening / shearing; the chrome currently bakes a single face, so rich text
+is what introduces font-variant baking — decide whether to ship bold/italic
+TTFs or synthesize them. A fixed-width face is desirable for code and ABC so
+columns line up (super/subscript aside).
+
+**Ordering.** (1) `BD_MULTILINE` — plain multi-line editing. (2) style-run
+support in the renderer (per-run fg/bg + styles; font-variant baking for
+bold/italic). (3) the editor widget — row API, lock, and highlight on top.
+
 ### Clipboard
 
 Copy / cut / paste, backed by per-platform hooks (X11 selections, Win32
