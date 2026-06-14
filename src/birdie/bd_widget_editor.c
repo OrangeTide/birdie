@@ -25,6 +25,7 @@ struct editor {
 	float  scroll_x;
 	int    scroll_y;
 	int    locked;
+	int    mono;            /* fixed-width face (default on) */
 	struct erun *runs;
 	int    nrun, runcap;
 };
@@ -216,11 +217,11 @@ e_style_eq(bd_rich_style a, bd_rich_style b)
 /* measuring                                                          */
 /* ------------------------------------------------------------------ */
 
-/* bd_draw font flags for a style */
+/* bd_draw font flags for a run's style, plus the editor's base (mono) face */
 static int
-e_font(bd_rich_style st)
+e_font(const struct editor *e, bd_rich_style st)
 {
-	int f = 0;
+	int f = e->mono ? BD_FONT_MONO : 0;
 	if (st.flags & BD_RT_BOLD)   f |= BD_FONT_BOLD;
 	if (st.flags & BD_RT_ITALIC) f |= BD_FONT_ITALIC;
 	return f;
@@ -250,7 +251,7 @@ e_span_px(const struct editor *e, int a, int b)
 		int q = e_next(e->buf, b, p);
 		while (q < b && e_style_eq(e_style_at(e, q), st))
 			q = e_next(e->buf, b, q);
-		w += e_seg_w(e, p, q, e_font(st));
+		w += e_seg_w(e, p, q, e_font(e, st));
 		p = q;
 	}
 	return w;
@@ -263,7 +264,7 @@ e_col_at_px(const struct editor *e, int start, int end, float target)
 	float w = 0.0f;
 	while (pos < end) {
 		int nx = e_next(e->buf, end, pos);
-		float cw = e_seg_w(e, pos, nx, e_font(e_style_at(e, pos)));
+		float cw = e_seg_w(e, pos, nx, e_font(e, e_style_at(e, pos)));
 		if (w + cw * 0.5f >= target) return pos;
 		w += cw;
 		pos = nx;
@@ -272,9 +273,9 @@ e_col_at_px(const struct editor *e, int start, int end, float target)
 }
 
 static int
-e_line_h(void)
+e_line_h(const struct editor *e)
 {
-	int h = (int)bd_draw_line_height();
+	int h = (int)bd_draw_line_height_styled(e->mono ? BD_FONT_MONO : 0);
 	return h > 0 ? h : 14;
 }
 
@@ -286,7 +287,7 @@ static void
 editor_init(bd_id id, void *state)
 {
 	struct editor *e = state;
-	(void)e;
+	e->mono = 1;            /* a code/music editor wants fixed-width by default */
 	bd_set(id, BD_PREF_W_I, 280, BD_PREF_H_I, 140, BD_PAD_I, 4, BD_END);
 }
 
@@ -306,7 +307,7 @@ static void
 editor_draw_line(struct editor *e, int a, int b, float x0, int top,
     const bd_theme *th)
 {
-	int lh = e_line_h();
+	int lh = e_line_h(e);
 	float penx = x0;
 	int seg = a;
 	while (seg < b) {
@@ -320,7 +321,7 @@ editor_draw_line(struct editor *e, int a, int b, float x0, int top,
 		if (n >= (int)sizeof tmp) n = (int)sizeof tmp - 1;
 		memcpy(tmp, e->buf + seg, (size_t)n);
 		tmp[n] = '\0';
-		int font = e_font(st);             /* true bold/italic face */
+		int font = e_font(e, st);          /* mono + true bold/italic face */
 		float w = bd_draw_text_width_styled(tmp, font);
 
 		uint32_t fg = st.fg ? st.fg : th->text;
@@ -357,7 +358,7 @@ editor_render(bd_id id, void *state)
 	int pad = bd_get_i(id, BD_PAD_I);
 	int ix = x + pad, iy = y + pad;
 	int iw = w - 2 * pad, ih = h - 2 * pad;
-	int lh = e_line_h();
+	int lh = e_line_h(e);
 
 	/* caret line/x, then keep it in view */
 	int cls = e_line_start(e, e->cursor);
@@ -417,7 +418,7 @@ static int
 editor_event(bd_id id, void *state, const bd_event *ev)
 {
 	struct editor *e = state;
-	int lh = e_line_h();
+	int lh = e_line_h(e);
 
 	switch (ev->type) {
 	case BD_EV_MOUSE_SCROLL:
@@ -635,6 +636,13 @@ bd_editor_set_locked(bd_id id, int locked)
 {
 	struct editor *e = editor_of(id);
 	if (e) e->locked = locked;
+}
+
+void
+bd_editor_set_monospace(bd_id id, int on)
+{
+	struct editor *e = editor_of(id);
+	if (e) e->mono = on;
 }
 
 int

@@ -52,6 +52,9 @@ void bd_editor_delete_row(bd_id id, int row);
 void bd_editor_set_locked(bd_id id, int locked);
 int  bd_editor_locked(bd_id id);
 
+/* Fixed-width (monospace) face on/off; on by default (code / ABC). */
+void bd_editor_set_monospace(bd_id id, int on);
+
 /* ---- styling / highlight ---- */
 void bd_editor_clear_styles(bd_id id);
 /* style a byte range [start,end) of the whole text */

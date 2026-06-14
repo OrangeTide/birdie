@@ -53,14 +53,17 @@ float bd_draw_text_width(const char *s);
 float bd_draw_line_height(void);   /* baked font ascent+descent+gap, pixels */
 float bd_draw_ascent(void);        /* baked font ascent, pixels */
 
-/* Font style: a bitmask selecting one of four baked faces (regular / bold /
- * italic / bold-italic). A variant whose TTF was not found falls back to the
- * regular face. */
+/* Font style: a bitmask selecting one of eight baked faces — bold/italic in a
+ * proportional or a fixed-width (BD_FONT_MONO) family. A variant whose TTF was
+ * not found falls back to the regular proportional face. */
 enum {
 	BD_FONT_BOLD   = 1 << 0,
 	BD_FONT_ITALIC = 1 << 1,
+	BD_FONT_MONO   = 1 << 2,
 };
 void  bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style);
 float bd_draw_text_width_styled(const char *s, int style);
+float bd_draw_line_height_styled(int style); /* per-face line height, px */
+float bd_draw_ascent_styled(int style);      /* per-face ascent, px */
 
 #endif

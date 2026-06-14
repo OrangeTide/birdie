@@ -240,8 +240,9 @@ primitives widgets actually call:
 
 - filled / stroked rect (chrome panels, borders, selection)
 - textured sprite / quad (glyph atlas, icon textures, SIXEL/MXP later)
-- text run (stb_truetype atlases baked from the chrome TTFs — regular plus
-  bold/italic/bold-italic faces selected by `bd_draw_text_styled`; the terminal
+- text run (stb_truetype atlases baked from the chrome TTFs — a proportional
+  and a fixed-width family, each in regular/bold/italic/bold-italic, selected
+  by `bd_draw_text_styled` via `BD_FONT_BOLD|ITALIC|MONO`; the terminal
   extension keeps its own CP437 atlas)
 
 These batch into one dynamic vertex buffer that flushes on texture change or
@@ -575,11 +576,12 @@ row/note. The editor's `highlight()` calls are a convenience over the run list.
 **Rendering implications.** The text renderer draws per-run fg/bg and styles.
 fg/bg, underline, strikeout, and super/subscript are cheap (vertex color, extra
 line quads, a baseline offset). **Bold and italic** are true variant faces:
-`bd_draw.c` bakes four atlases (regular / bold / oblique / bold-oblique) from
-the vendored DejaVu TTFs and `bd_draw_text_styled(..., BD_FONT_BOLD|
-BD_FONT_ITALIC)` picks one (a missing variant TTF falls back to regular). A
-fixed-width face would be desirable for code and ABC so columns line up; the
-chrome is proportional DejaVu for now.
+`bd_draw.c` bakes eight atlases — a proportional family (DejaVu Sans) and a
+fixed-width family (DejaVu Sans Mono), each in regular/bold/oblique/
+bold-oblique — and `bd_draw_text_styled(..., BD_FONT_BOLD|BD_FONT_ITALIC|
+BD_FONT_MONO)` picks one (a missing variant TTF falls back to regular). The
+editor uses the **fixed-width family by default** so code and ABC columns line
+up (`bd_editor_set_monospace`); chrome stays proportional.
 
 **Status.** Implemented: the row API (`bd_editor_set_text` / `text` /
 `row_count` / `row_text` / `insert_row` / `replace_row` / `delete_row`), lock
@@ -588,7 +590,8 @@ chrome is proportional DejaVu for now.
 multi-line editor (caret nav, newline, backspace/delete, click-to-caret,
 scroll), and styled rendering segment-by-segment: per-run fg/bg, underline,
 strikeout, **true bold and italic** (separate baked faces, see Rendering),
-super/subscript (baseline shift). Style runs are byte ranges that shift across
+super/subscript (baseline shift); it renders in a **fixed-width face by
+default** (`bd_editor_set_monospace`). Style runs are byte ranges that shift across
 edits; an app re-emits them after big changes (a syntax highlighter) or sets
 them on a locked buffer (ABC playback). Deferred: cross-line selection, and
 Tab-inserts-a-tab (Tab currently traverses focus).

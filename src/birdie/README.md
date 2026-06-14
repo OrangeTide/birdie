@@ -239,8 +239,10 @@ bd_editor_clear_styles(ed);
 ```
 
 The renderer draws runs segment by segment: per-run fg/bg, underline,
-strikeout, true bold/italic (separate baked faces; see Fonts), and
-super/subscript.
+strikeout, true bold/italic (separate baked faces; see Dependencies), and
+super/subscript. The editor renders in a fixed-width face by default (good for
+code/ABC column alignment); `bd_editor_set_monospace(ed, 0)` switches to the
+proportional face.
 
 ## Defining a widget type
 
@@ -334,6 +336,10 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
    -DBD_ASSET_GUI_FONT_BOLD='"assets/fonts/DejaVuSans-Bold.ttf"' \
    -DBD_ASSET_GUI_FONT_ITALIC='"assets/fonts/DejaVuSans-Oblique.ttf"' \
    -DBD_ASSET_GUI_FONT_BOLDITALIC='"assets/fonts/DejaVuSans-BoldOblique.ttf"' \
+   -DBD_ASSET_GUI_FONT_MONO='"assets/fonts/DejaVuSansMono.ttf"' \
+   -DBD_ASSET_GUI_FONT_MONO_BOLD='"assets/fonts/DejaVuSansMono-Bold.ttf"' \
+   -DBD_ASSET_GUI_FONT_MONO_ITALIC='"assets/fonts/DejaVuSansMono-Oblique.ttf"' \
+   -DBD_ASSET_GUI_FONT_MONO_BOLDITALIC='"assets/fonts/DejaVuSansMono-BoldOblique.ttf"' \
    -DBD_ASSET_TERM_FONT='"assets/font8x16.png"' \
    -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
    -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
@@ -351,15 +357,18 @@ Run `./gallery` from the bundle root so those relative asset paths resolve.
 - A **GLES-capable backend**. ludica (the reference, `bd_backend_ludica.c`)
   provides the window and GLES context; SDL, raylib, GLFW, or ANGLE can too.
 - **libvt** is required by the terminal widget (`bd_widget_vt.c`).
-- Vendored: **stb_truetype** (text rasterization) and four chrome TTFs the
-  toolkit bakes — regular plus bold / oblique / bold-oblique for true
-  bold/italic. `bd_draw_text_styled(s, x, y, rgba, BD_FONT_BOLD|BD_FONT_ITALIC)`
-  selects a face; a missing variant TTF falls back to regular.
+- Vendored: **stb_truetype** (text rasterization) and eight chrome TTFs the
+  toolkit bakes — a proportional family (DejaVu Sans) and a fixed-width family
+  (DejaVu Sans Mono), each in regular / bold / oblique / bold-oblique.
+  `bd_draw_text_styled(s, x, y, rgba, BD_FONT_BOLD|BD_FONT_ITALIC|BD_FONT_MONO)`
+  selects a face; a missing variant TTF falls back to regular. The editor uses
+  the mono family by default (`bd_editor_set_monospace`).
 
 The assets the toolkit loads (`assets/` — the chrome TTFs, the terminal's CP437
 atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
-`bd_draw.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*` (the four
-font variants are `BD_ASSET_GUI_FONT`, `_BOLD`, `_ITALIC`, `_BOLDITALIC`).
+`bd_draw.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*` (the eight font faces are
+`BD_ASSET_GUI_FONT`[`_BOLD`/`_ITALIC`/`_BOLDITALIC`] and the same with a
+`_MONO` prefix on the suffix, e.g. `BD_ASSET_GUI_FONT_MONO_BOLD`).
 
 ## License
 

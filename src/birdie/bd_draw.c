@@ -55,15 +55,19 @@ static bd_texture cur_tex;
 static int        batch_active;
 static float      win_w, win_h;
 
-/* fonts: four baked faces indexed by BD_FONT_BOLD|BD_FONT_ITALIC. A missing
- * variant TTF falls back to the regular face (index 0). */
+/* fonts: eight baked faces indexed by
+ * BD_FONT_BOLD|BD_FONT_ITALIC|BD_FONT_MONO. A missing variant TTF falls back
+ * to the regular proportional face (index 0). */
+#define FONT_FACES 8
 struct face {
 	int              have;
 	bd_texture       atlas;
 	stbtt_packedchar packed[FONT_COUNT];
+	float            ascent;
+	float            line_h;
 };
-static struct face faces[4];
-static float        font_ascent;
+static struct face faces[FONT_FACES];
+static float        font_ascent;   /* regular proportional face (back-compat) */
 static float        font_line_h;
 
 /* default variant paths; override with -DBD_ASSET_GUI_FONT_* at build time */
@@ -75,6 +79,18 @@ static float        font_line_h;
 #endif
 #ifndef BD_ASSET_GUI_FONT_BOLDITALIC
 #define BD_ASSET_GUI_FONT_BOLDITALIC "src/birdie/assets/fonts/DejaVuSans-BoldOblique.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_MONO
+#define BD_ASSET_GUI_FONT_MONO           "src/birdie/assets/fonts/DejaVuSansMono.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_MONO_BOLD
+#define BD_ASSET_GUI_FONT_MONO_BOLD      "src/birdie/assets/fonts/DejaVuSansMono-Bold.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_MONO_ITALIC
+#define BD_ASSET_GUI_FONT_MONO_ITALIC    "src/birdie/assets/fonts/DejaVuSansMono-Oblique.ttf"
+#endif
+#ifndef BD_ASSET_GUI_FONT_MONO_BOLDITALIC
+#define BD_ASSET_GUI_FONT_MONO_BOLDITALIC "src/birdie/assets/fonts/DejaVuSansMono-BoldOblique.ttf"
 #endif
 
 static inline void
@@ -159,15 +175,19 @@ bake_font(const char *path, float px, int slot, int metrics)
 		return;
 	}
 
-	if (metrics) {
+	{
 		stbtt_fontinfo info;
 		if (stbtt_InitFont(&info, ttf,
 		    stbtt_GetFontOffsetForIndex(ttf, 0))) {
 			int asc, desc, gap;
 			stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
 			float s = stbtt_ScaleForPixelHeight(&info, px);
-			font_ascent = asc * s;
-			font_line_h = (asc - desc + gap) * s;
+			faces[slot].ascent = asc * s;
+			faces[slot].line_h = (asc - desc + gap) * s;
+			if (metrics) {       /* the regular face sets the globals */
+				font_ascent = faces[slot].ascent;
+				font_line_h = faces[slot].line_h;
+			}
 		}
 	}
 
@@ -194,12 +214,12 @@ bake_font(const char *path, float px, int slot, int metrics)
 	free(ttf);
 }
 
-/* the baked face for a style, falling back to the regular face */
+/* the baked face for a style, falling back to the regular proportional face */
 static const struct face *
 face_for(int style)
 {
-	int i = style & (BD_FONT_BOLD | BD_FONT_ITALIC);
-	if (i < 0 || i > 3 || !faces[i].have)
+	int i = style & (BD_FONT_BOLD | BD_FONT_ITALIC | BD_FONT_MONO);
+	if (i < 0 || i >= FONT_FACES || !faces[i].have)
 		i = 0;
 	return &faces[i];
 }
@@ -222,10 +242,15 @@ bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
 	cur_tex = white;
 
 	if (font_path) {
+		/* indices are BD_FONT_BOLD|ITALIC|MONO */
 		bake_font(font_path, font_px, 0, 1);              /* regular */
 		bake_font(BD_ASSET_GUI_FONT_BOLD, font_px, 1, 0);
 		bake_font(BD_ASSET_GUI_FONT_ITALIC, font_px, 2, 0);
 		bake_font(BD_ASSET_GUI_FONT_BOLDITALIC, font_px, 3, 0);
+		bake_font(BD_ASSET_GUI_FONT_MONO, font_px, 4, 0);
+		bake_font(BD_ASSET_GUI_FONT_MONO_BOLD, font_px, 5, 0);
+		bake_font(BD_ASSET_GUI_FONT_MONO_ITALIC, font_px, 6, 0);
+		bake_font(BD_ASSET_GUI_FONT_MONO_BOLDITALIC, font_px, 7, 0);
 	}
 	return 1;
 }
@@ -235,7 +260,7 @@ bd_draw_shutdown(void)
 {
 	if (!be)
 		return;
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < FONT_FACES; i++)
 		if (faces[i].have) {
 			be->destroy_texture(faces[i].atlas);
 			faces[i].have = 0;
@@ -299,7 +324,7 @@ bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style)
 	const struct face *f = face_for(style);
 	if (!f->have || !s)
 		return;
-	float px = x, py = y + font_ascent;
+	float px = x, py = y + f->ascent;
 	for (; *s; s++) {
 		int cp = (unsigned char)*s;
 		if (cp < FONT_FIRST || cp >= FONT_FIRST + FONT_COUNT)
@@ -337,3 +362,6 @@ float bd_draw_text_width(const char *s)
 
 float bd_draw_line_height(void) { return font_line_h; }
 float bd_draw_ascent(void)      { return font_ascent; }
+
+float bd_draw_line_height_styled(int style) { return face_for(style)->line_h; }
+float bd_draw_ascent_styled(int style)      { return face_for(style)->ascent; }
