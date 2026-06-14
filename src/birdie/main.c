@@ -1,10 +1,8 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
-#include "bd_widget_value.h"
 #include "bd_backend_ludica.h"
 #include "ludica.h"
 #include <stddef.h>
-#include <stdio.h>
 
 static bd_id status_label;
 static bd_id terminal;
@@ -23,57 +21,6 @@ on_quit(bd_id id, void *arg)
 	(void)id;
 	(void)arg;
 	lud_quit();
-}
-
-static void
-on_slider(bd_id id, void *arg, float t)
-{
-	(void)id;
-	(void)arg;
-	static char buf[32];
-	snprintf(buf, sizeof buf, "Volume: %d%%", (int)(t * 100.0f + 0.5f));
-	bd_set(status_label, BD_LABEL_S, buf, BD_END);
-}
-
-static void
-on_knob(bd_id id, void *arg, float v)
-{
-	(void)id;
-	(void)arg;
-	static char buf[32];
-	snprintf(buf, sizeof buf, "Value: %g", v);
-	bd_set(status_label, BD_LABEL_S, buf, BD_END);
-}
-
-static void
-on_toggle(bd_id id, void *arg, int on)
-{
-	(void)id;
-	(void)arg;
-	bd_set(status_label, BD_LABEL_S, on ? "Switch: ON" : "Switch: OFF",
-		BD_END);
-}
-
-static void
-on_wheel(bd_id id, void *arg, float d)
-{
-	(void)id;
-	(void)arg;
-	static float acc;
-	static char buf[32];
-	acc += d;
-	snprintf(buf, sizeof buf, "Spin: %+.2f", acc);
-	bd_set(status_label, BD_LABEL_S, buf, BD_END);
-}
-
-static void
-on_xy(bd_id id, void *arg, float x, float y)
-{
-	(void)id;
-	(void)arg;
-	static char buf[32];
-	snprintf(buf, sizeof buf, "X-Y: %.2f, %.2f", x, y);
-	bd_set(status_label, BD_LABEL_S, buf, BD_END);
 }
 
 static int
@@ -141,36 +88,6 @@ init(void)
 		BD_PAD_I, 4,
 		BD_END);
 
-	/* knob row: dots, balance, hex MIDI labels, and a 7-way rotary switch */
-	bd_id krow = bd_create(frame, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW,
-		BD_PREF_H_I, 96,
-		BD_PAD_I, 14,
-		BD_GAP_I, 18,
-		BD_BG_C, 0x313335FFu,
-		BD_END);
-	bd_knob_create(krow, &(bd_knob_desc){
-		.min = 0, .max = 1, .value = 0.3f,
-		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
-	bd_knob_create(krow, &(bd_knob_desc){
-		.min = -1, .max = 1, .value = 0,
-		.dial = BD_DIAL_BALANCE, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
-	bd_knob_create(krow, &(bd_knob_desc){
-		.min = 0, .max = 127, .value = 64,
-		.dial = BD_DIAL_LABELS, .hex = 1, .cb = on_knob },
-		BD_PREF_W_I, 120, BD_END);
-	bd_knob_create(krow, &(bd_knob_desc){
-		.min = 0, .max = 6, .step = 1, .value = 2,
-		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
-	bd_toggle_create(krow, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
-	bd_wheel_create(krow, BD_VERTICAL, on_wheel, NULL, BD_PREF_W_I, 30, BD_END);
-	bd_knob_create(krow, &(bd_knob_desc){
-		.relative = 1, .dimples = 3, .cb = on_wheel },  /* jog dial */
-		BD_PREF_W_I, 84, BD_END);
-	bd_xypad_create(krow, &(bd_xypad_desc){
-		.shape = BD_XY_CIRCLE, .spring = 1, .x = 0.5f, .y = 0.5f,
-		.cb = on_xy }, BD_PREF_W_I, 76, BD_END);
-
 	/* button bar */
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW,
@@ -189,11 +106,6 @@ init(void)
 		BD_LABEL_S, "Quit",
 		BD_PREF_W_I, 80,
 		BD_ON_CLICK_F, on_quit,
-		BD_END);
-
-	/* a horizontal slider fills the rest of the bar */
-	bd_slider_create(bar, BD_HORIZONTAL, 0.5f, on_slider, NULL,
-		BD_GROW_I, 1,
 		BD_END);
 
 	/* status bar */

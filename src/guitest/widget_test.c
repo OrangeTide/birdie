@@ -1,0 +1,266 @@
+/*
+ * widget_test.c — birdie-gui widget gallery.
+ *
+ * A standalone sample that exhibits and exercises every working widget on the
+ * raw-GLES backend (bd_backend_gles + window.h), independent of ludica. birdie
+ * the MUD client runs on ludica; this gallery runs on GLES, so both backends
+ * stay exercised. It also doubles as the place to grow interactive widget
+ * tests as new widgets land.
+ *
+ * Run from the repo root so the default BD_ASSET_* paths resolve.
+ *
+ * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
+ */
+
+#include "widget.h"
+#include "bd_widget_vt.h"
+#include "bd_widget_value.h"
+#include "bd_backend_gles.h"
+#include "window.h"
+
+#include <stdio.h>
+
+static bd_id status;
+static bd_id term;
+static int   running = 1;
+
+/* Echo a line to both the status bar and the terminal log, so every widget
+ * interaction is visible. */
+static void
+report(const char *msg)
+{
+	bd_set(status, BD_LABEL_S, msg, BD_END);
+	if (term) {
+		bd_terminal_write(term, msg, -1);
+		bd_terminal_write(term, "\r\n", 2);
+	}
+}
+
+/* ---- callbacks ---- */
+
+static void on_btn(bd_id id, void *arg)   { (void)id; report((const char *)arg); }
+
+static void
+on_quit(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	running = 0;
+}
+
+static void
+on_slider(bd_id id, void *arg, float t)
+{
+	(void)id;
+	static char b[64];
+	snprintf(b, sizeof b, "%s: %d%%", (const char *)arg, (int)(t * 100 + 0.5f));
+	report(b);
+}
+
+static void
+on_knob(bd_id id, void *arg, float v)
+{
+	(void)id;
+	static char b[64];
+	snprintf(b, sizeof b, "%s: %g", (const char *)arg, v);
+	report(b);
+}
+
+static void
+on_jog(bd_id id, void *arg, float d)
+{
+	(void)id; (void)arg;
+	static float acc;
+	static char b[64];
+	acc += d;
+	snprintf(b, sizeof b, "Jog: %+.2f (sum %.2f)", d, acc);
+	report(b);
+}
+
+static void
+on_toggle(bd_id id, void *arg, int on)
+{
+	(void)id; (void)arg;
+	report(on ? "Toggle: ON" : "Toggle: OFF");
+}
+
+static void
+on_xy(bd_id id, void *arg, float x, float y)
+{
+	(void)id;
+	static char b[64];
+	snprintf(b, sizeof b, "%s: %.2f, %.2f", (const char *)arg, x, y);
+	report(b);
+}
+
+/* ---- a labeled framing panel for a gallery section ---- */
+
+static bd_id
+section(bd_id parent, const char *title, int layout, int height)
+{
+	bd_id box = bd_create(parent, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_PREF_H_I, height,
+		BD_BG_C, 0x2B2D30FFu,
+		BD_PAD_I, 6,
+		BD_GAP_I, 4,
+		BD_END);
+	bd_create(box, BD_LABEL, BD_LABEL_S, title,
+		BD_PREF_H_I, 16, BD_FG_C, 0x9DA3AAFFu, BD_END);
+	bd_id row = bd_create(box, BD_PANEL,
+		BD_LAYOUT_I, layout,
+		BD_GAP_I, 14,
+		BD_GROW_I, 1,
+		BD_END);
+	return row;
+}
+
+static void
+build_ui(void)
+{
+	bd_id frame = bd_create(BD_NONE, BD_FRAME,
+		BD_LABEL_S, "birdie-gui widget gallery",
+		BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_END);
+
+	/* ---- menu bar (exhibits pull-downs + a pinnable menu) ---- */
+	bd_id menu = bd_create(frame, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 22, BD_BG_C, 0x3C3F41FFu,
+		BD_PAD_I, 2, BD_GAP_I, 16, BD_END);
+
+	bd_id m_file = bd_create(menu, BD_MENU, BD_LABEL_S, "File", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "New",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"File > New", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Open...",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"File > Open", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Quit",
+		BD_ON_CLICK_F, on_quit, BD_END);
+
+	bd_id m_edit = bd_create(menu, BD_MENU, BD_LABEL_S, "Edit", BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Copy",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"Edit > Copy", BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Paste",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"Edit > Paste", BD_END);
+
+	/* a menu opened pinned, to exhibit olvwm-style pushpins */
+	bd_id m_view = bd_create(menu, BD_MENU, BD_LABEL_S, "View (pinnable)",
+		BD_END);
+	bd_create(m_view, BD_BUTTON, BD_LABEL_S, "Toggle A",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"View > A", BD_END);
+	bd_create(m_view, BD_BUTTON, BD_LABEL_S, "Toggle B",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"View > B", BD_END);
+
+	/* ---- body: terminal/input on the left, widget exhibits on the right ---- */
+	bd_id body = bd_create(frame, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1,
+		BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
+
+	bd_id left = bd_create(body, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_GAP_I, 4, BD_END);
+	term = bd_terminal_create(left, BD_GROW_I, 1, BD_END);
+	bd_terminal_write(term,
+		"\033[1mbirdie-gui widget gallery\033[0m\r\n"
+		"GLES backend. Interact with the widgets; events log here.\r\n", -1);
+	bd_create(left, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_PAD_I, 4, BD_END);
+
+	bd_id right = bd_create(body, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 420,
+		BD_GAP_I, 6, BD_END);
+
+	/* knobs: every dial style + a stepped N-way rotary switch */
+	bd_id krow = section(right, "Knobs & dials", BD_LAYOUT_ROW, 96);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 1, .value = 0.3f, .dial = BD_DIAL_DOTS,
+		.cb = on_knob, .arg = (void *)"Gain" }, BD_PREF_W_I, 60, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = -1, .max = 1, .value = 0, .dial = BD_DIAL_BALANCE,
+		.cb = on_knob, .arg = (void *)"Balance" }, BD_PREF_W_I, 60, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 127, .value = 64, .dial = BD_DIAL_LABELS, .hex = 1,
+		.cb = on_knob, .arg = (void *)"MIDI CC" }, BD_PREF_W_I, 100, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 6, .step = 1, .value = 2, .dial = BD_DIAL_DOTS,
+		.cb = on_knob, .arg = (void *)"Mode" }, BD_PREF_W_I, 60, BD_END);
+
+	/* switches and relative wheels */
+	bd_id srow = section(right, "Switches & wheels", BD_LAYOUT_ROW, 96);
+	bd_toggle_create(srow, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
+	bd_wheel_create(srow, BD_VERTICAL, on_jog, NULL, BD_PREF_W_I, 30, BD_END);
+	bd_wheel_create(srow, BD_HORIZONTAL, on_jog, NULL,
+		BD_PREF_W_I, 80, BD_PREF_H_I, 30, BD_END);
+	bd_knob_create(srow, &(bd_knob_desc){
+		.relative = 1, .dimples = 3, .cb = on_jog }, /* endless jog dial */
+		BD_PREF_W_I, 76, BD_END);
+
+	/* X-Y pads: bounded square + spring-return joystick circle */
+	bd_id xrow = section(right, "X-Y pads", BD_LAYOUT_ROW, 120);
+	bd_xypad_create(xrow, &(bd_xypad_desc){
+		.shape = BD_XY_SQUARE, .x = 0.5f, .y = 0.5f,
+		.cb = on_xy, .arg = (void *)"Pad" }, BD_PREF_W_I, 90, BD_END);
+	bd_xypad_create(xrow, &(bd_xypad_desc){
+		.shape = BD_XY_CIRCLE, .spring = 1, .x = 0.5f, .y = 0.5f,
+		.cb = on_xy, .arg = (void *)"Stick" }, BD_PREF_W_I, 90, BD_END);
+
+	/* sliders: a tall vertical fader beside a horizontal one. The vertical
+	 * fader keeps a fixed width (it fills the row height); the horizontal
+	 * slider sits in a column wrapper so it keeps a short, fixed height
+	 * instead of stretching its thumb to fill the tall row. */
+	bd_id vrow = section(right, "Sliders", BD_LAYOUT_ROW, 150);
+	bd_slider_create(vrow, BD_VERTICAL, 0.6f, on_slider, (void *)"Fader",
+		BD_PREF_W_I, 28, BD_END);
+	bd_id hwrap = bd_create(vrow, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_END);
+	bd_slider_create(hwrap, BD_HORIZONTAL, 0.4f, on_slider, (void *)"Wet",
+		BD_PREF_H_I, 24, BD_END);
+
+	/* ---- button bar with a horizontal slider ---- */
+	bd_id bar = bd_create(frame, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
+		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
+	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Connect", BD_PREF_W_I, 90,
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"Connect", BD_END);
+	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Quit", BD_PREF_W_I, 90,
+		BD_ON_CLICK_F, on_quit, BD_END);
+	bd_slider_create(bar, BD_HORIZONTAL, 0.5f, on_slider, (void *)"Volume",
+		BD_GROW_I, 1, BD_END);
+
+	/* ---- status bar (the event readout) ---- */
+	status = bd_create(frame, BD_LABEL, BD_LABEL_S, "Ready",
+		BD_PREF_H_I, 20, BD_FG_C, 0xAAAAAAFFu, BD_BG_C, 0x3C3F41FFu,
+		BD_PAD_I, 4, BD_END);
+}
+
+int
+main(void)
+{
+	if (win_open("birdie-gui widget gallery", 1024, 720) != 0) {
+		fprintf(stderr, "widget_test: cannot open window\n");
+		return 1;
+	}
+
+	bd_gui_init(&bd_backend_gles, NULL);
+	build_ui();
+
+	while (running) {
+		win_event wev;
+		while (win_poll(&wev)) {
+			if (wev.type == WIN_EV_CLOSE)
+				running = 0;
+			else if (wev.type == WIN_EV_KEY_DOWN
+			    && wev.key == WIN_KEY_ESCAPE)
+				running = 0;
+
+			bd_event bev;
+			if (bd_event_from_win(&wev, &bev))
+				bd_gui_event(&bev);
+		}
+
+		bd_gui_layout(win_width(), win_height());
+		bd_gui_render();
+		win_swap();
+	}
+
+	bd_gui_cleanup();
+	win_close();
+	return 0;
+}

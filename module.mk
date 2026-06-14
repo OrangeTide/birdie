@@ -88,3 +88,26 @@ test : bd_vt
 	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
 	@echo "running headless GUI test:"
 	@$(TEST_BIN)
+
+# ----------------------------------------------------------------------
+# Widget gallery (src/guitest/). A standalone windowed sample on the raw
+# OpenGL ES 3 backend (src/guitest/bd_backend_gles.c + x11_window.c),
+# independent of ludica, that exhibits and exercises every working widget.
+# birdie runs on ludica, this runs on GLES, so both backends stay tested.
+# Linux/X11 only and opt-in (not built by `all`); run from the repo root so
+# the default BD_ASSET_* paths resolve. Links libvt for the terminal widget.
+# ----------------------------------------------------------------------
+GALLERY_BIN := $(BUILDDIR)/birdie-gui-gallery
+
+.PHONY : widget-test
+widget-test : bd_vt
+	@mkdir -p $(BUILDDIR)
+	cc -Wall -W -Isrc/birdie -Isrc/guitest -Isrc/libvt -Isrc/thirdparty/stb \
+	    src/guitest/widget_test.c src/guitest/x11_window.c \
+	    src/guitest/bd_backend_gles.c \
+	    src/birdie/widget.c src/birdie/bd_widget_vt.c \
+	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
+	    $(BUILDDIR)/bd_vt.a \
+	    -lX11 -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
+	@echo "built widget gallery: $(GALLERY_BIN)"
+	@echo "run it from the repo root: $(GALLERY_BIN)"
