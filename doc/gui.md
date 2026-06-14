@@ -159,8 +159,9 @@ What is built:
   text on the GPU interface; widgets can also drop to a custom fragment shader.
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
   `BD_MENU` (+ pinnable pushpins), `BD_TEXT` (single-line field),
-  `BD_MULTILINE` (multi-line editor), `BD_INPUT_LINE`, and the `BD_TERMINAL`
-  extension (libvt). Flexbox row/col + fixed layout.
+  `BD_MULTILINE` (multi-line editor), `BD_LIST` (scrolling/selectable list),
+  `BD_INPUT_LINE`, and the `BD_TERMINAL` extension (libvt). Flexbox row/col +
+  fixed layout.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
@@ -171,9 +172,9 @@ What is built:
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 
-Not yet built: `BD_LIST`, `BD_SCROLLBAR`, `BD_NOTICE`, `BD_TAB_BAR` (still
-enum-only); IME/compose; clipboard; multitouch; pen. These are tracked in the
-roadmap and widget-set sections.
+Not yet built: `BD_SCROLLBAR`, `BD_NOTICE`, `BD_TAB_BAR` (still enum-only);
+IME/compose; clipboard; multitouch; pen. These are tracked in the roadmap and
+widget-set sections.
 
 ## v1.0 widget set
 
@@ -189,7 +190,7 @@ are extensions (`widget_ext.h`) and so are not in this core set.
 | `BD_BUTTON`      | clickable action                                    | yes  |
 | `BD_TEXT`        | single-line text input                              | yes  |
 | `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    | yes  |
-| `BD_LIST`        | scrolling list (MUD list, log sink list)            | no   |
+| `BD_LIST`        | scrolling list (MUD list, log sink list)            | yes  |
 | `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | no   |
 | `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
 | `BD_NOTICE`      | modal confirmation / alert                          | no   |

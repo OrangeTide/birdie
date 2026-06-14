@@ -118,6 +118,10 @@ static bd_texture pin_out_tex;
 static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
 static float cursor_blink;
+/* BD_LIST double-click tracking */
+static bd_id list_last_id = BD_NONE;
+static int   list_last_row = -1;
+static double list_last_time;
 
 /* Single-line editable text widgets share the same edit/render/focus paths.
  * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT is
@@ -407,6 +411,13 @@ ml_line_index(const char *buf, int pos)
 	return n;
 }
 
+/* BD_LIST: number of '\n'-separated items in text_buf */
+static int
+list_count(const struct widget *w)
+{
+	return w->text_len > 0 ? ml_line_index(w->text_buf, w->text_len) + 1 : 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* attribute application                                              */
 /* ------------------------------------------------------------------ */
@@ -444,6 +455,14 @@ apply_s(struct widget *w, int attr, const char *val)
 			w->text_len = n;
 			w->cursor = n;
 			w->sel_anchor = -1;
+		} else if (w->type == BD_LIST && val) {
+			/* '\n'-separated items; cursor is the selected row */
+			int n = (int)strlen(val);
+			if (n >= (int)sizeof(w->text_buf))
+				n = (int)sizeof(w->text_buf) - 1;
+			memcpy(w->text_buf, val, n);
+			w->text_buf[n] = '\0';
+			w->text_len = n;
 		}
 		break;
 	case BD_NAME_S:  w->acc_name = val; break;
@@ -589,6 +608,13 @@ defaults(struct widget *w, int type)
 		w->pref_h = (int)CHROME_FONT_SZ * 6 + 8;   /* ~6 lines */
 		w->pad = 4;
 		w->sel_anchor = -1;
+		break;
+	case BD_LIST:
+		w->bg = theme.press;
+		w->fg = theme.text;
+		w->pref_h = (int)CHROME_FONT_SZ * 6 + 8;
+		w->pad = 2;
+		w->cursor = -1;       /* selected row index; -1 = none */
 		break;
 	}
 }
@@ -1132,6 +1158,58 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_LIST: {
+		int focused = (focus_id == id);
+		fill_rect(w->x, w->y, w->w, w->h, w->bg);
+		stroke_rect(w->x, w->y, w->w, w->h,
+		    focused ? theme.focus : theme.border);
+
+		int pad = w->pad;
+		int ix = w->x + pad, iy = w->y + pad;
+		int iw = w->w - 2 * pad, ih = w->h - 2 * pad;
+		int lh = ml_line_h();
+		int count = list_count(w);
+
+		/* clamp scroll to content */
+		int max_scroll = count * lh - ih;
+		if (max_scroll < 0) max_scroll = 0;
+		if (w->scroll_y > (float)max_scroll) w->scroll_y = (float)max_scroll;
+		if (w->scroll_y < 0.0f) w->scroll_y = 0.0f;
+
+		bd_draw_flush();
+		be->scissor(ix, iy, iw, ih);
+
+		int li = 0, pos = 0;
+		while (li < count) {
+			int le = ml_line_end(w->text_buf, w->text_len, pos);
+			int top = iy + li * lh - (int)w->scroll_y;
+			if (top + lh >= iy && top <= iy + ih) {
+				if (li == w->cursor) {
+					fill_rect(ix, top, iw, lh,
+					    focused ? theme.select : theme.hover);
+				}
+				char tmp[1024];
+				int n = le - pos;
+				if (n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+				if (n > 0) {
+					memcpy(tmp, w->text_buf + pos, n);
+					tmp[n] = '\0';
+					uint32_t fg = (li == w->cursor) ? theme.text_hi
+					    : w->fg;
+					bd_draw_text(tmp, (float)(ix + 2),
+					    (float)top, fg);
+				}
+			}
+			if (le >= w->text_len) break;
+			pos = le + 1;
+			li++;
+		}
+
+		bd_draw_flush();
+		be->scissor_off();
+		break;
+	}
+
 	default: {
 		const bd_widget_class *cls = class_of(w->type);
 		if (cls && cls->render)
@@ -1144,6 +1222,7 @@ render_widget(bd_id id)
 
 	const bd_widget_class *cls = class_of(w->type);
 	int leaf = (w->type == BD_MENU || is_text_field(w->type) ||
+	    w->type == BD_LIST ||
 	    (cls && !cls->contains_children));
 	if (!leaf) {
 		bd_id c;
@@ -1188,7 +1267,8 @@ hit_interactive(bd_id id, int mx, int my)
 	}
 	if (found != BD_NONE)
 		return found;
-	if ((w->on_click || is_text_field(w->type)) && w->enabled)
+	if ((w->on_click || is_text_field(w->type) || w->type == BD_LIST) &&
+	    w->enabled)
 		return id;
 	return BD_NONE;
 }
@@ -1779,6 +1859,76 @@ multiline_click(bd_id id, int mx, int my)
 }
 
 /* ------------------------------------------------------------------ */
+/* BD_LIST selection                                                  */
+/* ------------------------------------------------------------------ */
+
+/* scroll so the selected row is visible */
+static void
+list_ensure_visible(struct widget *w)
+{
+	if (w->cursor < 0)
+		return;
+	int lh = ml_line_h();
+	int ih = w->h - 2 * w->pad;
+	int top = w->cursor * lh;
+	if (top - (int)w->scroll_y < 0)
+		w->scroll_y = (float)top;
+	if (top + lh - (int)w->scroll_y > ih)
+		w->scroll_y = (float)(top + lh - ih);
+	if (w->scroll_y < 0.0f)
+		w->scroll_y = 0.0f;
+}
+
+/* select the row under my; returns the row, or -1 if past the last item */
+static int
+list_click(bd_id id, int my)
+{
+	struct widget *w = &pool[id];
+	int lh = ml_line_h();
+	int iy = w->y + w->pad;
+	int row = (my - iy + (int)w->scroll_y) / (lh > 0 ? lh : 1);
+	if (row < 0 || row >= list_count(w))
+		return -1;
+	w->cursor = row;
+	return row;
+}
+
+/* keyboard: move/activate the selection. Returns 1 if consumed. */
+static int
+list_key(bd_id id, int key, unsigned mods)
+{
+	(void)mods;
+	struct widget *w = &pool[id];
+	int count = list_count(w);
+	if (count == 0)
+		return 0;
+
+	switch (key) {
+	case BD_KEY_UP:
+		w->cursor = w->cursor <= 0 ? 0 : w->cursor - 1;
+		break;
+	case BD_KEY_DOWN:
+		w->cursor = w->cursor < 0 ? 0
+		    : (w->cursor + 1 >= count ? count - 1 : w->cursor + 1);
+		break;
+	case BD_KEY_HOME:
+		w->cursor = 0;
+		break;
+	case BD_KEY_END:
+		w->cursor = count - 1;
+		break;
+	case BD_KEY_ENTER:
+		if (w->on_click && w->cursor >= 0)
+			w->on_click(id, w->on_click_data);
+		return 1;
+	default:
+		return 0;
+	}
+	list_ensure_visible(w);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* public: lifecycle                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -1915,7 +2065,7 @@ is_focusable(bd_id id)
 	struct widget *w = &pool[id];
 	if (!w->alive || !w->visible || !w->enabled)
 		return 0;
-	if (is_text_field(w->type))
+	if (is_text_field(w->type) || w->type == BD_LIST)
 		return 1;
 	if (w->type == BD_BUTTON)
 		return w->on_click != NULL;
@@ -1967,6 +2117,42 @@ bd_focused(void)
 	return focus_id;
 }
 
+void
+bd_list_set_items(bd_id id, const char *items)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_LIST)
+		return;
+	bd_set(id, BD_LABEL_S, items, BD_END);
+}
+
+int
+bd_list_count(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_LIST)
+		return 0;
+	return list_count(&pool[id]);
+}
+
+int
+bd_list_selected(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_LIST)
+		return -1;
+	return pool[id].cursor;
+}
+
+void
+bd_list_select(bd_id id, int row)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_LIST)
+		return;
+	int n = list_count(&pool[id]);
+	if (row < -1) row = -1;
+	if (row >= n) row = n - 1;
+	pool[id].cursor = row;
+	list_ensure_visible(&pool[id]);
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2002,6 +2188,13 @@ bd_gui_event(const bd_event *ev)
 			    : input_key(focus_id, ev->key, ev->mods);
 	}
 
+	/* keyboard events for a focused list */
+	if (focus_id != BD_NONE && pool[focus_id].alive &&
+	    pool[focus_id].type == BD_LIST && ev->type == BD_EV_KEY_DOWN) {
+		if (list_key(focus_id, ev->key, ev->mods))
+			return 1;
+	}
+
 	/* Enter or Space activates a focused button */
 	if (focus_id != BD_NONE && pool[focus_id].alive &&
 	    pool[focus_id].type == BD_BUTTON) {
@@ -2034,6 +2227,13 @@ bd_gui_event(const bd_event *ev)
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL: {
+		bd_id li = hit_interactive(frame, mouse_x, mouse_y);
+		if (li != BD_NONE && pool[li].type == BD_LIST) {
+			pool[li].scroll_y -= ev->scroll_dy * (float)ml_line_h();
+			if (pool[li].scroll_y < 0.0f)
+				pool[li].scroll_y = 0.0f;
+			return 1;
+		}
 		bd_id ext = hit_extension(frame, mouse_x, mouse_y);
 		if (ext != BD_NONE && ext_event(ext, ev))
 			return 1;
@@ -2063,6 +2263,26 @@ bd_gui_event(const bd_event *ev)
 					multiline_click(hit, mx, my);
 				else
 					input_click(hit, mx);
+				return 1;
+			}
+
+			if (hit != BD_NONE && pool[hit].type == BD_LIST) {
+				focus_id = hit;
+				int row = list_click(hit, my);
+				double now = be->time();
+				if (row >= 0 && hit == list_last_id &&
+				    row == list_last_row &&
+				    now - list_last_time < 0.4) {
+					/* double-click activates */
+					struct widget *l = &pool[hit];
+					if (l->on_click)
+						l->on_click(hit, l->on_click_data);
+					list_last_id = BD_NONE;
+				} else {
+					list_last_id = hit;
+					list_last_row = row;
+					list_last_time = now;
+				}
 				return 1;
 			}
 

@@ -112,6 +112,15 @@ const bd_theme *bd_gui_theme(void);
  * click and on Tab / Shift-Tab traversal. */
 bd_id bd_focused(void);
 
+/* BD_LIST: a scrolling, selectable list of newline-separated items. Set the
+ * items with BD_LABEL_S (or bd_list_set_items); the selection callback runs on
+ * activation (double-click or Enter) via BD_ON_CLICK_F. The host reads the
+ * selected row index (-1 if none) and can set it. */
+void bd_list_set_items(bd_id id, const char *newline_separated);
+int  bd_list_count(bd_id id);
+int  bd_list_selected(bd_id id);
+void bd_list_select(bd_id id, int row);
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a

@@ -96,7 +96,11 @@ geometry (`BD_PREF_W_I`, `BD_GROW_I`, `BD_PAD_I`, `BD_GAP_I`), layout
 (`BD_LAYOUT_I` with `BD_LAYOUT_ROW`/`COL`/`FIXED`), text (`BD_LABEL_S`), color
 (`BD_FG_C`, `BD_BG_C`), and callbacks (`BD_ON_CLICK_F`). Built-in types include
 `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`,
-`BD_MULTILINE`, and `BD_INPUT_LINE`. `BD_TEXT` is a single-line field:
+`BD_MULTILINE`, `BD_LIST`, and `BD_INPUT_LINE`. `BD_LIST` is a
+scrolling/selectable list of `\n`-separated items (`BD_LABEL_S` or
+`bd_list_set_items`); `bd_list_selected`/`bd_list_select` read/set the row and
+`BD_ON_CLICK_F` fires on activation (double-click or Enter). `BD_TEXT` is a
+single-line field:
 set/read its contents with `bd_set`/`bd_get_s(id, BD_LABEL_S)`; Enter fires
 `BD_ON_CLICK_F` without clearing (`BD_INPUT_LINE` clears, for a command line).
 `BD_MULTILINE` is the multi-line editor (Enter inserts a newline; Up/Down,

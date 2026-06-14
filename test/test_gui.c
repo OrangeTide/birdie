@@ -731,6 +731,39 @@ main(void)
 	    n_drawverts > 0 && strcmp(rb, "ZT:Song\nK:G\nCDEF") == 0);
 	bd_gui_cleanup();
 
+	/* ---- BD_LIST scrolling/selectable list ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id lif = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id lst = bd_create(lif, BD_LIST, BD_GROW_I, 1,
+	    BD_LABEL_S, "alpha\nbeta\ngamma\ndelta",
+	    BD_ON_CLICK_F, on_click, BD_END);
+	bd_gui_layout(800, 600);
+	check("list_count counts items", bd_list_count(lst) == 4);
+
+	int lx, ly, lw, lh_, lh = (int)bd_draw_line_height();
+	bd_widget_rect(lst, &lx, &ly, &lw, &lh_);
+	int rowy = ly + 2 + 1 * lh + lh / 2;     /* row 1 (pad 2) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=lx+5, .y=rowy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=lx+5, .y=rowy });
+	check("clicking selects a row + focuses",
+	    bd_list_selected(lst) == 1 && bd_focused() == lst);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	check("Down moves selection", bd_list_selected(lst) == 2);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_END });
+	check("End selects the last row", bd_list_selected(lst) == 3);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	check("Home selects the first row", bd_list_selected(lst) == 0);
+
+	int lc = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter activates the selection", clicked == lc + 1);
+
+	bd_list_select(lst, 2);
+	check("bd_list_select sets the row", bd_list_selected(lst) == 2);
+	bd_gui_render();   /* exercises the list render/scissor path */
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

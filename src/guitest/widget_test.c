@@ -196,6 +196,14 @@ on_new_window(bd_id id, void *arg)
 	bd_editor_highlight_row(med, 3,
 		(bd_rich_style){ BD_RT_BOLD, 0x202020FFu, 0xFFD54AFFu });
 
+	bd_create(body, BD_LABEL, BD_LABEL_S, "Recent (BD_LIST):",
+		BD_PREF_H_I, 16, BD_END);
+	bd_create(body, BD_LIST, BD_PREF_H_I, 72,
+		BD_LABEL_S, "Aardwolf  (yesterday)\nBatMUD  (last week)\n"
+		"Discworld  (last month)\nLensmoor  (2 months ago)",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"connect to recent",
+		BD_END);
+
 	bd_id bar = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
 		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
