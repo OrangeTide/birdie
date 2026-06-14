@@ -35,7 +35,7 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 # The bundle is source-only; consumers supply ludica (reference backend +
 # GUI font) and libvt (terminal widget) themselves.
 # ----------------------------------------------------------------------
-GUI_VERSION ?= 0.1.0
+GUI_VERSION ?= 0.2.0
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip
