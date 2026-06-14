@@ -552,7 +552,9 @@ main(void)
 	    exp_name_n == 2 && exp_name_key == 100 &&
 	    strcmp(exp_name_buf, "a!") == 0);
 
-	bd_gui_render();   /* exercises the band/selection render path */
+	n_scissor = 0;
+	bd_gui_render();   /* exercises the band/selection/clip render path */
+	check("explorer clips its content with scissor", n_scissor > 0);
 	bd_gui_cleanup();
 
 	/* ---- Tab focus traversal across widget kinds ---- */

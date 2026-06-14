@@ -283,9 +283,10 @@ be_destroy_texture(bd_texture t)
 static void
 be_scissor(int x, int y, int w, int h)
 {
-	/* toolkit clip is top-left pixels; GL scissor origin is bottom-left */
+	/* toolkit clip is top-left pixels; GL scissor origin is bottom-left.
+	 * Flip against the window being rendered, not always the primary. */
 	glEnable(GL_SCISSOR_TEST);
-	glScissor(x, win_height() - (y + h), w, h);
+	glScissor(x, be_height() - (y + h), w, h);
 }
 
 static void be_scissor_off(void) { glDisable(GL_SCISSOR_TEST); }

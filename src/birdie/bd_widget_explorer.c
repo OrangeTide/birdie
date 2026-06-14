@@ -18,10 +18,9 @@
  * Enter / Ctrl-A, Shift extends), a focus ring, in-place rename (F2 or
  * bd_explorer_begin_rename(); a small UTF-8 line editor committing via
  * model.set_name), and the accessor API. The widget takes keyboard focus when
- * clicked.
+ * clicked. The scrolling content is scissor-clipped to the panel interior.
  *
  * TODO (the interaction still to fill in):
- *   - scissor-clip the scrolled content to the widget bounds
  *   - label truncation / ellipsis
  *   - list/details view modes
  *
@@ -654,11 +653,15 @@ explorer_render(bd_id id, void *state)
 	int x, y, w, h;
 	bd_widget_rect(id, &x, &y, &w, &h);
 
-	/* recessed panel + outline */
+	/* recessed panel + outline, drawn before the clip so the border stays
+	 * crisp */
 	bd_draw_rect(x, y, w, h, th->press);
 	bd_draw_rect_lines(x, y, w, h, th->border);
 
-	/* TODO: scissor to (x,y,w,h) so scrolled cells clip at the edges */
+	/* clip the scrolling content to the panel interior (inside the border) */
+	const bd_backend *be = bd_backend_get();
+	bd_draw_flush();
+	be->scissor(x + 1, y + 1, w - 2, h - 2);
 
 	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
 	int slot = 0;
@@ -726,6 +729,10 @@ explorer_render(bd_id id, void *state)
 			    (int)bd_draw_line_height(), th->text_hi);
 		}
 	}
+
+	/* commit the clipped content and lift the scissor */
+	bd_draw_flush();
+	be->scissor_off();
 }
 
 /* ------------------------------------------------------------------ */

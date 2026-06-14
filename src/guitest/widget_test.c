@@ -109,9 +109,12 @@ on_xy(bd_id id, void *arg, float x, float y)
 
 /* ---- a small explorer model (drag to rearrange, F2 to rename) ---- */
 static struct srv { uint64_t key; char name[24]; int x, y; } servers[] = {
-	{ 1, "Aardwolf",   -1, -1 }, { 2, "BatMUD",   -1, -1 },
-	{ 3, "Discworld",  -1, -1 }, { 4, "Lensmoor", -1, -1 },
-	{ 5, "Nanvaent",   -1, -1 }, { 6, "Threshold",-1, -1 },
+	{ 1, "Aardwolf",  -1, -1 }, { 2, "BatMUD",    -1, -1 },
+	{ 3, "Discworld", -1, -1 }, { 4, "Lensmoor",  -1, -1 },
+	{ 5, "Nanvaent",  -1, -1 }, { 6, "Threshold", -1, -1 },
+	{ 7, "Achaea",    -1, -1 }, { 8, "Genesis",   -1, -1 },
+	{ 9, "Realms",    -1, -1 }, { 10, "Medievia", -1, -1 },
+	{ 11, "Gemstone", -1, -1 }, { 12, "Armageddon",-1, -1 },
 };
 static int srv_count(void *ctx){ (void)ctx; return (int)(sizeof servers / sizeof *servers); }
 static void
