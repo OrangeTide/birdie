@@ -42,6 +42,11 @@ int bd_draw_win_h(void);
 void bd_draw_rect(float x, float y, float w, float h, uint32_t rgba);
 void bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba);
 
+/* Filled convex quad from four corners (in order), e.g. a folder-tab
+ * trapezoid. Solid color. */
+void bd_draw_quad(float x0, float y0, float x1, float y1,
+                  float x2, float y2, float x3, float y3, uint32_t rgba);
+
 /* Tinted textured quad. Source rect is normalized texture coords [0,1]. */
 void bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
                     float u0, float v0, float u1, float v1, uint32_t rgba);

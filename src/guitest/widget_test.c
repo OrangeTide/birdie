@@ -271,6 +271,10 @@ build_ui(void)
 	bd_create(m_view, BD_BUTTON, BD_LABEL_S, "Toggle B",
 		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"View > B", BD_END);
 
+	/* session tabs (skeuomorphic folder tabs) */
+	bd_create(frame, BD_TAB_BAR, BD_PREF_H_I, 26,
+		BD_LABEL_S, "Aardwolf\nBatMUD\nlocalhost", BD_END);
+
 	/* ---- body: terminal/input on the left, widget exhibits on the right ---- */
 	bd_id body = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1,

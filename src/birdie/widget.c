@@ -411,11 +411,48 @@ ml_line_index(const char *buf, int pos)
 	return n;
 }
 
-/* BD_LIST: number of '\n'-separated items in text_buf */
+/* BD_LIST / BD_TAB_BAR: number of '\n'-separated items in text_buf */
 static int
 list_count(const struct widget *w)
 {
 	return w->text_len > 0 ? ml_line_index(w->text_buf, w->text_len) + 1 : 0;
+}
+
+/* BD_TAB_BAR folder-tab geometry */
+#define TAB_SLANT 10    /* angled shoulder width, px */
+#define TAB_HPAD  12    /* text padding inside the flat top, px */
+
+/* copy tab `idx`'s label into buf (NUL-terminated); returns its width in px */
+static int
+tab_label(const struct widget *w, int idx, char *buf, int cap)
+{
+	int pos = 0;
+	for (int i = 0; i < idx; i++) {
+		pos = ml_line_end(w->text_buf, w->text_len, pos);
+		if (pos < w->text_len) pos++;
+	}
+	int le = ml_line_end(w->text_buf, w->text_len, pos);
+	int n = le - pos;
+	if (n > cap - 1) n = cap - 1;
+	if (n > 0) memcpy(buf, w->text_buf + pos, (size_t)n);
+	buf[n < 0 ? 0 : n] = '\0';
+	return (int)chrome_text_w(buf) + 2 * TAB_HPAD + 2 * TAB_SLANT;
+}
+
+/* index of the tab under x (bar-relative bounding boxes), or -1 */
+static int
+tab_at(const struct widget *w, int mx)
+{
+	int n = list_count(w);
+	int tx = w->x;
+	char buf[256];
+	for (int i = 0; i < n; i++) {
+		int tw = tab_label(w, i, buf, sizeof buf);
+		if (mx >= tx && mx < tx + tw)
+			return i;
+		tx += tw;
+	}
+	return -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -455,8 +492,8 @@ apply_s(struct widget *w, int attr, const char *val)
 			w->text_len = n;
 			w->cursor = n;
 			w->sel_anchor = -1;
-		} else if (w->type == BD_LIST && val) {
-			/* '\n'-separated items; cursor is the selected row */
+		} else if ((w->type == BD_LIST || w->type == BD_TAB_BAR) && val) {
+			/* '\n'-separated items; cursor is the selected row/tab */
 			int n = (int)strlen(val);
 			if (n >= (int)sizeof(w->text_buf))
 				n = (int)sizeof(w->text_buf) - 1;
@@ -615,6 +652,12 @@ defaults(struct widget *w, int type)
 		w->pref_h = (int)CHROME_FONT_SZ * 6 + 8;
 		w->pad = 2;
 		w->cursor = -1;       /* selected row index; -1 = none */
+		break;
+	case BD_TAB_BAR:
+		w->bg = theme.bg;
+		w->fg = theme.text;
+		w->pref_h = (int)CHROME_FONT_SZ + 12;
+		w->cursor = 0;        /* active tab index */
 		break;
 	}
 }
@@ -982,6 +1025,34 @@ layout_children(bd_id id)
 /* rendering                                                          */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Draw one folder tab. The trapezoid (angled shoulders) sits on the content
+ * line; the active tab is raised, drawn in the content face, and (because it
+ * is drawn after the baseline) merges with the panel below. A light band along
+ * the flat top gives the raised, dimensional look.
+ */
+static void
+draw_tab(const struct widget *w, int tx, int tw, const char *label,
+    int active, int focused)
+{
+	int top = w->y + (active ? 2 : 5);
+	int bot = w->y + w->h;
+	uint32_t face = active ? theme.widget : theme.press;
+
+	bd_draw_quad((float)tx, (float)bot,
+	    (float)(tx + TAB_SLANT), (float)top,
+	    (float)(tx + tw - TAB_SLANT), (float)top,
+	    (float)(tx + tw), (float)bot, face);
+	/* highlight band across the flat top */
+	uint32_t hi = (active && focused) ? theme.focus : theme.hover;
+	fill_rect(tx + TAB_SLANT, top, tw - 2 * TAB_SLANT, 2, hi);
+
+	float twpx = chrome_text_w(label);
+	float lx = (float)tx + ((float)tw - twpx) * 0.5f;
+	float by = chrome_baseline_y(top, bot - top);
+	queue_text(label, lx, by, active ? theme.text_hi : theme.text);
+}
+
 static void
 render_widget(bd_id id)
 {
@@ -1210,6 +1281,39 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_TAB_BAR: {
+		int focused = (focus_id == id);
+		int n = list_count(w);
+		fill_rect(w->x, w->y, w->w, w->h, theme.bg);
+
+		bd_draw_flush();
+		be->scissor(w->x, w->y, w->w, w->h);
+
+		/* inactive tabs first, then the content line, then the active tab
+		 * on top so it merges with the panel below */
+		int tx = w->x;
+		int act_tx = 0, act_tw = 0, have_act = 0;
+		char act_lbl[256];
+		char lbl[256];
+		for (int i = 0; i < n; i++) {
+			int tw = tab_label(w, i, lbl, sizeof lbl);
+			if (i == w->cursor) {
+				act_tx = tx; act_tw = tw; have_act = 1;
+				memcpy(act_lbl, lbl, sizeof lbl);
+			} else {
+				draw_tab(w, tx, tw, lbl, 0, focused);
+			}
+			tx += tw;
+		}
+		fill_rect(w->x, w->y + w->h - 2, w->w, 2, theme.border);
+		if (have_act)
+			draw_tab(w, act_tx, act_tw, act_lbl, 1, focused);
+
+		bd_draw_flush();
+		be->scissor_off();
+		break;
+	}
+
 	default: {
 		const bd_widget_class *cls = class_of(w->type);
 		if (cls && cls->render)
@@ -1222,7 +1326,7 @@ render_widget(bd_id id)
 
 	const bd_widget_class *cls = class_of(w->type);
 	int leaf = (w->type == BD_MENU || is_text_field(w->type) ||
-	    w->type == BD_LIST ||
+	    w->type == BD_LIST || w->type == BD_TAB_BAR ||
 	    (cls && !cls->contains_children));
 	if (!leaf) {
 		bd_id c;
@@ -1267,8 +1371,8 @@ hit_interactive(bd_id id, int mx, int my)
 	}
 	if (found != BD_NONE)
 		return found;
-	if ((w->on_click || is_text_field(w->type) || w->type == BD_LIST) &&
-	    w->enabled)
+	if ((w->on_click || is_text_field(w->type) || w->type == BD_LIST ||
+	    w->type == BD_TAB_BAR) && w->enabled)
 		return id;
 	return BD_NONE;
 }
@@ -1929,6 +2033,27 @@ list_key(bd_id id, int key, unsigned mods)
 }
 
 /* ------------------------------------------------------------------ */
+/* BD_TAB_BAR                                                         */
+/* ------------------------------------------------------------------ */
+
+/* set the active tab (clamped) and fire the change callback */
+static void
+tabbar_activate(bd_id id, int idx)
+{
+	struct widget *w = &pool[id];
+	int n = list_count(w);
+	if (n == 0)
+		return;
+	if (idx < 0) idx = 0;
+	if (idx >= n) idx = n - 1;
+	if (idx == w->cursor)
+		return;
+	w->cursor = idx;
+	if (w->on_click)
+		w->on_click(id, w->on_click_data);
+}
+
+/* ------------------------------------------------------------------ */
 /* public: lifecycle                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -2065,7 +2190,8 @@ is_focusable(bd_id id)
 	struct widget *w = &pool[id];
 	if (!w->alive || !w->visible || !w->enabled)
 		return 0;
-	if (is_text_field(w->type) || w->type == BD_LIST)
+	if (is_text_field(w->type) || w->type == BD_LIST ||
+	    w->type == BD_TAB_BAR)
 		return 1;
 	if (w->type == BD_BUTTON)
 		return w->on_click != NULL;
@@ -2153,6 +2279,41 @@ bd_list_select(bd_id id, int row)
 	list_ensure_visible(&pool[id]);
 }
 
+void
+bd_tabbar_set_tabs(bd_id id, const char *tabs)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
+		return;
+	bd_set(id, BD_LABEL_S, tabs, BD_END);
+}
+
+int
+bd_tabbar_count(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
+		return 0;
+	return list_count(&pool[id]);
+}
+
+int
+bd_tabbar_active(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
+		return -1;
+	return pool[id].cursor;
+}
+
+void
+bd_tabbar_set_active(bd_id id, int index)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
+		return;
+	int n = list_count(&pool[id]);
+	if (index < 0) index = 0;
+	if (index >= n) index = n - 1;
+	pool[id].cursor = index;   /* programmatic set: no callback */
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2193,6 +2354,19 @@ bd_gui_event(const bd_event *ev)
 	    pool[focus_id].type == BD_LIST && ev->type == BD_EV_KEY_DOWN) {
 		if (list_key(focus_id, ev->key, ev->mods))
 			return 1;
+	}
+
+	/* Left/Right switch tabs on a focused tab bar */
+	if (focus_id != BD_NONE && pool[focus_id].alive &&
+	    pool[focus_id].type == BD_TAB_BAR && ev->type == BD_EV_KEY_DOWN) {
+		if (ev->key == BD_KEY_LEFT) {
+			tabbar_activate(focus_id, pool[focus_id].cursor - 1);
+			return 1;
+		}
+		if (ev->key == BD_KEY_RIGHT) {
+			tabbar_activate(focus_id, pool[focus_id].cursor + 1);
+			return 1;
+		}
 	}
 
 	/* Enter or Space activates a focused button */
@@ -2283,6 +2457,14 @@ bd_gui_event(const bd_event *ev)
 					list_last_row = row;
 					list_last_time = now;
 				}
+				return 1;
+			}
+
+			if (hit != BD_NONE && pool[hit].type == BD_TAB_BAR) {
+				focus_id = hit;
+				int t = tab_at(&pool[hit], mx);
+				if (t >= 0)
+					tabbar_activate(hit, t);
 				return 1;
 			}
 

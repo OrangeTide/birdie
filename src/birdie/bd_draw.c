@@ -311,6 +311,30 @@ bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba)
 	quad(white, x + w - 1, y,         1, h, 0, 0, 1, 1, rgba);
 }
 
+/* Filled convex quad from four arbitrary corners (e.g. a folder-tab
+ * trapezoid). Corners in order; solid color via the 1x1 white texture. */
+void
+bd_draw_quad(float x0, float y0, float x1, float y1,
+    float x2, float y2, float x3, float y3, uint32_t rgba)
+{
+	if (!batch_active)
+		return;
+	if (cur_tex.id != white.id) {
+		flush();
+		cur_tex = white;
+	}
+	if (nverts + 6 > MAX_VERTS)
+		flush();
+	float r, g, b, a;
+	unpack(rgba, &r, &g, &b, &a);
+	bd_vertex v0 = { x0, y0, 0, 0, r, g, b, a };
+	bd_vertex v1 = { x1, y1, 0, 0, r, g, b, a };
+	bd_vertex v2 = { x2, y2, 0, 0, r, g, b, a };
+	bd_vertex v3 = { x3, y3, 0, 0, r, g, b, a };
+	verts[nverts++] = v0; verts[nverts++] = v1; verts[nverts++] = v2;
+	verts[nverts++] = v0; verts[nverts++] = v2; verts[nverts++] = v3;
+}
+
 void
 bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
     float u0, float v0, float u1, float v1, uint32_t rgba)

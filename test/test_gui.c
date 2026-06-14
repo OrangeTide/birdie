@@ -764,6 +764,36 @@ main(void)
 	bd_gui_render();   /* exercises the list render/scissor path */
 	bd_gui_cleanup();
 
+	/* ---- BD_TAB_BAR folder tabs ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id tbf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id tb = bd_create(tbf, BD_TAB_BAR, BD_PREF_H_I, 28,
+	    BD_LABEL_S, "Aardwolf\nBatMUD\nDiscworld",
+	    BD_ON_CLICK_F, on_click, BD_END);
+	bd_gui_layout(800, 600);
+	check("tabbar_count counts tabs", bd_tabbar_count(tb) == 3);
+	check("first tab active by default", bd_tabbar_active(tb) == 0);
+
+	int tbx, tby, tbw, tbh;
+	bd_widget_rect(tb, &tbx, &tby, &tbw, &tbh);
+	int tab0w = (int)bd_draw_text_width("Aardwolf") + 44; /* text + 2*pad+2*slant */
+	int tcx = tbx + tab0w + 10, tcy = tby + tbh / 2;     /* inside tab 1 */
+	int tc = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tcx, .y=tcy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tcx, .y=tcy });
+	check("clicking a tab activates it + fires",
+	    bd_tabbar_active(tb) == 1 && clicked == tc + 1);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
+	check("Right moves to the next tab", bd_tabbar_active(tb) == 2);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_LEFT });
+	check("Left moves to the previous tab", bd_tabbar_active(tb) == 1);
+
+	bd_tabbar_set_active(tb, 0);
+	check("bd_tabbar_set_active sets the tab", bd_tabbar_active(tb) == 0);
+	bd_gui_render();   /* exercises the folder-tab render path */
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

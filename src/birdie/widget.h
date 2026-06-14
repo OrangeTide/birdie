@@ -121,6 +121,15 @@ int  bd_list_count(bd_id id);
 int  bd_list_selected(bd_id id);
 void bd_list_select(bd_id id, int row);
 
+/* BD_TAB_BAR: a row of skeuomorphic folder tabs for multiple sessions. Set the
+ * tab labels with BD_LABEL_S (or bd_tabbar_set_tabs); the active tab is index
+ * 0 by default. Clicking a tab or Left/Right (when focused) changes it and
+ * fires BD_ON_CLICK_F; the host reads/sets the active index. */
+void bd_tabbar_set_tabs(bd_id id, const char *newline_separated);
+int  bd_tabbar_count(bd_id id);
+int  bd_tabbar_active(bd_id id);
+void bd_tabbar_set_active(bd_id id, int index);
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a

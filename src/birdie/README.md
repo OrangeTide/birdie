@@ -96,7 +96,10 @@ geometry (`BD_PREF_W_I`, `BD_GROW_I`, `BD_PAD_I`, `BD_GAP_I`), layout
 (`BD_LAYOUT_I` with `BD_LAYOUT_ROW`/`COL`/`FIXED`), text (`BD_LABEL_S`), color
 (`BD_FG_C`, `BD_BG_C`), and callbacks (`BD_ON_CLICK_F`). Built-in types include
 `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`,
-`BD_MULTILINE`, `BD_LIST`, and `BD_INPUT_LINE`. `BD_LIST` is a
+`BD_MULTILINE`, `BD_LIST`, `BD_TAB_BAR`, and `BD_INPUT_LINE`. `BD_TAB_BAR` is a
+row of skeuomorphic folder tabs (labels via `BD_LABEL_S`/`bd_tabbar_set_tabs`;
+`bd_tabbar_active`/`bd_tabbar_set_active`; `BD_ON_CLICK_F` fires on tab change).
+`BD_LIST` is a
 scrolling/selectable list of `\n`-separated items (`BD_LABEL_S` or
 `bd_list_set_items`); `bd_list_selected`/`bd_list_select` read/set the row and
 `BD_ON_CLICK_F` fires on activation (double-click or Enter). `BD_TEXT` is a

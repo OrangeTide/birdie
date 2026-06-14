@@ -160,8 +160,8 @@ What is built:
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
   `BD_MENU` (+ pinnable pushpins), `BD_TEXT` (single-line field),
   `BD_MULTILINE` (multi-line editor), `BD_LIST` (scrolling/selectable list),
-  `BD_INPUT_LINE`, and the `BD_TERMINAL` extension (libvt). Flexbox row/col +
-  fixed layout.
+  `BD_TAB_BAR` (skeuomorphic folder tabs), `BD_INPUT_LINE`, and the
+  `BD_TERMINAL` extension (libvt). Flexbox row/col + fixed layout.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
@@ -172,9 +172,9 @@ What is built:
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 
-Not yet built: `BD_SCROLLBAR`, `BD_NOTICE`, `BD_TAB_BAR` (still enum-only);
-IME/compose; clipboard; multitouch; pen. These are tracked in the roadmap and
-widget-set sections.
+Not yet built: `BD_SCROLLBAR`, `BD_NOTICE` (still enum-only); IME/compose;
+clipboard; multitouch; pen. These are tracked in the roadmap and widget-set
+sections.
 
 ## v1.0 widget set
 
@@ -194,7 +194,7 @@ are extensions (`widget_ext.h`) and so are not in this core set.
 | `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | no   |
 | `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
 | `BD_NOTICE`      | modal confirmation / alert                          | no   |
-| `BD_TAB_BAR`     | tabs for multiple concurrent MUD sessions           | no   |
+| `BD_TAB_BAR`     | tabs for multiple concurrent MUD sessions           | yes  |
 | `BD_TERMINAL`    | the MUD output widget (custom renderer)             | yes  |
 | `BD_INPUT_LINE`  | the MUD command input (history, completion)         | yes  |
 
@@ -240,6 +240,8 @@ On top of that, the toolkit's renderer **`bd_draw.c`** offers the higher-level
 primitives widgets actually call:
 
 - filled / stroked rect (chrome panels, borders, selection)
+- filled convex quad from four corners (`bd_draw_quad`) for trapezoids like
+  the folder tabs
 - textured sprite / quad (glyph atlas, icon textures, SIXEL/MXP later)
 - text run (stb_truetype atlases baked from the chrome TTFs — a proportional
   and a fixed-width family, each in regular/bold/italic/bold-italic, selected
