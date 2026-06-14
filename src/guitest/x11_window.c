@@ -595,6 +595,22 @@ win_poll(win_event *ev)
             clip_serve(&xev.xselectionrequest);
             continue;
         }
+        /* X11 auto-repeat is a KeyRelease immediately followed by a KeyPress
+         * with the same keycode and time: collapse the pair into one repeat
+         * key-down, dropping the release. */
+        if (xev.type == KeyRelease && XPending(g.xdisplay)) {
+            XEvent nx;
+            XPeekEvent(g.xdisplay, &nx);
+            if (nx.type == KeyPress && nx.xkey.keycode == xev.xkey.keycode
+                && nx.xkey.time == xev.xkey.time) {
+                XNextEvent(g.xdisplay, &nx);
+                if (translate(&nx, ev)) {
+                    ev->repeat = 1;
+                    return 1;
+                }
+                continue;
+            }
+        }
         if (translate(&xev, ev))
             return 1;
     }

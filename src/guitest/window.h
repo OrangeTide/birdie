@@ -77,6 +77,7 @@ typedef struct {
     int      button;        /* WIN_MOUSE_* (mouse down / up) */
     float    scroll_dy;     /* wheel delta (scroll) */
     int      key;           /* WIN_KEY_* (key down / up) */
+    int      repeat;        /* key down: 1 if an auto-repeat */
     unsigned codepoint;     /* Unicode codepoint (char) */
     int      width, height; /* new size (resize) */
     int      window;        /* originating window id (1 = primary) */

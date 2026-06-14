@@ -2758,9 +2758,10 @@ bd_gui_event(const bd_event *ev)
 		}
 	}
 
-	/* keyboard events for a focused extension widget (e.g. explorer nav) */
+	/* keyboard events (incl. key-up) for a focused extension widget */
 	if (focus_id != BD_NONE && pool[focus_id].alive &&
-	    (ev->type == BD_EV_KEY_DOWN || ev->type == BD_EV_CHAR)) {
+	    (ev->type == BD_EV_KEY_DOWN || ev->type == BD_EV_KEY_UP ||
+	     ev->type == BD_EV_CHAR)) {
 		const bd_widget_class *cls = class_of(pool[focus_id].type);
 		if (cls && cls->event && ext_event(focus_id, ev))
 			return 1;

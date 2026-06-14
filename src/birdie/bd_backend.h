@@ -37,6 +37,7 @@ enum bd_ev_type {
 	BD_EV_MOUSE_SCROLL,
 	BD_EV_KEY_DOWN,
 	BD_EV_CHAR,
+	BD_EV_KEY_UP,
 };
 
 /* Mouse buttons. */
@@ -84,7 +85,8 @@ typedef struct {
 	int      x, y;          /* mouse position (move / button) */
 	int      button;        /* BD_MOUSE_* (mouse down / up) */
 	float    scroll_dy;     /* wheel delta (scroll) */
-	int      key;           /* BD_KEY_* (key down) */
+	int      key;           /* BD_KEY_* (key down / up) */
+	int      repeat;        /* key down: 1 if an auto-repeat, else 0 */
 	unsigned codepoint;     /* Unicode codepoint (char) */
 	int      window;        /* originating window id (0 = primary). Backends
 	                           without multi_window leave this 0. */

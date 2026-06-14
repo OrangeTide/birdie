@@ -197,6 +197,21 @@ static const bd_widget_class rec_class = {
 };
 static int rec_type;
 
+/* ---- key-event recording extension (key-down/up + repeat) ---- */
+static int key_dn, key_up, key_rep;
+static int
+keyrec_event(bd_id id, void *st, const bd_event *ev)
+{
+	(void)id; (void)st;
+	if (ev->type == BD_EV_KEY_DOWN) { key_dn++; if (ev->repeat) key_rep++; return 1; }
+	if (ev->type == BD_EV_KEY_UP)   { key_up++; return 1; }
+	if (ev->type == BD_EV_MOUSE_DOWN) return 1;   /* accept focus on click */
+	return 0;
+}
+static const bd_widget_class keyrec_class = {
+	.name = "keyrec", .state_size = 0, .event = keyrec_event,
+};
+
 static bd_event
 mouse(int type, int x, int y)
 {
@@ -915,6 +930,26 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='V', .mods=BD_MOD_CTRL });
 	check("paste preserves newlines in BD_MULTILINE",
 	    strcmp(bd_get_s(cml, BD_LABEL_S), "a\nb") == 0);
+	bd_gui_cleanup();
+
+	/* ---- key-up + repeat delivered to a focused extension ---- */
+	bd_gui_init(&stub, NULL);
+	int krt = bd_register_widget_class(&keyrec_class);
+	bd_id krf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id krw = bd_create(krf, krt, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+	int krx, kry, krw_, krh;
+	bd_widget_rect(krw, &krx, &kry, &krw_, &krh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=krx+5, .y=kry+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=krx+5, .y=kry+5 });
+	check("clicking focuses the extension", bd_focused() == krw);
+
+	key_dn = key_up = key_rep = 0;
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A, .repeat=1 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_UP,   .key=BD_KEY_A });
+	check("extension receives key-down, repeat, and key-up",
+	    key_dn == 2 && key_rep == 1 && key_up == 1);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);

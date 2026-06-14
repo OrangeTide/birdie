@@ -389,13 +389,19 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 	case WIN_EV_KEY_DOWN:
 		e.type = BD_EV_KEY_DOWN;
 		e.key = ev->key;
+		e.repeat = ev->repeat;
+		break;
+	case WIN_EV_KEY_UP:
+		e.type = BD_EV_KEY_UP;
+		e.key = ev->key;
 		break;
 	case WIN_EV_CHAR:
 		e.type = BD_EV_CHAR;
 		e.codepoint = ev->codepoint;
+		e.repeat = ev->repeat;
 		break;
 	default:
-		return 0;       /* close, resize, key-up: no bd_event yet */
+		return 0;       /* close, resize: no bd_event */
 	}
 
 	*out = e;

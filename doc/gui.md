@@ -175,8 +175,8 @@ What is built:
 - **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`
   (X11 CLIPBOARD on the GLES backend; ludica backend NULL for now).
 
-Not yet built: IME/compose; multitouch; pen; key-up/repeat. These are tracked
-in the roadmap section.
+Not yet built: IME/compose; multitouch; pen. These are tracked in the roadmap
+section.
 
 ## v1.0 widget set
 
@@ -621,9 +621,11 @@ copy/cut still needs a selection, so it is single-line-field-only until
   the current frame's input lines, buttons, and extension widgets (menus
   excluded), wrapping; focused buttons get a ring and Enter/Space activation;
   `bd_focused()` exposes the focus. Per-window scoping uses `ev->window`.
-- **Key-up events and a repeat flag** on `bd_event`. Cheap to add while the
-  struct is already being broken, and useful for held-key interactions. Still
-  to do.
+- **Key-up events and a repeat flag** on `bd_event` — **done**. `BD_EV_KEY_UP`
+  plus `bd_event.repeat` (1 on an auto-repeat key-down). Both backends emit
+  them (the GLES backend collapses X11's release/press auto-repeat pair into
+  one repeat key-down). Key-up routes to the focused extension widget; core
+  widgets act on key-down only.
 
 ### Multitouch gestures
 

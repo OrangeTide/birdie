@@ -235,6 +235,11 @@ bd_event_from_lud(const lud_event_t *ev, bd_event *out)
 	case LUD_EV_KEY_DOWN:
 		e.type = BD_EV_KEY_DOWN;
 		e.key = map_key(ev->key.keycode);
+		e.repeat = ev->key.repeat;
+		break;
+	case LUD_EV_KEY_UP:
+		e.type = BD_EV_KEY_UP;
+		e.key = map_key(ev->key.keycode);
 		break;
 	case LUD_EV_CHAR:
 		e.type = BD_EV_CHAR;
