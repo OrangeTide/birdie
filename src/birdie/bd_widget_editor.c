@@ -488,6 +488,19 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 	case BD_KEY_ENTER:
 		editor_insert(e, '\n');
 		break;
+	case 'V':       /* Ctrl-V: paste at the cursor */
+		if (ev->mods & BD_MOD_CTRL) {
+			const bd_backend *be = bd_backend_get();
+			const char *t = (!e->locked && be->clipboard_get)
+			    ? be->clipboard_get() : NULL;
+			if (t) {
+				int n = (int)strlen(t);
+				e_splice(e, e->cursor, 0, t, n);
+				e->cursor += n;
+			}
+			return 1;
+		}
+		return 0;
 	case BD_KEY_BACKSPACE:
 		if (!e->locked && e->cursor > 0) {
 			int p = e_prev(e->buf, e->cursor);

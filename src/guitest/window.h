@@ -118,4 +118,9 @@ int  win_window_width(int id);
 int  win_window_height(int id);
 void win_window_set_title(int id, const char *title);
 
+/* system clipboard (X11 CLIPBOARD). get returns a pointer valid until the next
+ * clipboard call, or NULL if empty. */
+void        win_clipboard_set(const char *utf8);
+const char *win_clipboard_get(void);
+
 #endif

@@ -326,6 +326,10 @@ Shaders are GLES3 (`#version 300 es`); alpha blending is on.
 `bd_backend_ludica.c` is the reference; a raw X11/EGL/GLES backend lives in
 `src/guitest/` (which also has a standalone widget gallery).
 
+**Clipboard (optional).** Provide `clipboard_set(utf8)` / `clipboard_get()`
+and the text fields gain Ctrl-C/X/V; the GLES backend implements them on the
+X11 CLIPBOARD selection. Leave them NULL for no clipboard (a safe no-op).
+
 **Multiple windows (optional).** Set `multi_window = 1` and provide the
 `window_*` hooks (`window_open` / `close` / `begin` / `swap` / `width` /
 `height` / `set_title`). Each top-level `BD_FRAME` then maps to a native

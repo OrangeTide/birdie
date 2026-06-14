@@ -14,12 +14,15 @@
 #include "window.h"
 
 #include <locale.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 #include <X11/keysym.h>
 
 #include <EGL/egl.h>
@@ -61,12 +64,14 @@ struct win_slot {
 static struct {
     Display   *xdisplay;
     Atom       wm_delete_window;
+    Atom       a_clipboard, a_utf8, a_targets, a_prop;
     XIM        xim;
     EGLDisplay egl_display;
     EGLConfig  egl_config;
     EGLContext egl_context;
     struct win_slot windows[MAX_WINDOWS];   /* slot 0 is window id 1 */
     int        next_id;
+    char       clip[4096];                  /* our owned clipboard text */
 } g;
 
 /* ------------------------------------------------------------------ */
@@ -190,6 +195,10 @@ win_open(const char *title, int width, int height)
         return -1;
 
     g.wm_delete_window = XInternAtom(g.xdisplay, "WM_DELETE_WINDOW", False);
+    g.a_clipboard = XInternAtom(g.xdisplay, "CLIPBOARD", False);
+    g.a_utf8      = XInternAtom(g.xdisplay, "UTF8_STRING", False);
+    g.a_targets   = XInternAtom(g.xdisplay, "TARGETS", False);
+    g.a_prop      = XInternAtom(g.xdisplay, "BD_CLIPBOARD", False);
 
     g.egl_display = eglGetDisplay(g.xdisplay);
     if (g.egl_display == EGL_NO_DISPLAY)
@@ -481,6 +490,99 @@ translate(XEvent *xev, win_event *ev)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* clipboard (X11 CLIPBOARD selection)                                */
+/* ------------------------------------------------------------------ */
+
+static Window
+clip_owner_window(void)
+{
+    struct win_slot *s = slot_by_id(1);
+    return s ? s->xwindow : 0;
+}
+
+/* serve a SelectionRequest from our owned clipboard text */
+static void
+clip_serve(XSelectionRequestEvent *req)
+{
+    XSelectionEvent ev;
+    memset(&ev, 0, sizeof ev);
+    ev.type = SelectionNotify;
+    ev.display = req->display;
+    ev.requestor = req->requestor;
+    ev.selection = req->selection;
+    ev.target = req->target;
+    ev.time = req->time;
+    ev.property = None;
+
+    if (req->target == g.a_utf8 || req->target == XA_STRING) {
+        XChangeProperty(g.xdisplay, req->requestor, req->property,
+            req->target, 8, PropModeReplace,
+            (const unsigned char *)g.clip, (int)strlen(g.clip));
+        ev.property = req->property;
+    } else if (req->target == g.a_targets) {
+        Atom targets[] = { g.a_utf8, XA_STRING };
+        XChangeProperty(g.xdisplay, req->requestor, req->property,
+            XA_ATOM, 32, PropModeReplace,
+            (const unsigned char *)targets, 2);
+        ev.property = req->property;
+    }
+    XSendEvent(g.xdisplay, req->requestor, False, 0, (XEvent *)&ev);
+}
+
+void
+win_clipboard_set(const char *utf8)
+{
+    if (!g.xdisplay)
+        return;
+    snprintf(g.clip, sizeof g.clip, "%s", utf8 ? utf8 : "");
+    XSetSelectionOwner(g.xdisplay, g.a_clipboard, clip_owner_window(),
+        CurrentTime);
+}
+
+const char *
+win_clipboard_get(void)
+{
+    if (!g.xdisplay)
+        return NULL;
+    Window me = clip_owner_window();
+    Window owner = XGetSelectionOwner(g.xdisplay, g.a_clipboard);
+    if (owner == None)
+        return NULL;
+    if (owner == me)
+        return g.clip;          /* we own it: return our copy directly */
+
+    XConvertSelection(g.xdisplay, g.a_clipboard, g.a_utf8, g.a_prop, me,
+        CurrentTime);
+    XFlush(g.xdisplay);
+
+    for (int i = 0; i < 200; i++) {     /* wait up to ~200ms */
+        XEvent xev;
+        if (XCheckTypedWindowEvent(g.xdisplay, me, SelectionNotify, &xev)) {
+            if (xev.xselection.property == None)
+                return NULL;
+            Atom type; int fmt;
+            unsigned long nitems, after;
+            unsigned char *data = NULL;
+            XGetWindowProperty(g.xdisplay, me, g.a_prop, 0, 65536, True,
+                AnyPropertyType, &type, &fmt, &nitems, &after, &data);
+            if (!data)
+                return NULL;
+            unsigned long n = nitems;
+            if (n >= sizeof g.clip) n = sizeof g.clip - 1;
+            memcpy(g.clip, data, n);
+            g.clip[n] = '\0';
+            XFree(data);
+            return g.clip;
+        }
+        /* keep serving our own clipboard to other apps while we wait */
+        if (XCheckTypedWindowEvent(g.xdisplay, me, SelectionRequest, &xev))
+            clip_serve(&xev.xselectionrequest);
+        usleep(1000);
+    }
+    return NULL;
+}
+
 int
 win_poll(win_event *ev)
 {
@@ -489,6 +591,10 @@ win_poll(win_event *ev)
         XNextEvent(g.xdisplay, &xev);
         if (XFilterEvent(&xev, None))
             continue;
+        if (xev.type == SelectionRequest) {
+            clip_serve(&xev.xselectionrequest);
+            continue;
+        }
         if (translate(&xev, ev))
             return 1;
     }

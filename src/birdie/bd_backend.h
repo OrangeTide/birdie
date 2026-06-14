@@ -164,6 +164,13 @@ typedef struct bd_backend {
 	int  (*window_width)(int id);
 	int  (*window_height)(int id);
 	void (*window_set_title)(int id, const char *title);
+
+	/* ---- clipboard (optional; NULL = no clipboard) ----
+	 * set copies the UTF-8 string to the system clipboard; get returns the
+	 * current clipboard text (a pointer owned by the backend, valid until the
+	 * next clipboard call) or NULL if empty/unsupported. */
+	void        (*clipboard_set)(const char *utf8);
+	const char *(*clipboard_get)(void);
 } bd_backend;
 
 #endif

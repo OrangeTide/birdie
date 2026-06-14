@@ -172,9 +172,11 @@ What is built:
   activate, right-click context, keyboard nav, in-place rename, scissor clip.
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
+- **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`
+  (X11 CLIPBOARD on the GLES backend; ludica backend NULL for now).
 
-Not yet built: IME/compose; clipboard; multitouch; pen; key-up/repeat. These
-are tracked in the roadmap section.
+Not yet built: IME/compose; multitouch; pen; key-up/repeat. These are tracked
+in the roadmap section.
 
 ## v1.0 widget set
 
@@ -599,12 +601,19 @@ edits; an app re-emits them after big changes (a syntax highlighter) or sets
 them on a locked buffer (ABC playback). Deferred: cross-line selection, and
 Tab-inserts-a-tab (Tab currently traverses focus).
 
-### Clipboard
+### Clipboard — implemented
 
-Copy / cut / paste, backed by per-platform hooks (X11 selections, Win32
-clipboard, macOS pasteboard, Wayland data-device). Paste reuses the same
-string channel as IME commit, so it lands naturally alongside it. A text
-editor without paste is incomplete.
+Copy / cut / paste via two optional backend hooks, `clipboard_set(utf8)` and
+`clipboard_get()`. The text fields handle Ctrl-C / Ctrl-X (copy/cut the
+selection) and Ctrl-V (paste, replacing the selection; newlines kept in
+`BD_MULTILINE`, stripped in single-line fields); the editor widget pastes too.
+The raw GLES backend implements it on the X11 CLIPBOARD selection (owns the
+selection and serves `SelectionRequest`; reads via `XConvertSelection`),
+verified interoperating with `xclip` both directions. The ludica backend
+leaves the hooks NULL for now, so birdie itself has no clipboard until ludica
+exposes one (see `todo.txt`); the hooks being NULL is a safe no-op. Per-window
+copy/cut still needs a selection, so it is single-line-field-only until
+`BD_MULTILINE`/editor selection lands.
 
 ### Focus traversal, key-up, and repeat
 

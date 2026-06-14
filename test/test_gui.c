@@ -61,6 +61,10 @@ static void be_destroy_tex(bd_texture t){ (void)t; }
 static void be_scissor(int x,int y,int w,int h){ (void)x;(void)y;(void)w;(void)h; n_scissor++; }
 static void be_scissor_off(void){}
 
+static char be_clip[256];
+static void be_clip_set(const char *s){ snprintf(be_clip, sizeof be_clip, "%s", s ? s : ""); }
+static const char *be_clip_get(void){ return be_clip; }
+
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
 	.clear=be_clear,
@@ -71,6 +75,7 @@ static const bd_backend stub = {
 	.load_texture=be_load_tex, .make_texture=be_make_tex, .update_texture=be_update_tex,
 	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
+	.clipboard_set=be_clip_set, .clipboard_get=be_clip_get,
 };
 
 /* ---- multi-window stub: like `stub` but advertises native windows ---- */
@@ -867,6 +872,49 @@ main(void)
 	bd_notice_open("Quit?", "Quit\nCancel", on_notice, NULL);
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
 	check("Escape cancels the notice (-1)", notice_btn == -1);
+	bd_gui_cleanup();
+
+	/* ---- clipboard: copy / paste / cut in a text field ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id cbf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ctf = bd_create(cbf, BD_TEXT, BD_PREF_H_I, 24, BD_END);
+	bd_gui_layout(800, 600);
+	int cbx, cby, cbw, cbh;
+	bd_widget_rect(ctf, &cbx, &cby, &cbw, &cbh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=cbx+5, .y=cby+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=cbx+5, .y=cby+5 });
+	const char *hello = "hello";
+	for (const char *p = hello; *p; p++)
+		bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint=(unsigned)*p });
+	check("typed into the field", strcmp(bd_get_s(ctf, BD_LABEL_S), "hello") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A, .mods=BD_MOD_CTRL });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("Ctrl-C copies the selection to the clipboard",
+	    strcmp(be_clip, "hello") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_END });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='V', .mods=BD_MOD_CTRL });
+	check("Ctrl-V pastes at the cursor",
+	    strcmp(bd_get_s(ctf, BD_LABEL_S), "hellohello") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A, .mods=BD_MOD_CTRL });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='X', .mods=BD_MOD_CTRL });
+	check("Ctrl-X cuts to the clipboard",
+	    strcmp(bd_get_s(ctf, BD_LABEL_S), "") == 0 &&
+	    strcmp(be_clip, "hellohello") == 0);
+
+	/* paste keeps newlines in a multi-line field */
+	be_clip_set("a\nb");
+	bd_id cml = bd_create(cbf, BD_MULTILINE, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+	int mlx2, mly2, mlw2, mlh2;
+	bd_widget_rect(cml, &mlx2, &mly2, &mlw2, &mlh2);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mlx2+3, .y=mly2+3 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mlx2+3, .y=mly2+3 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='V', .mods=BD_MOD_CTRL });
+	check("paste preserves newlines in BD_MULTILINE",
+	    strcmp(bd_get_s(cml, BD_LABEL_S), "a\nb") == 0);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);

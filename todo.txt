@@ -3,6 +3,11 @@
   - src/thirdparty/ludica/src/imgui
   - src/samples/
 
+- clipboard on ludica: the toolkit has clipboard (Ctrl-C/X/V) behind the
+  bd_backend clipboard_set/clipboard_get hooks, but bd_backend_ludica.c leaves
+  them NULL, so birdie itself has no copy/paste yet. Wire them when ludica
+  exposes a clipboard API (the GLES backend already does it via X11).
+
 - post-0.1: let client backends choose texture filtering (linear vs nearest).
   bd_backend.load_texture currently hardcodes nearest in the ludica binding;
   add a filter parameter when a backend needs scaled/linear assets.

@@ -1822,6 +1822,48 @@ input_insert_char(bd_id id, unsigned codepoint)
 	cursor_blink = (float)be->time();
 }
 
+/* copy the current selection (if any) to the system clipboard */
+static void
+clipboard_copy_selection(struct widget *w)
+{
+	if (!be->clipboard_set || w->sel_anchor < 0 || w->sel_anchor == w->cursor)
+		return;
+	int s0 = w->sel_anchor < w->cursor ? w->sel_anchor : w->cursor;
+	int s1 = w->sel_anchor < w->cursor ? w->cursor : w->sel_anchor;
+	char tmp[1024];
+	int n = s1 - s0;
+	if (n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+	memcpy(tmp, w->text_buf + s0, (size_t)n);
+	tmp[n] = '\0';
+	be->clipboard_set(tmp);
+}
+
+/* insert a UTF-8 string at the cursor, replacing any selection; drops newlines
+ * for a single-line field */
+static void
+input_insert_text(struct widget *w, const char *s, int single_line)
+{
+	if (!s)
+		return;
+	if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor)
+		input_delete_selection(w);
+	for (; *s; s++) {
+		char c = *s;
+		if (single_line && (c == '\n' || c == '\r'))
+			continue;
+		if (w->text_len + 1 >= (int)sizeof(w->text_buf))
+			break;
+		memmove(w->text_buf + w->cursor + 1, w->text_buf + w->cursor,
+		    (size_t)(w->text_len - w->cursor));
+		w->text_buf[w->cursor] = c;
+		w->text_len++;
+		w->cursor++;
+	}
+	w->text_buf[w->text_len] = '\0';
+	w->sel_anchor = -1;
+	cursor_blink = (float)be->time();
+}
+
 static void
 input_click(bd_id id, int mx)
 {
@@ -1945,6 +1987,29 @@ input_key(bd_id id, int key, unsigned mods)
 			w->sel_anchor = 0;
 			w->cursor = w->text_len;
 			cursor_blink = (float)be->time();
+			return 1;
+		}
+		return 0;
+	case 'C':       /* Ctrl-C: copy selection */
+		if (ctrl) {
+			clipboard_copy_selection(w);
+			return 1;
+		}
+		return 0;
+	case 'X':       /* Ctrl-X: cut selection */
+		if (ctrl) {
+			clipboard_copy_selection(w);
+			if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor)
+				input_delete_selection(w);
+			cursor_blink = (float)be->time();
+			return 1;
+		}
+		return 0;
+	case 'V':       /* Ctrl-V: paste at the cursor */
+		if (ctrl) {
+			if (be->clipboard_get)
+				input_insert_text(w, be->clipboard_get(),
+				    w->type != BD_MULTILINE);
 			return 1;
 		}
 		return 0;
