@@ -24,51 +24,19 @@ check(const char *what, int ok)
 	printf("  [%s] %s\n", ok ? "PASS" : "FAIL", what);
 }
 
-/* ---- recording stub backend ---- */
-static int n_fill, n_stroke, n_tinted, n_vfont;
+/* ---- recording stub backend (GPU interface) ---- */
+static int n_shader, n_drawverts, n_maketex, n_scissor;
+static unsigned next_texid = 1;   /* distinct id per texture, like a real backend */
 
 static int    be_width(void)  { return 800; }
 static int    be_height(void) { return 500; }
 static double be_time(void)   { return 0.0; }
 static void   be_viewport(int x,int y,int w,int h){(void)x;(void)y;(void)w;(void)h;}
 static void   be_clear(float r,float g,float b,float a){(void)r;(void)g;(void)b;(void)a;}
-static void   be_sprite_begin(float x,float y,float w,float h){(void)x;(void)y;(void)w;(void)h;}
-static void   be_sprite_end(void){}
-static void   be_fill(float x,float y,float w,float h,float r,float g,float b,float a)
-{ (void)x;(void)y;(void)w;(void)h;(void)r;(void)g;(void)b;(void)a; n_fill++; }
-static void   be_stroke(float x,float y,float w,float h,float r,float g,float b,float a)
-{ (void)x;(void)y;(void)w;(void)h;(void)r;(void)g;(void)b;(void)a; n_stroke++; }
-static void   be_tinted(bd_texture t,float dx,float dy,float dw,float dh,
-    float sx,float sy,float sw,float sh,float r,float g,float b,float a)
-{ (void)t;(void)dx;(void)dy;(void)dw;(void)dh;(void)sx;(void)sy;(void)sw;(void)sh;
-  (void)r;(void)g;(void)b;(void)a; n_tinted++; }
-static void   be_vfont_begin(float a,float b,float c,float d){(void)a;(void)b;(void)c;(void)d;}
-static void   be_vfont_end(void){}
-static void   be_vfont_draw(bd_font f,float x,float y,float s,
-    float r,float g,float b,float a,const char *t)
-{ (void)f;(void)x;(void)y;(void)s;(void)r;(void)g;(void)b;(void)a;(void)t; n_vfont++; }
-static float  be_vfont_w(bd_font f,float s,const char *t)
-{ (void)f;(void)s; return t ? (float)strlen(t) * 7.0f : 0.0f; }
-static unsigned next_texid = 1;   /* distinct id per texture, like a real backend */
-static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
-static void   be_destroy_tex(bd_texture t){ (void)t; }
-static bd_font be_load_font(const char *p){ (void)p; return (bd_font){1}; }
-static void   be_destroy_font(bd_font f){ (void)f; }
 
-/* ---- GPU interface recorders (v0.2) ---- */
-static int n_shader, n_mesh, n_drawmesh, n_updatemesh, n_maketex;
 static bd_shader be_make_shader(const char *v, const char *f)
 { (void)v; (void)f; n_shader++; return (bd_shader){1}; }
 static void be_destroy_shader(bd_shader s){ (void)s; }
-static bd_mesh be_make_mesh(const bd_vertex *v, int n, int dyn)
-{ (void)v; (void)n; (void)dyn; n_mesh++; return (bd_mesh){1}; }
-static void be_update_mesh(bd_mesh m, const bd_vertex *v, int n)
-{ (void)m; (void)v; (void)n; n_updatemesh++; }
-static void be_destroy_mesh(bd_mesh m){ (void)m; }
-static bd_texture be_make_tex(int w, int h, const void *px)
-{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){next_texid++}; }
-static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
-{ (void)t;(void)x;(void)y;(void)w;(void)h;(void)px; }
 static void be_use_shader(bd_shader s){ (void)s; }
 static void be_uni_i(bd_shader s,const char *n,int v){ (void)s;(void)n;(void)v; }
 static void be_uni_f(bd_shader s,const char *n,float v){ (void)s;(void)n;(void)v; }
@@ -76,23 +44,29 @@ static void be_uni_2(bd_shader s,const char *n,float x,float y){ (void)s;(void)n
 static void be_uni_3(bd_shader s,const char *n,float x,float y,float z){ (void)s;(void)n;(void)x;(void)y;(void)z; }
 static void be_uni_4(bd_shader s,const char *n,float x,float y,float z,float w){ (void)s;(void)n;(void)x;(void)y;(void)z;(void)w; }
 static void be_uni_m(bd_shader s,const char *n,const float m[16]){ (void)s;(void)n;(void)m; }
+static void be_draw_verts(const bd_vertex *v, int n){ (void)v; (void)n; n_drawverts++; }
+
+static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
+static bd_texture be_make_tex(int w, int h, const void *px)
+{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){next_texid++}; }
+static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
+{ (void)t;(void)x;(void)y;(void)w;(void)h;(void)px; }
 static void be_bind_tex(bd_texture t,int u){ (void)t;(void)u; }
-static void be_draw_mesh(bd_mesh m){ (void)m; n_drawmesh++; }
+static void be_destroy_tex(bd_texture t){ (void)t; }
+
+static void be_scissor(int x,int y,int w,int h){ (void)x;(void)y;(void)w;(void)h; n_scissor++; }
+static void be_scissor_off(void){}
 
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
-	.clear=be_clear, .sprite_begin=be_sprite_begin, .sprite_end=be_sprite_end,
-	.fill_rect=be_fill, .stroke_rect=be_stroke, .draw_tinted=be_tinted,
-	.vfont_begin=be_vfont_begin, .vfont_end=be_vfont_end, .vfont_draw=be_vfont_draw,
-	.vfont_text_width=be_vfont_w, .load_texture=be_load_tex,
-	.destroy_texture=be_destroy_tex, .load_font=be_load_font,
-	.destroy_font=be_destroy_font,
+	.clear=be_clear,
 	.make_shader=be_make_shader, .destroy_shader=be_destroy_shader,
-	.make_mesh=be_make_mesh, .update_mesh=be_update_mesh, .destroy_mesh=be_destroy_mesh,
-	.make_texture=be_make_tex, .update_texture=be_update_tex,
 	.use_shader=be_use_shader, .set_uniform_int=be_uni_i, .set_uniform_float=be_uni_f,
 	.set_uniform_vec2=be_uni_2, .set_uniform_vec3=be_uni_3, .set_uniform_vec4=be_uni_4,
-	.set_uniform_mat4=be_uni_m, .bind_texture=be_bind_tex, .draw_mesh=be_draw_mesh,
+	.set_uniform_mat4=be_uni_m, .draw_verts=be_draw_verts,
+	.load_texture=be_load_tex, .make_texture=be_make_tex, .update_texture=be_update_tex,
+	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
+	.scissor=be_scissor, .scissor_off=be_scissor_off,
 };
 
 /* ---- click callback ---- */
@@ -198,12 +172,12 @@ main(void)
 	/* rendering now flows through the toolkit renderer (bd_draw) onto the
 	 * GPU interface; bd_gui_init already created the shader + mesh and baked
 	 * the chrome font */
-	check("renderer initialized shader + mesh", n_shader == 1 && n_mesh == 1);
+	check("renderer initialized shader", n_shader == 1);
 	check("chrome font baked (real DejaVu): text width > 0",
 	    bd_draw_text_width("Quit") > 0.0f);
-	n_drawmesh = 0;
+	n_drawverts = 0;
 	bd_gui_render();
-	check("render issued GPU draws (chrome + terminal)", n_drawmesh > 0);
+	check("render issued GPU draws (chrome + terminal)", n_drawverts > 0);
 
 	/* write to a non-terminal must be a safe no-op */
 	bd_terminal_write(btn, "ignored", -1);

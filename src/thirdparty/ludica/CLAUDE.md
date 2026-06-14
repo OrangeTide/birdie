@@ -32,6 +32,7 @@ Each `module.mk` declares targets via `EXECUTABLES`, `LIBRARIES`, and
 - `samples/demo02_multiscroll/` — Parallax scrolling + sprite batching
 - `samples/demo03_text_dialogs/` — Font rendering + dialog box UI
 - `samples/demo04_sprites/` — Sprite rendering demo
+- `samples/demo08_picking/` — 3D color-id picking via offscreen render target (automatable; `--selftest`)
 - `samples/demo05_audio/` — Multi-channel audio mixer demo
 - `samples/lilpc/` — 286 XT PC emulator with CGA display
 - `samples/tridrop/` — Triangle drop demo
@@ -61,7 +62,9 @@ receives input events (key, mouse, gamepad, resize, focus).
 
 - Shaders: `lud_make_shader()`, `lud_apply_shader()`, `lud_uniform_*()`, `lud_destroy_shader()`
 - Meshes: `lud_make_mesh()`, `lud_draw()`, `lud_draw_range()`, `lud_destroy_mesh()`
+- Render state: `lud_depth_test()`, `lud_depth_func()`, `lud_depth_mask()`, `lud_cull()`, `lud_front_face()`, `lud_blend()`, `lud_scissor()`/`lud_scissor_off()`, `lud_read_pixels()` (RGBA, for color-id picking), `lud_flush()` — for 3D drawing; keeps apps off raw `<GLES2/gl2.h>`
 - Textures: `lud_make_texture()`, `lud_load_texture()`, `lud_bind_texture()`, `lud_update_texture()`, `lud_destroy_texture()`
+- Render targets: `lud_make_render_target()`, `lud_bind_render_target()`, `lud_render_target_texture()`, `lud_destroy_render_target()` — offscreen render-to-texture (post-processing, color-id picking)
 - Sprites: `lud_sprite_begin()`, `lud_sprite_draw()`, `lud_sprite_end()`
 - Fonts: `lud_make_default_font()`, `lud_draw_text()`
 - Framebuffer: `lud_make_framebuffer()`, palette + lock/unlock + blit
@@ -101,8 +104,12 @@ Query at runtime: `lud_gles_version()` returns 2 or 3.
 Resolution-independent text with automatic backend selection:
 GLES3 uses Slug (GPU Bezier evaluation), GLES2 uses SDF (distance field atlas).
 
-- Load: `lud_load_vfont("data/fonts/dejavu-sans")` — appends `.slugfont` or `.msdffont`
-- Draw: `lud_vfont_begin()` / `lud_vfont_draw()` / `lud_vfont_end()`
+- Load: `lud_load_vfont("assets/fonts/dejavu-sans")` — appends `.slugfont` or `.msdffont`
+- Draw: `lud_vfont_begin()` / `lud_vfont_draw(font, &pen, size, r,g,b,a, text)` / `lud_vfont_end()`
+- Pen: `lud_pen_t pen = { x, y };` — caller-owned, draw advances pen->x
+- Metrics: `lud_vfont_ascender()`, `lud_vfont_line_height()`, `lud_vfont_newline()`
+- Layout: `lud_vfont_line_break()` — word-wrap at max width
+- Clip: `lud_vfont_set_clip()` / `lud_vfont_clear_clip()` — GL scissor, session state
 - Measure: `lud_vfont_text_width()`
 - Convert: `font2slug input.ttf -o output.slugfont`, `font2msdf input.ttf -o output.msdffont`
 - Override backend: `LUD_VFONT_BACKEND=slug|msdf` environment variable
@@ -140,18 +147,24 @@ Polled: `lud_key_down()`, `lud_mouse_pos()`, `lud_mouse_button_down()`,
 
 ## Automation & MCP
 
+**Never bypass the MCP tool layer.** Do not connect to the launcher
+directly via `nc`, `netcat`, or piping into the bridge binary. Only
+use `mcp__ludica__*` tools. If the tools aren't loading, tell the
+user and stop. Do not attempt workarounds.
+
 Ludica games can be observed and controlled by AI agents via a
-long-lived launcher daemon (`ludica-mcp`) and an MCP stdio bridge
+long-lived launcher daemon (`ludica-launcher`) and an MCP stdio bridge
 (`ludica-mcp-bridge`). Start the launcher once per session:
 
 ```sh
-LUDICA_MCP_ALLOWEXEC=$(echo _out/*/bin/* | tr ' ' ':') ludica-mcp &
+LUDICA_MCP_ALLOWEXEC=$(echo _out/*/bin/* | tr ' ' ':') \
+    _out/x86_64-linux-gnu/bin/ludica-launcher --port=4000 &
 ```
 
 The launcher owns spawned game processes, captures stdout/stderr,
 proxies each game's control fd, and collects crash cores.
 `ludica-mcp-bridge` adapts the launcher's line protocol to MCP
-JSON-RPC on stdio and is pre-configured in `.claude/settings.json`.
+JSON-RPC on stdio and is configured in `.mcp.json`.
 Use the `/ludica-mcp` skill for tool usage and workflow recipes.
 See `doc/manual/ludica-mcp.md` for the full protocol reference.
 

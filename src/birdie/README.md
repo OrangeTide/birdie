@@ -117,6 +117,7 @@ core owns per-instance `state` of the size you declare.
 
 ```c
 #include "widget_ext.h"
+#include "bd_draw.h"
 
 struct gauge { float value; };
 
@@ -124,10 +125,9 @@ static void
 gauge_render(bd_id id, void *state)
 {
     struct gauge *g = state;
-    const bd_backend *be = bd_backend_get();
     int x, y, w, h;
     bd_widget_rect(id, &x, &y, &w, &h);
-    be->fill_rect(x, y, w * g->value, h, 0.3f, 0.7f, 1.0f, 1.0f);
+    bd_draw_rect(x, y, w * g->value, h, 0x4DB2FFFFu);
 }
 
 static const bd_widget_class gauge_class = {

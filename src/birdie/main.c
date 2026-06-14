@@ -140,6 +140,7 @@ main(int argc, char **argv)
 		.width     = 800,
 		.height    = 500,
 		.resizable = 1,
+		.gles_version = 3,   /* toolkit shaders are #version 300 es */
 		.argc      = argc,
 		.argv      = argv,
 		.init      = init,

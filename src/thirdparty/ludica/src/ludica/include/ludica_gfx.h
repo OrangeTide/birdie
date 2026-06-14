@@ -35,6 +35,33 @@ enum lud_primitive {
 	LUD_PRIM_LINES,
 };
 
+/* Depth comparison function */
+enum lud_depth_func {
+	LUD_DEPTH_LESS,    /* pass if incoming depth < stored (default) */
+	LUD_DEPTH_LEQUAL,  /* pass if incoming depth <= stored */
+	LUD_DEPTH_ALWAYS,  /* always pass (depth test effectively off) */
+};
+
+/* Face culling mode */
+enum lud_cull {
+	LUD_CULL_NONE,   /* draw all faces */
+	LUD_CULL_BACK,   /* cull back faces (CCW front, the default winding) */
+	LUD_CULL_FRONT,  /* cull front faces */
+};
+
+/* Blend mode (source factor, destination factor) */
+enum lud_blend {
+	LUD_BLEND_NONE,   /* blending off; source replaces destination */
+	LUD_BLEND_ALPHA,  /* src_alpha, 1-src_alpha (standard transparency) */
+	LUD_BLEND_ADD,    /* src_alpha, 1 (additive: glows, fire, light) */
+};
+
+/* Triangle winding that counts as front-facing (pairs with lud_cull) */
+enum lud_winding {
+	LUD_WINDING_CCW,  /* counter-clockwise is front (default) */
+	LUD_WINDING_CW,   /* clockwise is front */
+};
+
 /* Opaque resource handles (id == 0 means invalid/null) */
 typedef struct { unsigned id; } lud_shader_t;
 typedef struct { unsigned id; } lud_mesh_t;
@@ -101,6 +128,38 @@ void             lud_destroy_texture(lud_texture_t tex);
 /* Texture array (GLES3 only; returns zero-handle if GLES2) */
 lud_texture_t lud_make_texture_array(const lud_texture_array_desc_t *desc);
 void lud_texture_array_set_layer(lud_texture_t arr, int layer, const void *data);
+
+/* --- Render targets (offscreen render-to-texture) ---
+ *
+ * A render target is an off-screen framebuffer backed by a color
+ * texture you can later sample (post-processing, reflections, dynamic
+ * textures) or read back (color-id mouse picking). Set `depth` when the
+ * pass needs the depth test, e.g. rendering 3D geometry into the target.
+ *
+ * Bind the target, draw, then bind the zero-handle to return to the
+ * window. lud_bind_render_target sets the viewport to match the bound
+ * surface. */
+
+typedef struct { unsigned id; } lud_target_t;
+
+typedef struct {
+	int width, height;
+	enum lud_pixel_format format;   /* color format (LUD_PIXFMT_RGBA8 typical) */
+	enum lud_filter min_filter;
+	enum lud_filter mag_filter;
+	int depth;                       /* non-zero = attach a depth buffer */
+} lud_target_desc_t;
+
+lud_target_t lud_make_render_target(const lud_target_desc_t *desc);
+void         lud_destroy_render_target(lud_target_t target);
+
+/* The target's color texture, for binding/sampling. Valid until the
+ * target is destroyed (which also destroys this texture). */
+lud_texture_t lud_render_target_texture(lud_target_t target);
+
+/* Direct drawing to `target`; pass the zero-handle to restore the
+ * window's framebuffer. Sets the viewport to the bound surface size. */
+void lud_bind_render_target(lud_target_t target);
 
 /* --- Shader operations --- */
 
@@ -193,6 +252,56 @@ void lud_sprite_end(void);
 
 void lud_clear(float r, float g, float b, float a);
 void lud_viewport(int x, int y, int w, int h);
+
+/* --- Render state ---
+ *
+ * Thin wrappers over the GL render state apps need for 3D drawing.
+ * These keep programs off raw <GLES2/gl2.h> so the GLES2/GLES3/WebGL
+ * differences stay inside ludica. State is global GL session state and
+ * persists until changed. The sprite batch sets its own blend state on
+ * begin and clears it on end, so set lud_blend() for custom mesh draws
+ * outside a sprite batch. */
+
+/* Enable or disable the depth test. */
+void lud_depth_test(int enable);
+
+/* Set the depth comparison function (only meaningful while depth test on). */
+void lud_depth_func(enum lud_depth_func fn);
+
+/* Set face culling mode (LUD_CULL_NONE disables culling). */
+void lud_cull(enum lud_cull mode);
+
+/* Choose which winding is front-facing (for lud_cull). Default CCW. */
+void lud_front_face(enum lud_winding w);
+
+/* Enable or disable writing to the depth buffer. Disable (0) for a
+ * translucent pass: keep the depth test on so geometry is occluded by
+ * solid walls, but stop transparent surfaces from writing depth and
+ * hiding each other. Re-enable (1) before the next opaque pass. */
+void lud_depth_mask(int write);
+
+/* Set the blend mode (LUD_BLEND_NONE disables blending). */
+void lud_blend(enum lud_blend mode);
+
+/* Restrict drawing to a rectangle; fragments outside are discarded.
+ * Coordinates are window pixels with the origin at the bottom-left,
+ * the same space as lud_viewport. lud_scissor_off() removes it. */
+void lud_scissor(int x, int y, int w, int h);
+void lud_scissor_off(void);
+
+/* Read back a rectangle of the color buffer as RGBA8 (w*h*4 bytes into
+ * rgba). (x, y) is the TOP-LEFT of the region in window pixels with a
+ * top-left origin (same convention as lud_mouse_pos); rows are returned
+ * top-first. For 3D mouse picking, render each pickable object in a
+ * unique color, then read the pixel under the cursor:
+ *     lud_read_pixels(mx, my, 1, 1, &rgba);
+ * and map the color back to an object id. GLES can read back only the
+ * color buffer, not depth, so picking is color-id based rather than
+ * depth-unproject based. */
+void lud_read_pixels(int x, int y, int w, int h, void *rgba);
+
+/* Flush queued GL commands to the driver (does not swap buffers). */
+void lud_flush(void);
 
 /* --- Loading progress --- */
 

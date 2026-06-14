@@ -66,8 +66,11 @@ rsync -a \
 	--exclude '*.dep' \
 	--exclude '*~' \
 	--exclude 'compile_commands.json' \
-        --exclude '/src/thirdparty/ludica/assets/textures' \
-        --exclude '/src/thirdparty/ludica/src/imgui' \
+	--exclude '/assets/textures' \
+	--exclude '/src/imgui' \
+	--exclude '/tests' \
+	--exclude '/.mcp.json' \
+	--exclude '/cga-compat-test.txt' \
 	"$tmpdir/ludica"/ "$DEST"/
 
 cat > "$DEST/UPSTREAM" <<EOF

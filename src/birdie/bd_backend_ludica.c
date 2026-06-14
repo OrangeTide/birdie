@@ -1,13 +1,14 @@
 #include "bd_backend_ludica.h"
 #include "ludica.h"
 #include "ludica_gfx.h"
-#include "ludica_vfont.h"
+#include <stddef.h>
 
 /*
- * ludica binding for the widget toolkit's bd_backend interface. Every wrapper
- * is a thin pass-through; the only adaptation is bridging the {unsigned id;}
- * handle structs and choosing nearest-neighbor filtering for the GUI's
- * pixel-art chrome atlas and sprites.
+ * ludica binding for the widget toolkit's bd_backend GPU interface. The draw
+ * primitives map almost 1:1 onto ludica's shader/mesh/uniform/texture/scissor
+ * API (lud_make_shader, lud_make_mesh, lud_uniform_*, lud_bind_texture,
+ * lud_draw, lud_scissor). Shaders bind the bd_vertex attributes a_pos/a_uv/
+ * a_col to locations 0/1/2.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -16,104 +17,114 @@ static int    be_width(void)  { return lud_width(); }
 static int    be_height(void) { return lud_height(); }
 static double be_time(void)   { return lud_time(); }
 
-static void
-be_viewport(int x, int y, int w, int h)
-{
-	lud_viewport(x, y, w, h);
-}
+static void be_viewport(int x, int y, int w, int h) { lud_viewport(x, y, w, h); }
 
 static void
 be_clear(float r, float g, float b, float a)
 {
+	/* establish 2D UI render state each frame: alpha blend, no depth or
+	 * face culling (UI quads are drawn in either winding) */
+	lud_blend(LUD_BLEND_ALPHA);
+	lud_depth_test(0);
+	lud_cull(LUD_CULL_NONE);
 	lud_clear(r, g, b, a);
 }
 
-static void
-be_sprite_begin(float x, float y, float w, float h)
+/* ---- shaders ---- */
+
+static bd_shader
+be_make_shader(const char *vert, const char *frag)
 {
-	lud_sprite_begin(x, y, w, h);
+	lud_shader_desc_t desc = {
+		.vert_src = vert,
+		.frag_src = frag,
+		.attrs = { "a_pos", "a_uv", "a_col" },
+		.num_attrs = 3,
+	};
+	lud_shader_t sh = lud_make_shader(&desc);
+	return (bd_shader){sh.id};
 }
 
+static void be_destroy_shader(bd_shader sh) { lud_destroy_shader((lud_shader_t){sh.id}); }
+static void be_use_shader(bd_shader sh)     { lud_apply_shader((lud_shader_t){sh.id}); }
+
+static void be_uni_int  (bd_shader s, const char *n, int v)
+{ lud_uniform_int((lud_shader_t){s.id}, n, v); }
+static void be_uni_float(bd_shader s, const char *n, float v)
+{ lud_uniform_float((lud_shader_t){s.id}, n, v); }
+static void be_uni_vec2 (bd_shader s, const char *n, float x, float y)
+{ lud_uniform_vec2((lud_shader_t){s.id}, n, x, y); }
+static void be_uni_vec3 (bd_shader s, const char *n, float x, float y, float z)
+{ lud_uniform_vec3((lud_shader_t){s.id}, n, x, y, z); }
+static void be_uni_vec4 (bd_shader s, const char *n, float x, float y, float z, float w)
+{ lud_uniform_vec4((lud_shader_t){s.id}, n, x, y, z, w); }
+static void be_uni_mat4 (bd_shader s, const char *n, const float m[16])
+{ lud_uniform_mat4((lud_shader_t){s.id}, n, m); }
+
+/* ---- draw ----
+ * ludica has no in-place mesh update, so a vertex draw streams a throwaway
+ * mesh. Cheap enough for UI batches; lud_draw uses the currently applied
+ * shader. */
 static void
-be_sprite_end(void)
+be_draw_verts(const bd_vertex *verts, int count)
 {
-	lud_sprite_end();
+	lud_mesh_desc_t desc = {
+		.vertices = verts,
+		.vertex_count = count,
+		.vertex_stride = (int)sizeof(bd_vertex),
+		.layout = {
+			{ 2, (int)offsetof(bd_vertex, x) },
+			{ 2, (int)offsetof(bd_vertex, u) },
+			{ 4, (int)offsetof(bd_vertex, r) },
+		},
+		.num_attrs = 3,
+		.usage = LUD_USAGE_STREAM,
+		.primitive = LUD_PRIM_TRIANGLES,
+	};
+	lud_mesh_t m = lud_make_mesh(&desc);
+	lud_draw(m);
+	lud_destroy_mesh(m);
 }
 
-static void
-be_fill_rect(float x, float y, float w, float h,
-    float r, float g, float b, float a)
-{
-	lud_sprite_rect(x, y, w, h, r, g, b, a);
-}
-
-static void
-be_stroke_rect(float x, float y, float w, float h,
-    float r, float g, float b, float a)
-{
-	lud_sprite_rect_lines(x, y, w, h, r, g, b, a);
-}
-
-static void
-be_draw_tinted(bd_texture tex, float dx, float dy, float dw, float dh,
-    float sx, float sy, float sw, float sh,
-    float r, float g, float b, float a)
-{
-	lud_sprite_draw_tinted((lud_texture_t){tex.id}, dx, dy, dw, dh,
-	    sx, sy, sw, sh, r, g, b, a);
-}
-
-static void
-be_vfont_begin(float vx, float vy, float vw, float vh)
-{
-	lud_vfont_begin(vx, vy, vw, vh);
-}
-
-static void
-be_vfont_end(void)
-{
-	lud_vfont_end();
-}
-
-static void
-be_vfont_draw(bd_font font, float x, float y, float size,
-    float r, float g, float b, float a, const char *text)
-{
-	lud_vfont_draw((lud_vfont_t){font.id}, x, y, size, r, g, b, a, text);
-}
-
-static float
-be_vfont_text_width(bd_font font, float size, const char *text)
-{
-	return lud_vfont_text_width((lud_vfont_t){font.id}, size, text);
-}
+/* ---- textures ---- */
 
 static bd_texture
 be_load_texture(const char *path)
 {
 	lud_texture_t t = lud_load_texture(path,
-	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);
+	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);   /* pixel-art PNGs */
+	return (bd_texture){t.id};
+}
+
+static bd_texture
+be_make_texture(int w, int h, const void *rgba)
+{
+	lud_texture_desc_t desc = {
+		.width = w, .height = h,
+		.format = LUD_PIXFMT_RGBA8,
+		.min_filter = LUD_FILTER_LINEAR,
+		.mag_filter = LUD_FILTER_LINEAR,
+		.data = rgba,
+	};
+	lud_texture_t t = lud_make_texture(&desc);
 	return (bd_texture){t.id};
 }
 
 static void
-be_destroy_texture(bd_texture tex)
+be_update_texture(bd_texture t, int x, int y, int w, int h, const void *rgba)
 {
-	lud_destroy_texture((lud_texture_t){tex.id});
+	lud_update_texture((lud_texture_t){t.id}, x, y, w, h, rgba);
 }
 
-static bd_font
-be_load_font(const char *path)
-{
-	lud_vfont_t f = lud_load_vfont(path);
-	return (bd_font){f.id};
-}
+static void be_bind_texture(bd_texture t, int unit)
+{ lud_bind_texture((lud_texture_t){t.id}, unit); }
+static void be_destroy_texture(bd_texture t)
+{ lud_destroy_texture((lud_texture_t){t.id}); }
 
-static void
-be_destroy_font(bd_font font)
-{
-	lud_destroy_vfont((lud_vfont_t){font.id});
-}
+/* ---- scissor ---- */
+
+static void be_scissor(int x, int y, int w, int h) { lud_scissor(x, y, w, h); }
+static void be_scissor_off(void) { lud_scissor_off(); }
 
 const bd_backend bd_backend_ludica = {
 	.width            = be_width,
@@ -121,19 +132,23 @@ const bd_backend bd_backend_ludica = {
 	.time             = be_time,
 	.viewport         = be_viewport,
 	.clear            = be_clear,
-	.sprite_begin     = be_sprite_begin,
-	.sprite_end       = be_sprite_end,
-	.fill_rect        = be_fill_rect,
-	.stroke_rect      = be_stroke_rect,
-	.draw_tinted      = be_draw_tinted,
-	.vfont_begin      = be_vfont_begin,
-	.vfont_end        = be_vfont_end,
-	.vfont_draw       = be_vfont_draw,
-	.vfont_text_width = be_vfont_text_width,
+	.make_shader      = be_make_shader,
+	.destroy_shader   = be_destroy_shader,
+	.use_shader       = be_use_shader,
+	.set_uniform_int   = be_uni_int,
+	.set_uniform_float = be_uni_float,
+	.set_uniform_vec2  = be_uni_vec2,
+	.set_uniform_vec3  = be_uni_vec3,
+	.set_uniform_vec4  = be_uni_vec4,
+	.set_uniform_mat4  = be_uni_mat4,
+	.draw_verts       = be_draw_verts,
 	.load_texture     = be_load_texture,
+	.make_texture     = be_make_texture,
+	.update_texture   = be_update_texture,
+	.bind_texture     = be_bind_texture,
 	.destroy_texture  = be_destroy_texture,
-	.load_font        = be_load_font,
-	.destroy_font     = be_destroy_font,
+	.scissor          = be_scissor,
+	.scissor_off      = be_scissor_off,
 };
 
 /* ------------------------------------------------------------------ */

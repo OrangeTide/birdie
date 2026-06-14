@@ -47,7 +47,6 @@ static const char *FRAG_SRC =
 
 static const bd_backend *be;
 static bd_shader  shader;
-static bd_mesh    mesh;
 static bd_texture white;
 
 static bd_vertex  verts[MAX_VERTS];
@@ -81,8 +80,7 @@ flush(void)
 	be->set_uniform_vec2(shader, "u_res", win_w, win_h);
 	be->set_uniform_int(shader, "u_tex", 0);
 	be->bind_texture(cur_tex, 0);
-	be->update_mesh(mesh, verts, nverts);
-	be->draw_mesh(mesh);
+	be->draw_verts(verts, nverts);
 	nverts = 0;
 }
 
@@ -185,8 +183,7 @@ bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
 	be = backend;
 
 	shader = be->make_shader(VERT_SRC, FRAG_SRC);
-	mesh   = be->make_mesh(NULL, MAX_VERTS, 1);
-	if (shader.id == 0 || mesh.id == 0)
+	if (shader.id == 0)
 		return 0;
 
 	uint32_t wpix = 0xFFFFFFFFu;
@@ -206,7 +203,6 @@ bd_draw_shutdown(void)
 	if (have_font)
 		be->destroy_texture(atlas);
 	be->destroy_texture(white);
-	be->destroy_mesh(mesh);
 	be->destroy_shader(shader);
 	have_font = 0;
 	be = NULL;

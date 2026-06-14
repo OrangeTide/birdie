@@ -15,9 +15,7 @@
 /* Opaque resource handles. Values are meaningful only to the backend that
  * produced them; the toolkit just stores and passes them back. */
 typedef struct { unsigned id; } bd_texture;
-typedef struct { unsigned id; } bd_font;
-typedef struct { unsigned id; } bd_shader;   /* GPU interface (v0.2) */
-typedef struct { unsigned id; } bd_mesh;     /* GPU interface (v0.2) */
+typedef struct { unsigned id; } bd_shader;
 
 /* Interleaved UI vertex: position in pixels, texcoord, RGBA in [0,1]. The one
  * vertex format the GPU interface and the toolkit renderer share. */
@@ -94,10 +92,15 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 /*
- * All colors are float r,g,b,a in [0,1]. Coordinates are pixels with the
- * origin at the top-left of the window. The toolkit brackets quad drawing
- * with sprite_begin/sprite_end and proportional text with vfont_begin/
- * vfont_end, so a backend can batch within each pass.
+ * The backend provides a window + GLES-class GPU surface: shaders, vertex
+ * draws, uniforms, textures, and scissor clipping. It is the level ludica
+ * (lud_make_shader / lud_uniform_* / lud_scissor) and raw GLES both provide.
+ * The toolkit's renderer (bd_draw.c) builds chrome and text on top of it, and
+ * extension widgets can drop to a custom shader for effects like shaded knobs.
+ *
+ * Coordinates are pixels, origin top-left. Shaders consume the bd_vertex
+ * attributes by name at locations 0,1,2: a_pos (vec2), a_uv (vec2),
+ * a_col (vec4). Alpha blending is enabled by the backend.
  */
 typedef struct bd_backend {
 	/* frame / window */
@@ -107,50 +110,10 @@ typedef struct bd_backend {
 	void   (*viewport)(int x, int y, int w, int h);
 	void   (*clear)(float r, float g, float b, float a);
 
-	/* quad / sprite batch */
-	void   (*sprite_begin)(float x, float y, float w, float h);
-	void   (*sprite_end)(void);
-	void   (*fill_rect)(float x, float y, float w, float h,
-	                    float r, float g, float b, float a);
-	void   (*stroke_rect)(float x, float y, float w, float h,
-	                      float r, float g, float b, float a);
-	void   (*draw_tinted)(bd_texture tex,
-	                      float dx, float dy, float dw, float dh,
-	                      float sx, float sy, float sw, float sh,
-	                      float r, float g, float b, float a);
-
-	/* proportional vector font */
-	void   (*vfont_begin)(float vx, float vy, float vw, float vh);
-	void   (*vfont_end)(void);
-	void   (*vfont_draw)(bd_font font, float x, float y, float size,
-	                     float r, float g, float b, float a,
-	                     const char *text);
-	float  (*vfont_text_width)(bd_font font, float size, const char *text);
-
-	/* resources */
-	bd_texture (*load_texture)(const char *path);
-	void       (*destroy_texture)(bd_texture tex);
-	bd_font    (*load_font)(const char *path);
-	void       (*destroy_font)(bd_font font);
-
-	/*
-	 * GPU interface (v0.2). A shader + mesh + uniform + texture surface,
-	 * the level ludica (lud_make_shader/lud_make_mesh/lud_uniform_*) and raw
-	 * GLES both provide. The toolkit's renderer (bd_draw.c) builds chrome and
-	 * text on top of this, and extension widgets can drop to a custom shader
-	 * for effects like shaded knobs. Coordinates are pixels; the backend
-	 * supplies the pixel->clip projection to shaders as the "u_proj" mat4.
-	 */
-	bd_shader  (*make_shader)(const char *vert_glsl, const char *frag_glsl);
-	void       (*destroy_shader)(bd_shader sh);
-	bd_mesh    (*make_mesh)(const bd_vertex *verts, int count, int dynamic);
-	void       (*update_mesh)(bd_mesh m, const bd_vertex *verts, int count);
-	void       (*destroy_mesh)(bd_mesh m);
-	bd_texture (*make_texture)(int w, int h, const void *rgba);  /* rgba NULL = blank */
-	void       (*update_texture)(bd_texture t, int x, int y, int w, int h,
-	                             const void *rgba);
-
-	void (*use_shader)(bd_shader sh);
+	/* shaders */
+	bd_shader (*make_shader)(const char *vert_glsl, const char *frag_glsl);
+	void      (*destroy_shader)(bd_shader sh);
+	void      (*use_shader)(bd_shader sh);
 	void (*set_uniform_int)  (bd_shader sh, const char *name, int v);
 	void (*set_uniform_float)(bd_shader sh, const char *name, float v);
 	void (*set_uniform_vec2) (bd_shader sh, const char *name, float x, float y);
@@ -158,8 +121,22 @@ typedef struct bd_backend {
 	void (*set_uniform_vec4) (bd_shader sh, const char *name,
 	                          float x, float y, float z, float w);
 	void (*set_uniform_mat4) (bd_shader sh, const char *name, const float m[16]);
-	void (*bind_texture)(bd_texture t, int unit);
-	void (*draw_mesh)(bd_mesh m);
+
+	/* draw a triangle list of `count` vertices with the bound shader and
+	 * texture unit 0. The backend owns vertex-buffer management. */
+	void (*draw_verts)(const bd_vertex *verts, int count);
+
+	/* textures */
+	bd_texture (*load_texture)(const char *path);
+	bd_texture (*make_texture)(int w, int h, const void *rgba); /* rgba NULL = blank */
+	void       (*update_texture)(bd_texture t, int x, int y, int w, int h,
+	                             const void *rgba);
+	void       (*bind_texture)(bd_texture t, int unit);
+	void       (*destroy_texture)(bd_texture tex);
+
+	/* scissor clip rectangle (pixels, same space as viewport). */
+	void (*scissor)(int x, int y, int w, int h);
+	void (*scissor_off)(void);
 } bd_backend;
 
 #endif
