@@ -284,7 +284,7 @@ implementation. The plan is to **bundle both the GLES backend and the
 gallery into the `make dist` ZIP** so downstream consumers get a working
 example backend and a widget showcase, not just headers and sources.
 
-### Multiple native windows
+### Multiple native windows (implemented on the GLES backend)
 
 Open more than one top-level window so pop-up dialogs and genuinely
 multi-window applications are possible. This is the natural companion to
@@ -296,15 +296,41 @@ can (X11, Win32, Wayland, SDL) map each `bd_frame` to a real window.
 Backends that cannot (a single-surface or embedded host) must run their
 own in-surface window manager that lays out and decorates birdie-gui
 windows inside the one surface they own. The toolkit therefore treats
-"a window" as a backend capability, not a guarantee:
+"a window" as a backend capability, not a guarantee.
 
-- The `bd_backend` vtable gains window create/destroy/raise/move hooks plus
-  a capability flag the toolkit can query.
-- Each top-level `BD_FRAME` owns an optional backend window handle; when the
-  backend lacks multi-window support the toolkit composites frames itself.
-- Input/event routing already flows through the neutral `bd_event`
-  ([[birdie-backend-layer]]); it grows a window id so events dispatch to the
-  right frame.
+What landed:
+
+- The `bd_backend` vtable gained a `multi_window` capability flag plus
+  `window_open`/`window_close`/`window_begin`/`window_swap`/`window_width`/
+  `window_height`/`window_set_title`. `bd_event` gained a `window` id.
+- Each top-level `BD_FRAME` (parent `BD_NONE`) is a window. The first frame
+  adopts the primary window the host opened before `bd_gui_init` (so the GL
+  context exists for shader/atlas init); later frames call `window_open`.
+  `bd_frame_for_window()` maps an id back to its frame (e.g. for the host to
+  destroy the right frame on a WM close).
+- `bd_gui_render`/`bd_gui_layout`/`bd_gui_event` take a dual path on
+  `be->multi_window`: in multi-window mode render iterates windows
+  (`window_begin` → draw tree + the popups that window owns → `window_swap`)
+  and input routes to the frame matching `ev->window`. When the flag is 0
+  (ludica, the headless stub) the old single-window path is used unchanged,
+  so birdie and `make test` are unaffected.
+- The GLES backend (`src/guitest/`) implements it: one `EGLDisplay`/
+  `EGLContext`/`EGLConfig` shared across per-window `Window`+`EGLSurface`,
+  `win_poll` tags events with the originating window id. The gallery's "New
+  Window" button opens a real second OS window with its own widgets.
+- Routing/registration/render-all/destroy are covered by `make test` (a
+  multi-window recording stub); two independent native windows verified on a
+  real display.
+
+Still to do:
+
+- **ludica / single-surface compositing.** `multi_window` is 0 on ludica,
+  so only the primary frame shows; secondary frames need an in-surface
+  window manager (the "backend composites frames itself" path). Deferred.
+- Window decorations/raise/move/focus policy, and per-window hover-leave
+  (moving in one window leaves stale hover in others).
+- Popups still use global menu state; one open menu at a time across all
+  windows.
 
 ### Explorer / icon-browser widget
 

@@ -78,28 +78,43 @@ typedef struct {
     int      key;           /* WIN_KEY_* (key down / up) */
     unsigned codepoint;     /* Unicode codepoint (char) */
     int      width, height; /* new size (resize) */
+    int      window;        /* originating window id (1 = primary) */
 } win_event;
 
-/* Open the window and make its GL ES 3 context current. Returns 0 on success,
- * -1 on failure. */
+/* Open the primary window (id 1) and make its GL ES 3 context current. The
+ * EGL display/context/config created here are shared by any further windows.
+ * Returns 0 on success, -1 on failure. */
 int win_open(const char *title, int width, int height);
 
-/* Tear down the context, surface, and window. Safe to call after a failed
- * win_open(). */
+/* Tear down every window plus the context and display. Safe to call after a
+ * failed win_open(). */
 void win_close(void);
 
-/* Current drawable size in pixels. */
+/* Drawable size of the primary window in pixels. */
 int win_width(void);
 int win_height(void);
 
 /* Monotonic time in seconds since an unspecified epoch. */
 double win_time(void);
 
-/* Pop one pending event into *ev. Returns 1 if an event was written, 0 when
- * the queue is empty. */
+/* Pop one pending event (from any window) into *ev; ev->window is the id of
+ * the window it came from. Returns 1 if an event was written, 0 when the
+ * queue is empty. */
 int win_poll(win_event *ev);
 
-/* Present the rendered frame. Blocks for vsync, so it also paces the loop. */
+/* Present the primary window's rendered frame (== win_window_swap(1)). */
 void win_swap(void);
+
+/* ---- additional windows ----
+ * Each shares the primary window's GL context, so resources made on one are
+ * usable on all. win_window_begin() makes a window's surface current before
+ * drawing into it; win_window_swap() presents it. */
+int  win_window_open(const char *title, int w, int h); /* >0 id, 0 = fail */
+void win_window_close(int id);
+void win_window_begin(int id);
+void win_window_swap(int id);
+int  win_window_width(int id);
+int  win_window_height(int id);
+void win_window_set_title(int id, const char *title);
 
 #endif

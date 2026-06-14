@@ -19,6 +19,7 @@
 #include "window.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 static bd_id status;
 static bd_id term;
@@ -45,6 +46,19 @@ on_quit(bd_id id, void *arg)
 {
 	(void)id; (void)arg;
 	running = 0;
+}
+
+/* Close the window the Close button lives in: walk up to its top-level frame
+ * and destroy it (which closes the native window). */
+static void
+on_close_window(bd_id id, void *arg)
+{
+	(void)arg;
+	bd_id f = bd_parent(id);
+	while (f != BD_NONE && bd_parent(f) != BD_NONE)
+		f = bd_parent(f);
+	if (f != BD_NONE)
+		bd_destroy(f);
 }
 
 static void
@@ -90,6 +104,42 @@ on_xy(bd_id id, void *arg, float x, float y)
 	static char b[64];
 	snprintf(b, sizeof b, "%s: %.2f, %.2f", (const char *)arg, x, y);
 	report(b);
+}
+
+/* Open a second native window: a small dialog with its own widgets, proving
+ * windows render and take input independently. */
+static int dialog_n;
+
+static void
+on_new_window(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	static char title[32];
+	snprintf(title, sizeof title, "Dialog %d", ++dialog_n);
+
+	bd_id dlg = bd_create(BD_NONE, BD_FRAME,
+		BD_LABEL_S, title, BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_PREF_W_I, 360, BD_PREF_H_I, 240, BD_END);
+
+	bd_id body = bd_create(dlg, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1,
+		BD_PAD_I, 12, BD_GAP_I, 10, BD_END);
+	bd_create(body, BD_LABEL,
+		BD_LABEL_S, "A second native window.", BD_PREF_H_I, 18, BD_END);
+	bd_knob_create(body, &(bd_knob_desc){
+		.min = 0, .max = 1, .value = 0.5f, .dial = BD_DIAL_DOTS,
+		.cb = on_knob, .arg = (void *)"Dialog knob" },
+		BD_PREF_W_I, 60, BD_PREF_H_I, 60, BD_END);
+	bd_slider_create(body, BD_HORIZONTAL, 0.5f, on_slider,
+		(void *)"Dialog slider", BD_PREF_H_I, 24, BD_END);
+
+	bd_id bar = bd_create(dlg, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
+		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
+	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Close", BD_PREF_W_I, 90,
+		BD_ON_CLICK_F, on_close_window, BD_END);
+
+	report("opened a new window");
 }
 
 /* ---- a labeled framing panel for a gallery section ---- */
@@ -217,8 +267,8 @@ build_ui(void)
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
 		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
-	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Connect", BD_PREF_W_I, 90,
-		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"Connect", BD_END);
+	bd_create(bar, BD_BUTTON, BD_LABEL_S, "New Window", BD_PREF_W_I, 110,
+		BD_ON_CLICK_F, on_new_window, BD_END);
 	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Quit", BD_PREF_W_I, 90,
 		BD_ON_CLICK_F, on_quit, BD_END);
 	bd_slider_create(bar, BD_HORIZONTAL, 0.5f, on_slider, (void *)"Volume",
@@ -240,24 +290,33 @@ main(void)
 
 	bd_gui_init(&bd_backend_gles, NULL);
 	build_ui();
+	if (getenv("GALLERY_AUTODLG"))   /* open a second window for testing */
+		on_new_window(BD_NONE, NULL);
 
 	while (running) {
 		win_event wev;
 		while (win_poll(&wev)) {
-			if (wev.type == WIN_EV_CLOSE)
+			if (wev.type == WIN_EV_CLOSE) {
+				/* closing the primary quits; a secondary window
+				 * just destroys its frame */
+				if (wev.window == 1)
+					running = 0;
+				else
+					bd_destroy(bd_frame_for_window(wev.window));
+			} else if (wev.type == WIN_EV_KEY_DOWN
+			    && wev.key == WIN_KEY_ESCAPE) {
 				running = 0;
-			else if (wev.type == WIN_EV_KEY_DOWN
-			    && wev.key == WIN_KEY_ESCAPE)
-				running = 0;
+			}
 
 			bd_event bev;
 			if (bd_event_from_win(&wev, &bev))
 				bd_gui_event(&bev);
 		}
 
+		/* the GLES backend is multi_window, so bd_gui_render() makes each
+		 * window current and presents it; no win_swap() here */
 		bd_gui_layout(win_width(), win_height());
 		bd_gui_render();
-		win_swap();
 	}
 
 	bd_gui_cleanup();

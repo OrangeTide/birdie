@@ -108,4 +108,11 @@ int  bd_gui_event(const bd_event *ev);
 /* The active chrome theme, so extension widgets can match the chrome. */
 const bd_theme *bd_gui_theme(void);
 
+/* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
+ * backend with multi-window support the toolkit gives each a native window and
+ * tags events with its id (bd_event.window). bd_frame_for_window() maps a
+ * backend window id back to its frame so a host can, e.g., destroy the right
+ * frame on a window-close event. Returns BD_NONE if no frame owns that id. */
+bd_id bd_frame_for_window(int window_id);
+
 #endif

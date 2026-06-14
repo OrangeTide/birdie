@@ -85,6 +85,8 @@ typedef struct {
 	float    scroll_dy;     /* wheel delta (scroll) */
 	int      key;           /* BD_KEY_* (key down) */
 	unsigned codepoint;     /* Unicode codepoint (char) */
+	int      window;        /* originating window id (0 = primary). Backends
+	                           without multi_window leave this 0. */
 } bd_event;
 
 /* ------------------------------------------------------------------ */
@@ -137,6 +139,30 @@ typedef struct bd_backend {
 	/* scissor clip rectangle (pixels, same space as viewport). */
 	void (*scissor)(int x, int y, int w, int h);
 	void (*scissor_off)(void);
+
+	/* ---- multiple native windows (optional) ----
+	 *
+	 * A backend that can host more than one OS window sets multi_window to 1
+	 * and provides the window_* hooks. The toolkit then maps each top-level
+	 * BD_FRAME to a backend window: it renders each window's tree between
+	 * window_begin()/window_swap() and tags input events with the window id
+	 * the event came from.
+	 *
+	 * Window id 1 is the primary window the host already opened before
+	 * bd_gui_init(); the toolkit adopts it for the first top-level frame and
+	 * calls window_open() for any further frames. The id is also what appears
+	 * in bd_event.window.
+	 *
+	 * When multi_window is 0 these hooks are unused (leave them NULL): the
+	 * toolkit renders a single window and the host presents it as before. */
+	int multi_window;
+	int  (*window_open)(const char *title, int w, int h); /* >0 id, 0 = fail */
+	void (*window_close)(int id);
+	void (*window_begin)(int id);          /* make current + set draw target */
+	void (*window_swap)(int id);           /* present the rendered frame */
+	int  (*window_width)(int id);
+	int  (*window_height)(int id);
+	void (*window_set_title)(int id, const char *title);
 } bd_backend;
 
 #endif

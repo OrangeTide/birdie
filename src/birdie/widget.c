@@ -88,6 +88,8 @@ struct widget {
 	int sel_anchor;
 	float scroll_x;
 
+	int win_id;             /* backend window id for a top-level frame; 0 = none */
+
 	void *state;            /* per-instance data for extension widget types */
 };
 
@@ -95,9 +97,15 @@ struct widget {
 /* module state                                                       */
 /* ------------------------------------------------------------------ */
 
+#define MAX_WINDOWS 16
+
 static struct widget pool[MAX_WIDGETS];
 static int pool_next = 1;
 static bd_id root = BD_NONE;
+/* Top-level frames, in creation order; windows[0] == root is the primary. With
+ * a multi_window backend each maps to a native window (pool[].win_id). */
+static bd_id windows[MAX_WINDOWS];
+static int   window_count;
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id active_menu = BD_NONE;
@@ -535,12 +543,76 @@ create_begin(bd_id parent, int type)
 	return id;
 }
 
+/*
+ * Register a top-level frame as a window and, on a multi_window backend, give
+ * it a native window. The first frame adopts the primary window (id 1) the
+ * host already opened; later frames open their own. Runs after attributes are
+ * applied, so the title and preferred size are known.
+ */
+static void
+register_window(bd_id id)
+{
+	struct widget *w = &pool[id];
+	if (w->type != BD_FRAME || w->parent != BD_NONE)
+		return;
+	if (window_count < MAX_WINDOWS)
+		windows[window_count] = id;
+	window_count++;
+
+	if (!be || !be->multi_window)
+		return;
+	if (window_count == 1) {
+		w->win_id = 1;                  /* adopt the host's primary window */
+		if (be->window_set_title && w->label)
+			be->window_set_title(1, w->label);
+	} else if (be->window_open) {
+		int ww = w->pref_w > 0 ? w->pref_w : 480;
+		int wh = w->pref_h > 0 ? w->pref_h : 360;
+		w->win_id = be->window_open(w->label ? w->label : "", ww, wh);
+	}
+}
+
 static void
 create_finish(bd_id id)
 {
 	struct widget *w = &pool[id];
 	if (w->type == BD_MENU && w->pref_w == 0 && w->label)
 		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
+	register_window(id);
+}
+
+/* The top-level frame an id belongs to (itself if already a root). */
+static bd_id
+top_frame_of(bd_id id)
+{
+	while (id != BD_NONE && pool[id].parent != BD_NONE)
+		id = pool[id].parent;
+	return id;
+}
+
+/* The frame that owns backend window `win`, or root if none matches (single
+ * window / window 0). */
+static bd_id
+frame_for_window(int win)
+{
+	if (win != 0)
+		for (int i = 0; i < window_count; i++) {
+			bd_id f = windows[i];
+			if (pool[f].alive && pool[f].win_id == win)
+				return f;
+		}
+	return root;
+}
+
+bd_id
+bd_frame_for_window(int window_id)
+{
+	for (int i = 0; i < window_count; i++) {
+		bd_id f = windows[i];
+		if (pool[f].alive && pool[f].win_id == window_id)
+			return f;
+	}
+	return BD_NONE;
 }
 
 bd_id
@@ -610,6 +682,20 @@ bd_destroy(bd_id id)
 		cls->destroy(id, w->state);
 	free(w->state);
 	w->state = NULL;
+
+	/* drop a top-level frame from the window list and close its native
+	 * window (but never close the host-owned primary, id 1) */
+	for (int i = 0; i < window_count; i++) {
+		if (windows[i] != id)
+			continue;
+		if (be && be->multi_window && be->window_close &&
+		    w->win_id > 1)
+			be->window_close(w->win_id);
+		for (int j = i; j < window_count - 1; j++)
+			windows[j] = windows[j + 1];
+		window_count--;
+		break;
+	}
 
 	if (root == id)
 		root = BD_NONE;
@@ -1122,11 +1208,12 @@ render_popup(bd_id id)
 }
 
 static void
-render_popups(void)
+render_popups(bd_id frame)
 {
 	bd_id i;
 	for (i = 1; i < (bd_id)pool_next; i++) {
-		if (pool[i].alive && pool[i].type == BD_MENU && pool[i].menu_open)
+		if (pool[i].alive && pool[i].type == BD_MENU && pool[i].menu_open
+		    && top_frame_of(i) == frame)
 			render_popup(i);
 	}
 }
@@ -1157,7 +1244,7 @@ pin_menu(bd_id id)
 }
 
 static int
-handle_menu_event(const bd_event *ev)
+handle_menu_event(const bd_event *ev, bd_id frame)
 {
 	switch (ev->type) {
 	case BD_EV_MOUSE_MOVE:
@@ -1198,6 +1285,8 @@ handle_menu_event(const bd_event *ev)
 		for (i = 1; i < (bd_id)pool_next; i++) {
 			struct widget *m = &pool[i];
 			if (!m->alive || m->type != BD_MENU || !m->menu_open)
+				continue;
+			if (top_frame_of(i) != frame)
 				continue;
 			if (!in_rect(mx, my, m->popup_x, m->popup_y,
 			    m->popup_w, m->popup_h))
@@ -1241,6 +1330,8 @@ handle_menu_event(const bd_event *ev)
 		for (i = 1; i < (bd_id)pool_next; i++) {
 			struct widget *m = &pool[i];
 			if (!m->alive || m->type != BD_MENU)
+				continue;
+			if (top_frame_of(i) != frame)
 				continue;
 			if (!in_rect(mx, my, m->x, m->y, m->w, m->h))
 				continue;
@@ -1482,10 +1573,23 @@ bd_gui_cleanup(void)
 	memset(pool, 0, sizeof pool);
 	pool_next = 1;
 	root = BD_NONE;
+	window_count = 0;
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
 	drag_menu = BD_NONE;
+}
+
+/* Place one top-level frame and its tree at the origin of the given size. */
+static void
+layout_frame(bd_id frame, int w, int h)
+{
+	struct widget *r = &pool[frame];
+	r->x = 0;
+	r->y = 0;
+	r->w = w;
+	r->h = h;
+	layout_children(frame);
 }
 
 void
@@ -1493,13 +1597,20 @@ bd_gui_layout(int win_w, int win_h)
 {
 	if (root == BD_NONE)
 		return;
-	struct widget *r = &pool[root];
-	r->x = 0;
-	r->y = 0;
-	r->w = win_w;
-	r->h = win_h;
-	layout_children(root);
 
+	if (be && be->multi_window) {
+		for (int i = 0; i < window_count; i++) {
+			bd_id f = windows[i];
+			if (!pool[f].alive)
+				continue;
+			layout_frame(f, be->window_width(pool[f].win_id),
+			    be->window_height(pool[f].win_id));
+		}
+	} else {
+		layout_frame(root, win_w, win_h);
+	}
+
+	/* shared pass: popups and extension-widget layout over the whole pool */
 	bd_id i;
 	for (i = 1; i < (bd_id)pool_next; i++) {
 		struct widget *wi = &pool[i];
@@ -1513,25 +1624,45 @@ bd_gui_layout(int win_w, int win_h)
 	}
 }
 
-void
-bd_gui_render(void)
+/* Render one top-level frame's tree plus the popups it owns into the currently
+ * bound draw target of size w x h. */
+static void
+render_frame(bd_id frame, int w, int h)
 {
-	if (root == BD_NONE)
-		return;
-	int w = be->width(), h = be->height();
-
 	be->viewport(0, 0, w, h);
 	be->clear(0.0f, 0.0f, 0.0f, 1.0f);
 
 	/* layer 1: main widget tree */
 	bd_draw_begin(w, h);
-	render_widget(root);
+	render_widget(frame);
 	bd_draw_end();
 
-	/* layer 2: popup overlays */
+	/* layer 2: popup overlays owned by this frame */
 	bd_draw_begin(w, h);
-	render_popups();
+	render_popups(frame);
 	bd_draw_end();
+}
+
+void
+bd_gui_render(void)
+{
+	if (root == BD_NONE)
+		return;
+
+	if (be->multi_window) {
+		for (int i = 0; i < window_count; i++) {
+			bd_id f = windows[i];
+			if (!pool[f].alive)
+				continue;
+			int id = pool[f].win_id;
+			be->window_begin(id);
+			render_frame(f, be->window_width(id),
+			    be->window_height(id));
+			be->window_swap(id);
+		}
+	} else {
+		render_frame(root, be->width(), be->height());
+	}
 }
 
 int
@@ -1540,7 +1671,12 @@ bd_gui_event(const bd_event *ev)
 	if (root == BD_NONE)
 		return 0;
 
-	if (handle_menu_event(ev))
+	/* the top-level frame this event is destined for (its own window) */
+	bd_id frame = frame_for_window(ev->window);
+	if (frame == BD_NONE || !pool[frame].alive)
+		return 0;
+
+	if (handle_menu_event(ev, frame))
 		return 1;
 
 	/* keyboard events for focused input line */
@@ -1562,11 +1698,11 @@ bd_gui_event(const bd_event *ev)
 			ext_event(pointer_capture, ev);
 			return 1;
 		}
-		update_hover(root, ev->x, ev->y);
+		update_hover(frame, ev->x, ev->y);
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL: {
-		bd_id ext = hit_extension(root, mouse_x, mouse_y);
+		bd_id ext = hit_extension(frame, mouse_x, mouse_y);
 		if (ext != BD_NONE && ext_event(ext, ev))
 			return 1;
 		return 0;
@@ -1576,7 +1712,7 @@ bd_gui_event(const bd_event *ev)
 		if (ev->button == BD_MOUSE_LEFT) {
 			int mx = ev->x;
 			int my = ev->y;
-			bd_id hit = hit_interactive(root, mx, my);
+			bd_id hit = hit_interactive(frame, mx, my);
 
 			if (hit != BD_NONE &&
 			    pool[hit].type == BD_INPUT_LINE) {
@@ -1588,7 +1724,7 @@ bd_gui_event(const bd_event *ev)
 			focus_id = BD_NONE;
 
 			/* a value widget grabs the pointer for the drag */
-			bd_id ext = hit_extension(root, mx, my);
+			bd_id ext = hit_extension(frame, mx, my);
 			if (ext != BD_NONE) {
 				pointer_capture = ext;
 				ext_event(ext, ev);

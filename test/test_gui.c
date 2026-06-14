@@ -70,6 +70,36 @@ static const bd_backend stub = {
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
 };
 
+/* ---- multi-window stub: like `stub` but advertises native windows ---- */
+static int mw_next_id = 2;          /* id 1 is the adopted primary */
+static int mw_open(const char *t, int w, int h){ (void)t;(void)w;(void)h; return mw_next_id++; }
+static void mw_close(int id){ (void)id; }
+static void mw_begin(int id){ (void)id; }
+static void mw_swap(int id){ (void)id; }
+static int  mw_w(int id){ (void)id; return 400; }
+static int  mw_h(int id){ (void)id; return 300; }
+static void mw_title(int id, const char *t){ (void)id; (void)t; }
+
+static const bd_backend mwstub = {
+	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
+	.clear=be_clear,
+	.make_shader=be_make_shader, .destroy_shader=be_destroy_shader,
+	.use_shader=be_use_shader, .set_uniform_int=be_uni_i, .set_uniform_float=be_uni_f,
+	.set_uniform_vec2=be_uni_2, .set_uniform_vec3=be_uni_3, .set_uniform_vec4=be_uni_4,
+	.set_uniform_mat4=be_uni_m, .draw_verts=be_draw_verts,
+	.load_texture=be_load_tex, .make_texture=be_make_tex, .update_texture=be_update_tex,
+	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
+	.scissor=be_scissor, .scissor_off=be_scissor_off,
+	.multi_window=1, .window_open=mw_open, .window_close=mw_close,
+	.window_begin=mw_begin, .window_swap=mw_swap,
+	.window_width=mw_w, .window_height=mw_h, .window_set_title=mw_title,
+};
+
+/* per-window click counters */
+static int click_w1, click_w2;
+static void on_click_w1(bd_id id, void *a){ (void)id; (void)a; click_w1++; }
+static void on_click_w2(bd_id id, void *a){ (void)id; (void)a; click_w2++; }
+
 /* ---- click callback ---- */
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
@@ -313,6 +343,52 @@ main(void)
 
 	bd_gui_cleanup();
 	check("cleanup completed", 1);
+
+	/* ---- multiple windows: event routing by window id ---- */
+	bd_gui_init(&mwstub, NULL);
+
+	bd_id f1 = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id b1 = bd_create(f1, BD_BUTTON, BD_LABEL_S, "one", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_click_w1, BD_END);
+	bd_id f2 = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id b2 = bd_create(f2, BD_BUTTON, BD_LABEL_S, "two", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_click_w2, BD_END);
+
+	/* first frame adopts the primary (window 1); the second opens window 2 */
+	check("primary frame adopts window 1", bd_frame_for_window(1) == f1);
+	check("second frame opened window 2", bd_frame_for_window(2) == f2);
+
+	bd_gui_layout(0, 0);   /* multi_window: sizes come from the backend */
+
+	/* both buttons fill their window, so they share the same coordinates;
+	 * only ev.window distinguishes which one a click reaches */
+	int x1, y1, w1_, h1_;
+	bd_widget_rect(b1, &x1, &y1, &w1_, &h1_);
+	int mcx = x1 + w1_/2, mcy = y1 + h1_/2;
+
+	bd_event d1 = mouse(BD_EV_MOUSE_DOWN, mcx, mcy); d1.window = 1;
+	bd_event u1 = mouse(BD_EV_MOUSE_UP,   mcx, mcy); u1.window = 1;
+	bd_gui_event(&d1); bd_gui_event(&u1);
+	check("click tagged window 1 hit frame-1 button",
+	    click_w1 == 1 && click_w2 == 0);
+
+	bd_event d2 = mouse(BD_EV_MOUSE_DOWN, mcx, mcy); d2.window = 2;
+	bd_event u2 = mouse(BD_EV_MOUSE_UP,   mcx, mcy); u2.window = 2;
+	bd_gui_event(&d2); bd_gui_event(&u2);
+	check("click tagged window 2 hit frame-2 button",
+	    click_w2 == 1 && click_w1 == 1);
+
+	/* render must visit both windows */
+	n_drawverts = 0;
+	bd_gui_render();
+	check("render drew both windows", n_drawverts > 0);
+
+	/* closing the second frame releases its window and unregisters it */
+	bd_destroy(f2);
+	check("destroying frame-2 frees window 2", bd_frame_for_window(2) == BD_NONE);
+	(void)b2;
+
+	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;

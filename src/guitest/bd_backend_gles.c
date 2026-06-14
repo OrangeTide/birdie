@@ -35,6 +35,7 @@ static struct {
 	GLuint vao, vbo;
 	int    vbo_cap;          /* current VBO capacity in vertices */
 	GLuint cur_program;      /* program bound by use_shader */
+	int    cur_window;       /* window made current by window_begin */
 	int    ready;
 } gl;
 
@@ -65,8 +66,10 @@ gl_lazy_init(void)
 /* frame / window                                                     */
 /* ------------------------------------------------------------------ */
 
-static int    be_width(void)  { return win_width(); }
-static int    be_height(void) { return win_height(); }
+/* width()/height() report the window made current by window_begin (the one
+ * being rendered), falling back to the primary before any begin. */
+static int    be_width(void)  { return win_window_width(gl.cur_window ? gl.cur_window : 1); }
+static int    be_height(void) { return win_window_height(gl.cur_window ? gl.cur_window : 1); }
 static double be_time(void)   { return win_time(); }
 
 static void be_viewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
@@ -288,6 +291,26 @@ be_scissor(int x, int y, int w, int h)
 static void be_scissor_off(void) { glDisable(GL_SCISSOR_TEST); }
 
 /* ------------------------------------------------------------------ */
+/* multiple windows                                                   */
+/* ------------------------------------------------------------------ */
+
+static int  be_window_open(const char *title, int w, int h)
+{ return win_window_open(title, w, h); }
+static void be_window_close(int id) { win_window_close(id); }
+
+static void
+be_window_begin(int id)
+{
+	gl.cur_window = id;
+	win_window_begin(id);
+}
+
+static void be_window_swap(int id)              { win_window_swap(id); }
+static int  be_window_width(int id)             { return win_window_width(id); }
+static int  be_window_height(int id)            { return win_window_height(id); }
+static void be_window_set_title(int id, const char *t) { win_window_set_title(id, t); }
+
+/* ------------------------------------------------------------------ */
 /* vtable                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -314,6 +337,14 @@ const bd_backend bd_backend_gles = {
 	.destroy_texture   = be_destroy_texture,
 	.scissor           = be_scissor,
 	.scissor_off       = be_scissor_off,
+	.multi_window      = 1,
+	.window_open       = be_window_open,
+	.window_close      = be_window_close,
+	.window_begin      = be_window_begin,
+	.window_swap       = be_window_swap,
+	.window_width      = be_window_width,
+	.window_height     = be_window_height,
+	.window_set_title  = be_window_set_title,
 };
 
 /* ------------------------------------------------------------------ */
@@ -325,6 +356,7 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 {
 	bd_event e = {0};
 	e.mods = ev->mods;
+	e.window = ev->window;
 
 	switch (ev->type) {
 	case WIN_EV_MOUSE_MOVE:

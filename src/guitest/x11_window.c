@@ -1,6 +1,12 @@
 /*
  * x11_window.c : window.h backend for X11 + EGL + OpenGL ES 3.
  *
+ * Holds a small table of top-level windows that share one EGLDisplay,
+ * EGLConfig, and EGLContext (so textures/shaders made on one window work on
+ * all). win_open() creates the primary window as id 1; win_window_open() adds
+ * more. win_poll() drains events from every window and tags each with the id
+ * it came from.
+ *
  * Seeded from the smoltrek windowing layer; adopted into birdie-gui.
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -19,11 +25,11 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 
-/* Seeded from ~/DEVEL/screen-2/src/initgl (X11/EGL/GLES window+context). */
-
 #ifndef EGL_OPENGL_ES3_BIT_KHR
 #  define EGL_OPENGL_ES3_BIT_KHR 0x00000040
 #endif
+
+#define MAX_WINDOWS 16
 
 static const EGLint config_attribs[] = {
     EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
@@ -42,28 +48,70 @@ static const EGLint context_attribs[] = {
     EGL_NONE,
 };
 
-/* The single top-level window and its GL context. */
+/* One top-level window. id 0 means an empty slot. */
+struct win_slot {
+    int        id;
+    Window     xwindow;
+    XIC        xic;
+    EGLSurface egl_surface;
+    int        width, height;
+};
+
+/* Display + GL context shared by every window. */
 static struct {
     Display   *xdisplay;
-    Window     xwindow;
     Atom       wm_delete_window;
-    XIM        xim;            /* input method (may be NULL) */
-    XIC        xic;            /* input context for UTF-8 text */
+    XIM        xim;
     EGLDisplay egl_display;
     EGLConfig  egl_config;
-    EGLSurface egl_surface;
     EGLContext egl_context;
-    int        width, height;
-} win;
+    struct win_slot windows[MAX_WINDOWS];   /* slot 0 is window id 1 */
+    int        next_id;
+} g;
 
 /* ------------------------------------------------------------------ */
-/* setup / teardown                                                   */
+/* slot lookup                                                        */
 /* ------------------------------------------------------------------ */
 
-static Window
-native_window_create(const char *title, int width, int height)
+static struct win_slot *
+slot_by_id(int id)
 {
-    Screen *screen = DefaultScreenOfDisplay(win.xdisplay);
+    for (int i = 0; i < MAX_WINDOWS; i++)
+        if (g.windows[i].id == id)
+            return &g.windows[i];
+    return NULL;
+}
+
+static struct win_slot *
+slot_by_xwindow(Window w)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++)
+        if (g.windows[i].id && g.windows[i].xwindow == w)
+            return &g.windows[i];
+    return NULL;
+}
+
+static struct win_slot *
+slot_free(void)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++)
+        if (g.windows[i].id == 0)
+            return &g.windows[i];
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* window create / destroy                                            */
+/* ------------------------------------------------------------------ */
+
+static int
+window_create(const char *title, int width, int height)
+{
+    struct win_slot *s = slot_free();
+    if (!s)
+        return 0;
+
+    Screen *screen = DefaultScreenOfDisplay(g.xdisplay);
     Window root = RootWindowOfScreen(screen);
     unsigned long black = BlackPixelOfScreen(screen);
 
@@ -76,74 +124,100 @@ native_window_create(const char *title, int width, int height)
 
     int x = (WidthOfScreen(screen) - width) / 2;
     int y = (HeightOfScreen(screen) - height) / 2;
-    Window w = XCreateWindow(win.xdisplay, root, x, y, width, height, 0,
+    Window xw = XCreateWindow(g.xdisplay, root, x, y, width, height, 0,
         CopyFromParent, InputOutput, CopyFromParent,
         CWBorderPixel | CWEventMask, &wattr);
 
-    XSetWMProtocols(win.xdisplay, w, &win.wm_delete_window, 1);
-    XStoreName(win.xdisplay, w, title);
-    XMapWindow(win.xdisplay, w);
+    XSetWMProtocols(g.xdisplay, xw, &g.wm_delete_window, 1);
+    XStoreName(g.xdisplay, xw, title);
+    XMapWindow(g.xdisplay, xw);
 
-    return w;
+    EGLSurface surf = eglCreateWindowSurface(g.egl_display, g.egl_config,
+        xw, NULL);
+    if (surf == EGL_NO_SURFACE) {
+        XDestroyWindow(g.xdisplay, xw);
+        return 0;
+    }
+
+    XIC xic = NULL;
+    if (g.xim) {
+        xic = XCreateIC(g.xim,
+            XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+            XNClientWindow, xw, XNFocusWindow, xw, (void *)NULL);
+        if (xic)
+            XSetICFocus(xic);
+    }
+
+    s->id = g.next_id++;
+    s->xwindow = xw;
+    s->xic = xic;
+    s->egl_surface = surf;
+    s->width = width;
+    s->height = height;
+    return s->id;
 }
+
+static void
+window_destroy(struct win_slot *s)
+{
+    if (!s || !s->id)
+        return;
+    /* never leave a destroyed surface current */
+    eglMakeCurrent(g.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
+        g.egl_context);
+    if (s->xic)
+        XDestroyIC(s->xic);
+    if (s->egl_surface != EGL_NO_SURFACE)
+        eglDestroySurface(g.egl_display, s->egl_surface);
+    if (s->xwindow)
+        XDestroyWindow(g.xdisplay, s->xwindow);
+    memset(s, 0, sizeof(*s));
+}
+
+/* ------------------------------------------------------------------ */
+/* setup / teardown                                                   */
+/* ------------------------------------------------------------------ */
 
 int
 win_open(const char *title, int width, int height)
 {
     setlocale(LC_ALL, "");
-    memset(&win, 0, sizeof(win));
-    win.width = width;
-    win.height = height;
+    memset(&g, 0, sizeof(g));
+    g.next_id = 1;
 
-    win.xdisplay = XOpenDisplay(NULL);
-    if (!win.xdisplay)
+    g.xdisplay = XOpenDisplay(NULL);
+    if (!g.xdisplay)
         return -1;
 
-    win.wm_delete_window = XInternAtom(win.xdisplay, "WM_DELETE_WINDOW", False);
+    g.wm_delete_window = XInternAtom(g.xdisplay, "WM_DELETE_WINDOW", False);
 
-    win.egl_display = eglGetDisplay(win.xdisplay);
-    if (win.egl_display == EGL_NO_DISPLAY)
+    g.egl_display = eglGetDisplay(g.xdisplay);
+    if (g.egl_display == EGL_NO_DISPLAY)
         goto fail;
-    if (!eglInitialize(win.egl_display, NULL, NULL))
+    if (!eglInitialize(g.egl_display, NULL, NULL))
         goto fail;
     eglBindAPI(EGL_OPENGL_ES_API);
 
     EGLint num_config;
-    if (!eglChooseConfig(win.egl_display, config_attribs, &win.egl_config, 1,
+    if (!eglChooseConfig(g.egl_display, config_attribs, &g.egl_config, 1,
             &num_config) || num_config < 1)
         goto fail;
 
-    win.xwindow = native_window_create(title, width, height);
-
-    win.egl_surface = eglCreateWindowSurface(win.egl_display, win.egl_config,
-        win.xwindow, NULL);
-    if (win.egl_surface == EGL_NO_SURFACE)
-        goto fail;
-
-    win.egl_context = eglCreateContext(win.egl_display, win.egl_config,
+    g.egl_context = eglCreateContext(g.egl_display, g.egl_config,
         EGL_NO_CONTEXT, context_attribs);
-    if (win.egl_context == EGL_NO_CONTEXT)
+    if (g.egl_context == EGL_NO_CONTEXT)
         goto fail;
 
-    if (!eglMakeCurrent(win.egl_display, win.egl_surface, win.egl_surface,
-            win.egl_context))
-        goto fail;
-
-    /* Optional X input method for UTF-8 / compose / IME text entry. If it is
-     * unavailable we fall back to XLookupString (Latin-1) in translate(). */
+    /* Optional X input method for UTF-8 / compose / IME text entry. Each
+     * window gets its own input context in window_create(). */
     XSetLocaleModifiers("");
-    win.xim = XOpenIM(win.xdisplay, NULL, NULL, NULL);
-    if (win.xim) {
-        win.xic = XCreateIC(win.xim,
-            XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
-            XNClientWindow, win.xwindow,
-            XNFocusWindow, win.xwindow,
-            (void *)NULL);
-        if (win.xic)
-            XSetICFocus(win.xic);
-    }
+    g.xim = XOpenIM(g.xdisplay, NULL, NULL, NULL);
 
-    eglSwapInterval(win.egl_display, 1);
+    if (window_create(title, width, height) == 0)
+        goto fail;
+
+    win_window_begin(1);
+    eglSwapInterval(g.egl_display, 1);
     return 0;
 
 fail:
@@ -154,38 +228,84 @@ fail:
 void
 win_close(void)
 {
-    if (win.egl_display != EGL_NO_DISPLAY) {
-        eglMakeCurrent(win.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
+    if (g.egl_display != EGL_NO_DISPLAY) {
+        for (int i = 0; i < MAX_WINDOWS; i++)
+            if (g.windows[i].id)
+                window_destroy(&g.windows[i]);
+        eglMakeCurrent(g.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
             EGL_NO_CONTEXT);
-        if (win.egl_context != EGL_NO_CONTEXT)
-            eglDestroyContext(win.egl_display, win.egl_context);
-        if (win.egl_surface != EGL_NO_SURFACE)
-            eglDestroySurface(win.egl_display, win.egl_surface);
-        eglTerminate(win.egl_display);
+        if (g.egl_context != EGL_NO_CONTEXT)
+            eglDestroyContext(g.egl_display, g.egl_context);
+        eglTerminate(g.egl_display);
     }
-    if (win.xic)
-        XDestroyIC(win.xic);
-    if (win.xim)
-        XCloseIM(win.xim);
-    if (win.xdisplay) {
-        if (win.xwindow)
-            XDestroyWindow(win.xdisplay, win.xwindow);
-        XCloseDisplay(win.xdisplay);
-    }
-    memset(&win, 0, sizeof(win));
+    if (g.xim)
+        XCloseIM(g.xim);
+    if (g.xdisplay)
+        XCloseDisplay(g.xdisplay);
+    memset(&g, 0, sizeof(g));
+}
+
+/* ------------------------------------------------------------------ */
+/* per-window operations                                              */
+/* ------------------------------------------------------------------ */
+
+int
+win_window_open(const char *title, int w, int h)
+{
+    if (!g.xdisplay)
+        return 0;
+    return window_create(title, w, h);
+}
+
+void
+win_window_close(int id)
+{
+    window_destroy(slot_by_id(id));
+}
+
+void
+win_window_begin(int id)
+{
+    struct win_slot *s = slot_by_id(id);
+    if (s)
+        eglMakeCurrent(g.egl_display, s->egl_surface, s->egl_surface,
+            g.egl_context);
+}
+
+void
+win_window_swap(int id)
+{
+    struct win_slot *s = slot_by_id(id);
+    if (s)
+        eglSwapBuffers(g.egl_display, s->egl_surface);
 }
 
 int
-win_width(void)
+win_window_width(int id)
 {
-    return win.width;
+    struct win_slot *s = slot_by_id(id);
+    return s ? s->width : 0;
 }
 
 int
-win_height(void)
+win_window_height(int id)
 {
-    return win.height;
+    struct win_slot *s = slot_by_id(id);
+    return s ? s->height : 0;
 }
+
+void
+win_window_set_title(int id, const char *title)
+{
+    struct win_slot *s = slot_by_id(id);
+    if (s)
+        XStoreName(g.xdisplay, s->xwindow, title);
+}
+
+/* primary-window (id 1) conveniences */
+int    win_width(void)  { return win_window_width(1); }
+int    win_height(void) { return win_window_height(1); }
+void   win_swap(void)   { win_window_swap(1); }
 
 double
 win_time(void)
@@ -193,12 +313,6 @@ win_time(void)
     struct timespec tp;
     clock_gettime(CLOCK_MONOTONIC, &tp);
     return tp.tv_sec + tp.tv_nsec / 1e9;
-}
-
-void
-win_swap(void)
-{
-    eglSwapBuffers(win.egl_display, win.egl_surface);
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,27 +374,31 @@ utf8_first(const char *s, int len)
     return cp;
 }
 
-/* Translate one XEvent into *ev. Returns 1 if it produced an event, else 0
- * (the caller skips it and tries the next). */
+/* Translate one XEvent into *ev. Returns 1 if it produced an event, else 0. */
 static int
 translate(XEvent *xev, win_event *ev)
 {
+    struct win_slot *s = slot_by_xwindow(xev->xany.window);
+    if (!s)
+        return 0;
+
     memset(ev, 0, sizeof(*ev));
+    ev->window = s->id;
 
     switch (xev->type) {
     case ConfigureNotify:
-        if (xev->xconfigure.width == win.width
-            && xev->xconfigure.height == win.height)
+        if (xev->xconfigure.width == s->width
+            && xev->xconfigure.height == s->height)
             return 0;
-        win.width = xev->xconfigure.width;
-        win.height = xev->xconfigure.height;
+        s->width = xev->xconfigure.width;
+        s->height = xev->xconfigure.height;
         ev->type = WIN_EV_RESIZE;
-        ev->width = win.width;
-        ev->height = win.height;
+        ev->width = s->width;
+        ev->height = s->height;
         return 1;
 
     case ClientMessage:
-        if ((Atom)xev->xclient.data.l[0] == win.wm_delete_window) {
+        if ((Atom)xev->xclient.data.l[0] == g.wm_delete_window) {
             ev->type = WIN_EV_CLOSE;
             return 1;
         }
@@ -332,22 +450,17 @@ translate(XEvent *xev, win_event *ev)
         Status status = XLookupNone;
         int len, mods = map_mods(xev->xkey.state);
 
-        /* Prefer the input context (UTF-8, compose, IME); fall back to the
-         * Latin-1 XLookupString when no input method is available. */
-        if (win.xic)
-            len = Xutf8LookupString(win.xic, &xev->xkey, buf, sizeof(buf) - 1,
+        if (s->xic)
+            len = Xutf8LookupString(s->xic, &xev->xkey, buf, sizeof(buf) - 1,
                 &sym, &status);
         else
             len = XLookupString(&xev->xkey, buf, sizeof(buf) - 1, &sym, NULL);
         buf[len < 0 ? 0 : len] = '\0';
 
-        int got_text = win.xic
+        int got_text = s->xic
             ? (status == XLookupChars || status == XLookupBoth)
             : (len > 0);
 
-        /* Committed text with no command modifier becomes a CHAR; navigation
-         * keys and shortcuts become a KEY_DOWN. A multi-codepoint IME commit
-         * only yields its first codepoint here. */
         if (got_text && (unsigned char)buf[0] >= 0x20
             && !(mods & (WIN_MOD_CTRL | WIN_MOD_ALT))) {
             ev->type = WIN_EV_CHAR;
@@ -370,9 +483,9 @@ translate(XEvent *xev, win_event *ev)
 int
 win_poll(win_event *ev)
 {
-    while (XPending(win.xdisplay)) {
+    while (g.xdisplay && XPending(g.xdisplay)) {
         XEvent xev;
-        XNextEvent(win.xdisplay, &xev);
+        XNextEvent(g.xdisplay, &xev);
         if (XFilterEvent(&xev, None))
             continue;
         if (translate(&xev, ev))
