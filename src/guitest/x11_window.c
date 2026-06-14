@@ -13,6 +13,7 @@
 
 #include "window.h"
 
+#include <ctype.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,11 +62,27 @@ struct win_slot {
     int        width, height;
 };
 
+/* A stylus device learned from XInput2: which valuators carry pressure/tilt
+ * and their ranges, plus the live tip/barrel/eraser state. Cached by device
+ * id so each XI event need not re-query the server. */
+#define MAX_PENDEV 8
+struct pen_dev {
+    int    id;          /* XInput2 source device id, 0 = empty slot */
+    int    is_pen;      /* has a pressure valuator */
+    int    eraser;      /* this device is the eraser end */
+    int    v_press;     /* valuator number for pressure, -1 = none */
+    int    v_tiltx, v_tilty;
+    double pmin, pmax;  /* pressure valuator range */
+    int    down;        /* tip currently in contact */
+    int    barrel;      /* a barrel (side) button is held */
+};
+
 /* Display + GL context shared by every window. */
 static struct {
     Display   *xdisplay;
     Atom       wm_delete_window;
     Atom       a_clipboard, a_utf8, a_targets, a_prop;
+    Atom       a_press, a_tiltx, a_tilty;   /* XInput2 valuator label atoms */
     XIM        xim;
     EGLDisplay egl_display;
     EGLConfig  egl_config;
@@ -74,7 +91,86 @@ static struct {
     int        next_id;
     char       clip[4096];                  /* our owned clipboard text */
     int        xi_opcode;                   /* XInput2 major opcode, 0 = none */
+    struct pen_dev pendev[MAX_PENDEV];
 } g;
+
+/* Case-insensitive substring test (avoids the GNU strcasestr). */
+static int
+name_has(const char *hay, const char *needle)
+{
+    if (!hay)
+        return 0;
+    for (; *hay; hay++) {
+        const char *h = hay, *n = needle;
+        while (*n && tolower((unsigned char)*h) == tolower((unsigned char)*n))
+            h++, n++;
+        if (!*n)
+            return 1;
+    }
+    return 0;
+}
+
+/* Find (or query and cache) the stylus record for an XInput2 source device. */
+static struct pen_dev *
+pen_dev_get(int sourceid)
+{
+    struct pen_dev *p = NULL;
+    for (int i = 0; i < MAX_PENDEV; i++) {
+        if (g.pendev[i].id == sourceid)
+            return &g.pendev[i];
+        if (!p && g.pendev[i].id == 0)
+            p = &g.pendev[i];
+    }
+    if (!p)
+        p = &g.pendev[0];               /* evict slot 0 if the cache is full */
+
+    memset(p, 0, sizeof *p);
+    p->id = sourceid;
+    p->v_press = p->v_tiltx = p->v_tilty = -1;
+
+    int ndev = 0;
+    XIDeviceInfo *info = XIQueryDevice(g.xdisplay, sourceid, &ndev);
+    if (info && ndev > 0) {
+        if (name_has(info->name, "eras"))
+            p->eraser = 1;
+        for (int c = 0; c < info->num_classes; c++) {
+            if (info->classes[c]->type != XIValuatorClass)
+                continue;
+            XIValuatorClassInfo *v =
+                (XIValuatorClassInfo *)info->classes[c];
+            if (v->label == g.a_press) {
+                p->is_pen = 1;
+                p->v_press = v->number;
+                p->pmin = v->min;
+                p->pmax = v->max;
+            } else if (v->label == g.a_tiltx) {
+                p->v_tiltx = v->number;
+            } else if (v->label == g.a_tilty) {
+                p->v_tilty = v->number;
+            }
+        }
+    }
+    if (info)
+        XIFreeDeviceInfo(info);
+    return p;
+}
+
+/* Read valuator `number` out of an XI device event; returns 0 if absent. */
+static int
+xi_valuator(XIDeviceEvent *de, int number, double *out)
+{
+    const double *val = de->valuators.values;
+    for (int i = 0; i < de->valuators.mask_len * 8; i++) {
+        if (!XIMaskIsSet(de->valuators.mask, i))
+            continue;
+        if (i == number) {
+            *out = *val;
+            return 1;
+        }
+        val++;
+    }
+    return 0;
+}
 
 /* ------------------------------------------------------------------ */
 /* slot lookup                                                        */
@@ -139,11 +235,16 @@ window_create(const char *title, int width, int height)
     XStoreName(g.xdisplay, xw, title);
     XMapWindow(g.xdisplay, xw);
 
-    if (g.xi_opcode) {          /* receive multitouch events on this window */
+    if (g.xi_opcode) {          /* multitouch + pen/tablet events */
         unsigned char mask[XIMaskLen(XI_LASTEVENT)] = { 0 };
         XISetMask(mask, XI_TouchBegin);
         XISetMask(mask, XI_TouchUpdate);
         XISetMask(mask, XI_TouchEnd);
+        /* stylus arrives as XI motion/buttons carrying pressure valuators;
+         * core mouse events still flow, so non-pen XI events are ignored */
+        XISetMask(mask, XI_Motion);
+        XISetMask(mask, XI_ButtonPress);
+        XISetMask(mask, XI_ButtonRelease);
         XIEventMask em = { XIAllMasterDevices, sizeof mask, mask };
         XISelectEvents(g.xdisplay, xw, &em, 1);
     }
@@ -211,7 +312,7 @@ win_open(const char *title, int width, int height)
     g.a_targets   = XInternAtom(g.xdisplay, "TARGETS", False);
     g.a_prop      = XInternAtom(g.xdisplay, "BD_CLIPBOARD", False);
 
-    /* XInput2 for multitouch (optional) */
+    /* XInput2 for multitouch + pen/tablet (optional) */
     int xi_ev, xi_err;
     if (XQueryExtension(g.xdisplay, "XInputExtension", &g.xi_opcode,
             &xi_ev, &xi_err)) {
@@ -221,6 +322,10 @@ win_open(const char *title, int width, int height)
     } else {
         g.xi_opcode = 0;
     }
+    /* stylus valuator labels (libinput/wacom naming) */
+    g.a_press = XInternAtom(g.xdisplay, "Abs Pressure", False);
+    g.a_tiltx = XInternAtom(g.xdisplay, "Abs Tilt X", False);
+    g.a_tilty = XInternAtom(g.xdisplay, "Abs Tilt Y", False);
 
     g.egl_display = eglGetDisplay(g.xdisplay);
     if (g.egl_display == EGL_NO_DISPLAY)
@@ -651,6 +756,47 @@ win_poll(win_event *ev)
                     : (t == XI_TouchUpdate) ? WIN_EV_TOUCH_MOVE
                     : WIN_EV_TOUCH_UP;
                 handled = 1;
+            } else if (s && (t == XI_Motion || t == XI_ButtonPress
+                || t == XI_ButtonRelease)) {
+                /* Only a device with a pressure valuator is a stylus; plain
+                 * mouse XI events are left to the core MotionNotify path. */
+                struct pen_dev *p = pen_dev_get(de->sourceid);
+                if (p->is_pen) {
+                    double raw;
+                    if (t == XI_ButtonPress && de->detail == 1)
+                        p->down = 1;
+                    else if (t == XI_ButtonRelease && de->detail == 1)
+                        p->down = 0;
+                    else if (t == XI_ButtonPress && de->detail >= 2)
+                        p->barrel = 1;
+                    else if (t == XI_ButtonRelease && de->detail >= 2)
+                        p->barrel = 0;
+
+                    memset(ev, 0, sizeof(*ev));
+                    ev->window = s->id;
+                    ev->x = (int)de->event_x;
+                    ev->y = (int)de->event_y;
+                    ev->pressure = 1.0f;
+                    if (p->v_press >= 0 && p->pmax > p->pmin
+                        && xi_valuator(de, p->v_press, &raw))
+                        ev->pressure = (float)((raw - p->pmin)
+                            / (p->pmax - p->pmin));
+                    if (p->v_tiltx >= 0 && xi_valuator(de, p->v_tiltx, &raw))
+                        ev->tilt_x = (float)raw;
+                    if (p->v_tilty >= 0 && xi_valuator(de, p->v_tilty, &raw))
+                        ev->tilt_y = (float)raw;
+                    ev->pen_flags = WIN_PEN_INRANGE
+                        | (p->barrel ? WIN_PEN_BARREL : 0)
+                        | (p->eraser ? WIN_PEN_ERASER : 0);
+                    if (t == XI_ButtonPress && de->detail == 1)
+                        ev->type = WIN_EV_PEN_DOWN;
+                    else if (t == XI_ButtonRelease && de->detail == 1)
+                        ev->type = WIN_EV_PEN_UP;
+                    else
+                        ev->type = p->down ? WIN_EV_PEN_MOVE
+                            : WIN_EV_PEN_HOVER;
+                    handled = 1;
+                }
             }
             XFreeEventData(g.xdisplay, &xev.xcookie);
             if (handled)

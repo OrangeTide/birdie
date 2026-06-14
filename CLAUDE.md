@@ -71,7 +71,7 @@ The GUI toolkit (now packaged as **birdie-gui**) is the most developed part of t
 
 `src/birdie/main.c` is a thin MUD-client shell built on the toolkit: a frame with a menu bar, a `BD_TERMINAL` output pane, a `BD_INPUT_LINE`, buttons, and a status bar, running on ludica. Networking, triggers, and the real MUD logic are not wired up yet.
 
-Built today: chrome widgets (frame/panel/label/button/menu+pushpins/input-line/terminal), value widgets (slider, knob, toggle, wheel, jog, X-Y pad), an explorer/icon-browser widget, multiple native windows (GLES backend), and Tab focus traversal. Not yet: `BD_TEXT`/`BD_MULTILINE`/`BD_LIST`/`BD_SCROLLBAR`/`BD_NOTICE`/`BD_TAB_BAR`, IME, clipboard, multitouch, pen (tracked in `doc/gui.md`).
+Built: chrome widgets (frame/panel/label/button/menu+pushpins/input-line/terminal), the full v1.0 widget set (`BD_TEXT`/`BD_MULTILINE`/`BD_LIST`/`BD_SCROLLBAR`/`BD_NOTICE`/`BD_TAB_BAR`), value widgets (slider, knob, toggle, wheel, jog, X-Y pad), an explorer/icon-browser widget, a rich-text editor widget, a pressure-sensitive drawing canvas, multiple native windows (GLES backend), Tab focus traversal, clipboard, IME/compose, key-up/repeat, multitouch, and pen/tablet input. The v0.3 roadmap is complete on the GLES backend. Deferred: explorer list/details view, cross-line selection in multiline/editor, and Win32/Wayland/macOS backends (tracked in `doc/gui.md`).
 
 ## Target platforms
 

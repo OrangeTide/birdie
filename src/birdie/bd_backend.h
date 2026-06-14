@@ -43,6 +43,17 @@ enum bd_ev_type {
 	BD_EV_TOUCH_DOWN,   /* a finger touched down: `touch` id at `x`,`y` */
 	BD_EV_TOUCH_MOVE,
 	BD_EV_TOUCH_UP,
+	BD_EV_PEN_HOVER,    /* stylus moving in proximity, not touching the surface */
+	BD_EV_PEN_DOWN,     /* stylus tip contacted the surface */
+	BD_EV_PEN_MOVE,     /* stylus moving while in contact */
+	BD_EV_PEN_UP,       /* stylus tip lifted off the surface */
+};
+
+/* Pen flag bitmask (bd_event.pen_flags), valid for the BD_EV_PEN_* events. */
+enum {
+	BD_PEN_INRANGE = 1 << 0, /* stylus is within sensing proximity */
+	BD_PEN_BARREL  = 1 << 1, /* barrel (side) button held */
+	BD_PEN_ERASER  = 1 << 2, /* the eraser end is in use, not the tip */
 };
 
 /* Mouse buttons. */
@@ -90,6 +101,9 @@ typedef struct {
 	int      x, y;          /* mouse / touch position */
 	int      button;        /* BD_MOUSE_* (mouse down / up) */
 	int      touch;         /* touch-point id (BD_EV_TOUCH_*) */
+	float    pressure;      /* stylus tip pressure 0..1 (BD_EV_PEN_*) */
+	float    tilt_x, tilt_y;/* stylus tilt in degrees, ~-90..90 (BD_EV_PEN_*) */
+	int      pen_flags;     /* BD_PEN_* bitmask (BD_EV_PEN_*) */
 	float    scroll_dy;     /* wheel delta (scroll) */
 	int      key;           /* BD_KEY_* (key down / up) */
 	int      repeat;        /* key down: 1 if an auto-repeat, else 0 */

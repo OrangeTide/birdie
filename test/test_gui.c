@@ -14,6 +14,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
+#include "bd_widget_canvas.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -1031,6 +1032,50 @@ main(void)
 	check("each finger drives its own widget (down/move/up)",
 	    sa->down == 1 && sa->move == 1 && sa->up == 1 &&
 	    smb->down == 1 && smb->move == 1 && smb->up == 1);
+	bd_gui_cleanup();
+
+	/* ---- pen / drawing canvas: pressure strokes + eraser ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id pf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id cv = bd_canvas_create(pf, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+	int cvx, cvy, cvw, cvh;
+	bd_widget_rect(cv, &cvx, &cvy, &cvw, &cvh);
+	int pcx = cvx + cvw/2, pcy = cvy + cvh/2;
+
+	/* hovering in proximity must not lay down ink */
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_HOVER, .x=pcx, .y=pcy,
+	    .pen_flags=BD_PEN_INRANGE });
+	check("pen hover draws no stroke", bd_canvas_stroke_count(cv) == 0);
+
+	/* a tip-down / move / up makes one stroke; the move past the widget edge
+	 * still lands because contact captures the canvas */
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=pcx, .y=pcy,
+	    .pressure=0.8f, .pen_flags=BD_PEN_INRANGE });
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_MOVE, .x=pcx+20, .y=pcy+5,
+	    .pressure=0.9f, .pen_flags=BD_PEN_INRANGE });
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_MOVE, .x=cvx+cvw+50, .y=pcy,
+	    .pressure=0.5f, .pen_flags=BD_PEN_INRANGE });
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=cvx+cvw+50, .y=pcy,
+	    .pen_flags=BD_PEN_INRANGE });
+	check("pen stroke committed on tip up", bd_canvas_stroke_count(cv) == 1);
+
+	/* a second stroke */
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=pcx-30, .y=pcy-30,
+	    .pressure=1.0f, .pen_flags=BD_PEN_INRANGE });
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=pcx-30, .y=pcy-30,
+	    .pen_flags=BD_PEN_INRANGE });
+	check("second pen stroke committed", bd_canvas_stroke_count(cv) == 2);
+
+	/* the eraser end removes a stroke it passes over (no new stroke added) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=pcx, .y=pcy,
+	    .pressure=1.0f, .pen_flags=BD_PEN_INRANGE|BD_PEN_ERASER });
+	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=pcx, .y=pcy,
+	    .pen_flags=BD_PEN_INRANGE|BD_PEN_ERASER });
+	check("eraser removes the stroke under it", bd_canvas_stroke_count(cv) == 1);
+
+	bd_canvas_clear(cv);
+	check("canvas clear empties strokes", bd_canvas_stroke_count(cv) == 0);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);

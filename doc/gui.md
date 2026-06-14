@@ -179,8 +179,15 @@ What is built:
   candidate window). Key-up + an auto-repeat flag on `bd_event`.
 - **Multitouch** — `BD_EV_TOUCH_DOWN/MOVE/UP` with per-pointer ids + per-finger
   capture (several knobs at once); X11 XInput2 on the GLES backend.
+- **Pen / tablet** — `BD_EV_PEN_HOVER/DOWN/MOVE/UP` with pressure/tilt/flags +
+  a `bd_widget_canvas` drawing surface; X11 XInput2 valuators on the GLES
+  backend.
 
-Not yet built: pen. Tracked in the roadmap section.
+The v0.3 input roadmap (multi-window, explorer, rich text, the full v1.0
+widget set, clipboard, key-up/repeat, IME, multitouch, pen) is complete on the
+GLES backend. Deferred polish is tracked in the roadmap section: explorer
+list/details view, cross-line selection in the multiline/editor widgets, and
+the Win32 / Wayland / macOS backends.
 
 ## v1.0 widget set
 
@@ -645,19 +652,38 @@ interleaved down/move/up); not live-tested for want of a touchscreen. ludica
 exposes no touch, so birdie has none there. Win32 pointer input / Wayland touch
 / macOS are future.
 
-### Pen tablet input and a drawing canvas
+### Pen tablet input and a drawing canvas — implemented
 
-Support a pressure-sensitive pen (MPP 2.0 baseline: pressure, tilt X/Y,
-barrel button, eraser, and hover/proximity). The pointer/touch event grows
-pen fields: `pressure` (0..1), `tilt_x` / `tilt_y`, and a pen-flags field
-(eraser, barrel button, in-range/hover). Backends source these from XInput2
-valuators (X11), the Windows Ink / Pointer API (Win32), or tablet-v2
-(Wayland).
+`bd_event` carries pen fields: `pressure` (0..1), `tilt_x` / `tilt_y`
+(degrees), and `pen_flags` (`BD_PEN_INRANGE` / `BD_PEN_BARREL` /
+`BD_PEN_ERASER`), delivered as `BD_EV_PEN_HOVER/DOWN/MOVE/UP`. Contact
+(`PEN_DOWN`) captures the extension widget under the tip so the whole stroke
+routes there even if it strays past the edge; `PEN_HOVER` tracks the widget
+under the cursor without capturing, so a canvas can preview the nib before
+touching down. Pen events are delivered verbatim (not synthesized to mouse),
+since the consumer wants pressure and tilt.
 
-The compelling consumer is a **drawing-canvas widget** that turns pen data
-into variable-width strokes (pressure → width, tilt → nib shape), with hover
-shown before contact and the eraser end recognized. It is a natural
-`widget_ext` that renders through the v0.2 GPU interface.
+The consumer is `bd_widget_canvas` (`bd_widget_canvas.{c,h}`): a
+drawing-canvas `widget_ext` that turns pen data into variable-width ink
+strokes (pressure → nib width, tilt → broader nib), with the barrel button
+switching to a second ink and the eraser end rubbing out strokes it crosses.
+A hover ring previews the nib in proximity. It renders strokes as a run of
+convex quads with a square dab at each sample (caps + joins), scissor-clipped
+to the surface, through the v0.2 GPU interface. It also accepts plain mouse
+drags at full pressure, so it is usable with no tablet.
+
+The raw GLES backend sources the stylus from **X11 XInput2** valuators: it
+selects `XI_Motion`/`ButtonPress`/`ButtonRelease`, identifies a device as a
+pen by an `Abs Pressure` valuator (caching its pressure/tilt valuator numbers
+and ranges per device), reads pressure/tilt off each event, and maps the tip
+button to down/up, side buttons to the barrel flag, and an "eraser"-named
+device to the eraser flag. Plain mouse XI events are ignored so the core
+pointer path is untouched. The stroke routing, building, pressure→width, and
+eraser are headless-verified, and the renderer is verified live (a
+pressure-ramped sine drawn through the real event path, `GALLERY_AUTODRAW=1`);
+the XInput2 *emit* path is unverified for want of a connected tablet. ludica
+exposes no tablet. Windows Ink / Pointer API (Win32) and tablet-v2 (Wayland)
+are future.
 
 ## Open questions
 

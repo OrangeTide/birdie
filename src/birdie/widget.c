@@ -113,6 +113,7 @@ static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
  * several widgets (e.g. knobs) can be dragged at once */
 #define MAX_TOUCHES 10
 static struct { int active; int id; bd_id widget; } touches[MAX_TOUCHES];
+static bd_id pen_capture = BD_NONE;     /* extension widget grabbing the stylus */
 static bd_id active_menu = BD_NONE;
 static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
@@ -2256,6 +2257,7 @@ bd_gui_cleanup(void)
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
+	pen_capture = BD_NONE;
 	drag_menu = BD_NONE;
 	focus_id = BD_NONE;
 	active_notice = BD_NONE;
@@ -2767,6 +2769,35 @@ handle_touch(const bd_event *ev, bd_id frame)
 	return 1;
 }
 
+/* Route a stylus event to the extension widget under it. The pen carries
+ * pressure/tilt/eraser, so unlike touch it is delivered verbatim (not as a
+ * synthesized mouse event) for a drawing-canvas to consume. Contact (DOWN)
+ * captures the widget so the rest of the stroke goes to it even if the tip
+ * strays past the edge; HOVER tracks the widget under the cursor without
+ * capturing, so a canvas can preview the nib before touching down. */
+static int
+handle_pen(const bd_event *ev, bd_id frame)
+{
+	if (ev->type == BD_EV_PEN_DOWN) {
+		pen_capture = hit_extension(frame, ev->x, ev->y);
+		if (pen_capture != BD_NONE)
+			ext_event(pen_capture, ev);
+		return 1;
+	}
+	if (ev->type == BD_EV_PEN_HOVER) {
+		bd_id ext = hit_extension(frame, ev->x, ev->y);
+		if (ext != BD_NONE)
+			ext_event(ext, ev);
+		return 1;
+	}
+	/* MOVE / UP follow the captured widget */
+	if (pen_capture != BD_NONE)
+		ext_event(pen_capture, ev);
+	if (ev->type == BD_EV_PEN_UP)
+		pen_capture = BD_NONE;
+	return 1;
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2857,6 +2888,10 @@ bd_gui_event(const bd_event *ev)
 	if (ev->type == BD_EV_TOUCH_DOWN || ev->type == BD_EV_TOUCH_MOVE ||
 	    ev->type == BD_EV_TOUCH_UP)
 		return handle_touch(ev, frame);
+
+	if (ev->type == BD_EV_PEN_DOWN || ev->type == BD_EV_PEN_MOVE ||
+	    ev->type == BD_EV_PEN_UP || ev->type == BD_EV_PEN_HOVER)
+		return handle_pen(ev, frame);
 
 	/* Tab / Shift-Tab cycles keyboard focus among the frame's widgets,
 	 * before the event reaches whatever currently has focus */

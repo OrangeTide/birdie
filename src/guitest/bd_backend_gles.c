@@ -420,6 +420,21 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 		e.y = ev->y;
 		e.touch = ev->touch;
 		break;
+	case WIN_EV_PEN_HOVER:
+	case WIN_EV_PEN_DOWN:
+	case WIN_EV_PEN_MOVE:
+	case WIN_EV_PEN_UP:
+		e.type = ev->type == WIN_EV_PEN_HOVER ? BD_EV_PEN_HOVER
+		    : ev->type == WIN_EV_PEN_DOWN ? BD_EV_PEN_DOWN
+		    : ev->type == WIN_EV_PEN_MOVE ? BD_EV_PEN_MOVE
+		    : BD_EV_PEN_UP;
+		e.x = ev->x;
+		e.y = ev->y;
+		e.pressure = ev->pressure;
+		e.tilt_x = ev->tilt_x;
+		e.tilt_y = ev->tilt_y;
+		e.pen_flags = ev->pen_flags;
+		break;
 	default:
 		return 0;       /* close, resize: no bd_event */
 	}

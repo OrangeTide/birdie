@@ -13,15 +13,18 @@
  */
 
 #include "widget.h"
+#include "widget_ext.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
+#include "bd_widget_canvas.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 static bd_id status;
 static bd_id term;
@@ -42,6 +45,14 @@ report(const char *msg)
 /* ---- callbacks ---- */
 
 static void on_btn(bd_id id, void *arg)   { (void)id; report((const char *)arg); }
+
+static bd_id canvas;   /* the drawing canvas, cleared by its Clear button */
+static void on_canvas_clear(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	bd_canvas_clear(canvas);
+	report("Canvas cleared");
+}
 
 static void
 on_quit_confirm(bd_id n, int button, void *arg)
@@ -352,6 +363,16 @@ build_ui(void)
 	bd_slider_create(hwrap, BD_HORIZONTAL, 0.4f, on_slider, (void *)"Wet",
 		BD_PREF_H_I, 24, BD_END);
 
+	/* ---- pressure-sensitive drawing canvas ---- */
+	bd_id crow = section(right, "Drawing canvas (pen: pressure / tilt / "
+		"barrel = red / eraser)", BD_LAYOUT_ROW, 170);
+	canvas = bd_canvas_create(crow, BD_GROW_I, 1, BD_END);
+	bd_canvas_set_nib(canvas, 10.0f);
+	bd_id ccol = bd_create(crow, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 70, BD_END);
+	bd_create(ccol, BD_BUTTON, BD_LABEL_S, "Clear", BD_PREF_H_I, 24,
+		BD_ON_CLICK_F, on_canvas_clear, BD_END);
+
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
@@ -384,6 +405,32 @@ main(void)
 	if (getenv("GALLERY_AUTONOTICE"))   /* show a modal notice for a shot */
 		bd_notice_open("Disconnect from Aardwolf?", "Disconnect\nCancel",
 			on_quit_confirm, NULL);
+	if (getenv("GALLERY_AUTODRAW")) {   /* inject pen strokes to show ink */
+		bd_gui_layout(win_width(), win_height());
+		int cx, cy, cw, ch;
+		bd_widget_rect(canvas, &cx, &cy, &cw, &ch);
+		/* a pressure-ramped sine: width swells from light to heavy */
+		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=cx+12,
+			.y=cy+ch/2, .pressure=0.1f, .pen_flags=BD_PEN_INRANGE });
+		for (int i = 1; i <= 40; i++) {
+			float t = (float)i / 40.0f;
+			int px = cx + 12 + (int)(t * (cw - 24));
+			int py = cy + ch/2 - (int)(28.0 * sin(t * 6.2831853));
+			bd_gui_event(&(bd_event){ .type=BD_EV_PEN_MOVE, .x=px,
+				.y=py, .pressure=0.1f + 0.9f*t,
+				.pen_flags=BD_PEN_INRANGE });
+		}
+		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP,
+			.x=cx+cw-12, .y=cy+ch/2, .pen_flags=BD_PEN_INRANGE });
+		/* a short red barrel-button stroke */
+		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=cx+30, .y=cy+20,
+			.pressure=0.9f, .pen_flags=BD_PEN_INRANGE|BD_PEN_BARREL });
+		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_MOVE, .x=cx+cw-30,
+			.y=cy+20, .pressure=0.9f,
+			.pen_flags=BD_PEN_INRANGE|BD_PEN_BARREL });
+		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=cx+cw-30, .y=cy+20,
+			.pen_flags=BD_PEN_INRANGE|BD_PEN_BARREL });
+	}
 
 	while (running) {
 		win_event wev;

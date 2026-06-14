@@ -33,6 +33,17 @@ enum win_ev_type {
     WIN_EV_TOUCH_DOWN,    /* touch point `touch` at `x`,`y` */
     WIN_EV_TOUCH_MOVE,
     WIN_EV_TOUCH_UP,
+    WIN_EV_PEN_HOVER,     /* stylus in proximity, not touching */
+    WIN_EV_PEN_DOWN,      /* stylus tip contact */
+    WIN_EV_PEN_MOVE,      /* stylus moving while in contact */
+    WIN_EV_PEN_UP,        /* stylus tip lift */
+};
+
+/* Pen flag bitmask (win_event.pen_flags). */
+enum {
+    WIN_PEN_INRANGE = 1 << 0,
+    WIN_PEN_BARREL  = 1 << 1,
+    WIN_PEN_ERASER  = 1 << 2,
 };
 
 /* Mouse buttons. */
@@ -80,6 +91,9 @@ typedef struct {
     int      x, y;          /* mouse position (move / button) */
     int      button;        /* WIN_MOUSE_* (mouse down / up) */
     int      touch;         /* touch-point id (WIN_EV_TOUCH_*) */
+    float    pressure;      /* stylus pressure 0..1 (WIN_EV_PEN_*) */
+    float    tilt_x, tilt_y;/* stylus tilt in degrees (WIN_EV_PEN_*) */
+    int      pen_flags;     /* WIN_PEN_* bitmask (WIN_EV_PEN_*) */
     float    scroll_dy;     /* wheel delta (scroll) */
     int      key;           /* WIN_KEY_* (key down / up) */
     int      repeat;        /* key down: 1 if an auto-repeat */

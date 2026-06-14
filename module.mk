@@ -47,10 +47,10 @@ DIST_STB    := src/thirdparty/stb
 # public API headers
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
                 bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h \
-                bd_widget_editor.h
+                bd_widget_editor.h bd_widget_canvas.h
 # toolkit implementation + reference ludica backend
 DIST_SOURCES := widget.c bd_draw.c bd_widget_vt.c bd_widget_value.c \
-                bd_widget_explorer.c bd_widget_editor.c \
+                bd_widget_explorer.c bd_widget_editor.c bd_widget_canvas.c \
                 bd_backend_ludica.c bd_backend_ludica.h
 # raw X11/EGL/GLES reference backend + widget gallery (Linux)
 DIST_GLES_FILES := window.h x11_window.c bd_backend_gles.c bd_backend_gles.h \
@@ -119,6 +119,7 @@ test : bd_vt
 	    test/test_gui.c src/birdie/widget.c src/birdie/bd_widget_vt.c \
 	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
 	    src/birdie/bd_widget_explorer.c src/birdie/bd_widget_editor.c \
+	    src/birdie/bd_widget_canvas.c \
 	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
 	@echo "running headless GUI test:"
 	@$(TEST_BIN)
@@ -142,6 +143,7 @@ widget-test : bd_vt
 	    src/birdie/widget.c src/birdie/bd_widget_vt.c \
 	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
 	    src/birdie/bd_widget_explorer.c src/birdie/bd_widget_editor.c \
+	    src/birdie/bd_widget_canvas.c \
 	    $(BUILDDIR)/bd_vt.a \
 	    -lX11 -lXi -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
 	@echo "built widget gallery: $(GALLERY_BIN)"

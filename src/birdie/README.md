@@ -344,6 +344,16 @@ X11/XIM (the IME draws its own candidate window). With no hooks, plain
 synthesizing mouse events to the widget it landed on — so several knobs/sliders
 drag at once. The GLES backend sources touches from X11 XInput2 (`-lXi`).
 
+**Pen / tablet (optional).** Emit `BD_EV_PEN_HOVER/DOWN/MOVE/UP` with
+`bd_event.pressure`, `tilt_x`/`tilt_y`, and a `pen_flags` bitmask
+(`BD_PEN_INRANGE`/`BD_PEN_BARREL`/`BD_PEN_ERASER`). Contact captures the
+extension widget under the tip for the whole stroke; hover tracks it without
+capturing. `bd_widget_canvas` (`bd_canvas_create`) is a drawing surface that
+turns this into variable-width ink (pressure → width), with the barrel button
+as a second ink and the eraser end removing strokes; it falls back to mouse
+drags at full pressure. The GLES backend sources the stylus from X11 XInput2
+valuators (`-lXi`).
+
 **Multiple windows (optional).** Set `multi_window = 1` and provide the
 `window_*` hooks (`window_open` / `close` / `begin` / `swap` / `width` /
 `height` / `set_title`). Each top-level `BD_FRAME` then maps to a native
