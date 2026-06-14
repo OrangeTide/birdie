@@ -130,6 +130,13 @@ int  bd_tabbar_count(bd_id id);
 int  bd_tabbar_active(bd_id id);
 void bd_tabbar_set_active(bd_id id, int index);
 
+/* BD_SCROLLBAR: a standalone scrollbar. Orientation follows the shape (a bar
+ * taller than wide is vertical). pos is the thumb position in [0,1]; frac is
+ * the thumb size as a fraction of the track (visible/total). Dragging fires
+ * BD_ON_CLICK_F; the host reads bd_scrollbar_value. */
+void  bd_scrollbar_set(bd_id id, float pos, float frac);
+float bd_scrollbar_value(bd_id id);
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a

@@ -439,6 +439,46 @@ tab_label(const struct widget *w, int idx, char *buf, int cap)
 	return (int)chrome_text_w(buf) + 2 * TAB_HPAD + 2 * TAB_SLANT;
 }
 
+/* ------------------------------------------------------------------ */
+/* BD_SCROLLBAR geometry                                              */
+/* ------------------------------------------------------------------ */
+
+/* Orientation derives from the shape: a vertical bar is taller than wide. */
+static void
+scrollbar_metrics(const struct widget *w, int *vert, int *origin,
+    int *track_len, int *thumb_len)
+{
+	int v = w->h >= w->w;
+	int len = v ? w->h : w->w;
+	float frac = w->scroll_x;
+	if (frac <= 0.0f) frac = 0.3f;
+	if (frac > 1.0f) frac = 1.0f;
+	int tl = (int)(len * frac);
+	if (tl < 12) tl = 12;
+	if (tl > len) tl = len;
+	*vert = v;
+	*origin = v ? w->y : w->x;
+	*track_len = len;
+	*thumb_len = tl;
+}
+
+/* map a pointer to a thumb position [0,1] (thumb centered on the pointer) */
+static void
+scrollbar_from_pointer(struct widget *w, int mx, int my)
+{
+	int vert, origin, len, tl;
+	scrollbar_metrics(w, &vert, &origin, &len, &tl);
+	int travel = len - tl;
+	float pos = 0.0f;
+	if (travel > 0) {
+		int p = (vert ? my : mx) - origin - tl / 2;
+		pos = (float)p / (float)travel;
+	}
+	if (pos < 0.0f) pos = 0.0f;
+	if (pos > 1.0f) pos = 1.0f;
+	w->scroll_y = pos;
+}
+
 /* index of the tab under x (bar-relative bounding boxes), or -1 */
 static int
 tab_at(const struct widget *w, int mx)
@@ -658,6 +698,13 @@ defaults(struct widget *w, int type)
 		w->fg = theme.text;
 		w->pref_h = (int)CHROME_FONT_SZ + 12;
 		w->cursor = 0;        /* active tab index */
+		break;
+	case BD_SCROLLBAR:
+		w->bg = theme.press;
+		w->pref_w = 14;
+		w->pref_h = 14;       /* app grows the long axis */
+		w->scroll_y = 0.0f;   /* thumb position, [0,1] */
+		w->scroll_x = 0.3f;   /* thumb size as a fraction of the track */
 		break;
 	}
 }
@@ -1314,6 +1361,33 @@ render_widget(bd_id id)
 		break;
 	}
 
+	case BD_SCROLLBAR: {
+		int vert, origin, len, tl;
+		scrollbar_metrics(w, &vert, &origin, &len, &tl);
+		fill_rect(w->x, w->y, w->w, w->h, w->bg);   /* track */
+
+		int off = origin + (int)(w->scroll_y * (float)(len - tl));
+		uint32_t face = (w->pressed || w->hover) ? theme.hover : theme.widget;
+		int tx, ty, tw_, th_;
+		if (vert) {
+			tx = w->x + 1; ty = off; tw_ = w->w - 2; th_ = tl;
+		} else {
+			tx = off; ty = w->y + 1; tw_ = tl; th_ = w->h - 2;
+		}
+		fill_rect(tx, ty, tw_, th_, face);
+		stroke_rect(tx, ty, tw_, th_, theme.border);
+		/* skeuomorphic grip: three short lines across the thumb's middle */
+		for (int i = -1; i <= 1; i++) {
+			if (vert)
+				fill_rect(tx + 3, ty + th_ / 2 + i * 3,
+				    tw_ - 6, 1, theme.border);
+			else
+				fill_rect(tx + tw_ / 2 + i * 3, ty + 3,
+				    1, th_ - 6, theme.border);
+		}
+		break;
+	}
+
 	default: {
 		const bd_widget_class *cls = class_of(w->type);
 		if (cls && cls->render)
@@ -1327,6 +1401,7 @@ render_widget(bd_id id)
 	const bd_widget_class *cls = class_of(w->type);
 	int leaf = (w->type == BD_MENU || is_text_field(w->type) ||
 	    w->type == BD_LIST || w->type == BD_TAB_BAR ||
+	    w->type == BD_SCROLLBAR ||
 	    (cls && !cls->contains_children));
 	if (!leaf) {
 		bd_id c;
@@ -1372,7 +1447,7 @@ hit_interactive(bd_id id, int mx, int my)
 	if (found != BD_NONE)
 		return found;
 	if ((w->on_click || is_text_field(w->type) || w->type == BD_LIST ||
-	    w->type == BD_TAB_BAR) && w->enabled)
+	    w->type == BD_TAB_BAR || w->type == BD_SCROLLBAR) && w->enabled)
 		return id;
 	return BD_NONE;
 }
@@ -2314,6 +2389,27 @@ bd_tabbar_set_active(bd_id id, int index)
 	pool[id].cursor = index;   /* programmatic set: no callback */
 }
 
+void
+bd_scrollbar_set(bd_id id, float pos, float frac)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_SCROLLBAR)
+		return;
+	if (pos < 0.0f) pos = 0.0f;
+	if (pos > 1.0f) pos = 1.0f;
+	if (frac < 0.0f) frac = 0.0f;
+	if (frac > 1.0f) frac = 1.0f;
+	pool[id].scroll_y = pos;
+	pool[id].scroll_x = frac;
+}
+
+float
+bd_scrollbar_value(bd_id id)
+{
+	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_SCROLLBAR)
+		return 0.0f;
+	return pool[id].scroll_y;
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2392,9 +2488,17 @@ bd_gui_event(const bd_event *ev)
 
 	switch (ev->type) {
 	case BD_EV_MOUSE_MOVE:
-		/* a captured extension widget keeps the pointer through a drag */
+		/* a captured widget keeps the pointer through a drag */
 		if (pointer_capture != BD_NONE) {
-			ext_event(pointer_capture, ev);
+			if (pool[pointer_capture].type == BD_SCROLLBAR) {
+				struct widget *sb = &pool[pointer_capture];
+				scrollbar_from_pointer(sb, ev->x, ev->y);
+				if (sb->on_click)
+					sb->on_click(pointer_capture,
+					    sb->on_click_data);
+			} else {
+				ext_event(pointer_capture, ev);
+			}
 			return 1;
 		}
 		update_hover(frame, ev->x, ev->y);
@@ -2468,6 +2572,16 @@ bd_gui_event(const bd_event *ev)
 				return 1;
 			}
 
+			if (hit != BD_NONE && pool[hit].type == BD_SCROLLBAR) {
+				struct widget *sb = &pool[hit];
+				pointer_capture = hit;
+				sb->pressed = 1;
+				scrollbar_from_pointer(sb, mx, my);
+				if (sb->on_click)
+					sb->on_click(hit, sb->on_click_data);
+				return 1;
+			}
+
 			focus_id = BD_NONE;
 
 			/* a value widget grabs the pointer for the drag; an explorer
@@ -2490,7 +2604,10 @@ bd_gui_event(const bd_event *ev)
 
 	case BD_EV_MOUSE_UP:
 		if (pointer_capture != BD_NONE) {
-			ext_event(pointer_capture, ev);
+			if (pool[pointer_capture].type == BD_SCROLLBAR)
+				pool[pointer_capture].pressed = 0;
+			else
+				ext_event(pointer_capture, ev);
 			pointer_capture = BD_NONE;
 			return 1;
 		}

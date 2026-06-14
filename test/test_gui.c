@@ -794,6 +794,36 @@ main(void)
 	bd_gui_render();   /* exercises the folder-tab render path */
 	bd_gui_cleanup();
 
+	/* ---- BD_SCROLLBAR ---- */
+	bd_gui_init(&stub, NULL);
+	/* a ROW frame keeps the bar narrow (pref_w) and tall -> vertical */
+	bd_id sbf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_ROW, BD_END);
+	bd_id sb = bd_create(sbf, BD_SCROLLBAR, BD_PREF_W_I, 14,
+	    BD_ON_CLICK_F, on_click, BD_END);
+	bd_gui_layout(800, 600);
+	bd_scrollbar_set(sb, 0.0f, 0.25f);
+	check("scrollbar starts at 0", bd_scrollbar_value(sb) == 0.0f);
+
+	int sbx, sby, sbw, sbh;
+	bd_widget_rect(sb, &sbx, &sby, &sbw, &sbh);
+	check("scrollbar is vertical (tall + narrow)", sbh > sbw);
+
+	int sc = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=sbx+sbw/2, .y=sby+sbh-1 });
+	check("clicking the bottom scrolls toward the end",
+	    bd_scrollbar_value(sb) > 0.9f && clicked == sc + 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=sbx+sbw/2, .y=sby+sbh-1 });
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=sbx+sbw/2, .y=sby });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=sbx+sbw/2, .y=sby });
+	check("dragging to the top scrolls to 0", bd_scrollbar_value(sb) == 0.0f);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=sbx+sbw/2, .y=sby });
+
+	bd_scrollbar_set(sb, 0.5f, 0.25f);
+	check("bd_scrollbar_set sets the value", bd_scrollbar_value(sb) == 0.5f);
+	bd_gui_render();   /* exercises the scrollbar render path */
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

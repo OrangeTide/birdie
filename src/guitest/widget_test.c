@@ -282,7 +282,12 @@ build_ui(void)
 
 	bd_id left = bd_create(body, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_GAP_I, 4, BD_END);
-	term = bd_terminal_create(left, BD_GROW_I, 1, BD_END);
+	/* terminal with a standalone scrollbar beside it */
+	bd_id termrow = bd_create(left, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1, BD_GAP_I, 2, BD_END);
+	term = bd_terminal_create(termrow, BD_GROW_I, 1, BD_END);
+	bd_id sbar = bd_create(termrow, BD_SCROLLBAR, BD_PREF_W_I, 14, BD_END);
+	bd_scrollbar_set(sbar, 0.25f, 0.4f);
 	bd_terminal_write(term,
 		"\033[1mbirdie-gui widget gallery\033[0m\r\n"
 		"GLES backend. Interact with the widgets; events log here.\r\n", -1);
