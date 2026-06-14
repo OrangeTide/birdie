@@ -15,6 +15,7 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
+#include "bd_widget_explorer.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
@@ -106,6 +107,41 @@ on_xy(bd_id id, void *arg, float x, float y)
 	report(b);
 }
 
+/* ---- a small explorer model (drag the icons to rearrange) ---- */
+static struct srv { uint64_t key; const char *name; int x, y; } servers[] = {
+	{ 1, "Aardwolf",   -1, -1 }, { 2, "BatMUD",   -1, -1 },
+	{ 3, "Discworld",  -1, -1 }, { 4, "Lensmoor", -1, -1 },
+	{ 5, "Nanvaent",   -1, -1 }, { 6, "Threshold",-1, -1 },
+};
+static int srv_count(void *ctx){ (void)ctx; return (int)(sizeof servers / sizeof *servers); }
+static void
+srv_get(void *ctx, int i, bd_explorer_item *out)
+{
+	(void)ctx;
+	out->key = servers[i].key;
+	out->label = servers[i].name;
+	out->icon = (bd_texture){0};
+	out->enabled = 1;
+	out->x = servers[i].x;
+	out->y = servers[i].y;
+	out->user = &servers[i];
+}
+static void
+srv_set_pos(void *ctx, uint64_t key, int x, int y)
+{
+	(void)ctx;
+	for (int i = 0; i < srv_count(NULL); i++)
+		if (servers[i].key == key) { servers[i].x = x; servers[i].y = y; }
+}
+static void
+srv_activate(bd_id w, uint64_t key, void *user)
+{
+	(void)w; (void)key;
+	static char b[64];
+	snprintf(b, sizeof b, "activate %s", ((struct srv *)user)->name);
+	report(b);
+}
+
 /* Open a second native window: a small dialog with its own widgets, proving
  * windows render and take input independently. */
 static int dialog_n;
@@ -119,19 +155,19 @@ on_new_window(bd_id id, void *arg)
 
 	bd_id dlg = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, title, BD_LAYOUT_I, BD_LAYOUT_COL,
-		BD_PREF_W_I, 360, BD_PREF_H_I, 240, BD_END);
+		BD_PREF_W_I, 380, BD_PREF_H_I, 300, BD_END);
 
 	bd_id body = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1,
-		BD_PAD_I, 12, BD_GAP_I, 10, BD_END);
+		BD_PAD_I, 8, BD_GAP_I, 6, BD_END);
 	bd_create(body, BD_LABEL,
-		BD_LABEL_S, "A second native window.", BD_PREF_H_I, 18, BD_END);
-	bd_knob_create(body, &(bd_knob_desc){
-		.min = 0, .max = 1, .value = 0.5f, .dial = BD_DIAL_DOTS,
-		.cb = on_knob, .arg = (void *)"Dialog knob" },
-		BD_PREF_W_I, 60, BD_PREF_H_I, 60, BD_END);
-	bd_slider_create(body, BD_HORIZONTAL, 0.5f, on_slider,
-		(void *)"Dialog slider", BD_PREF_H_I, 24, BD_END);
+		BD_LABEL_S, "Servers (drag to arrange, rubber-band to select)",
+		BD_PREF_H_I, 18, BD_END);
+	bd_explorer_create(body,
+		&(bd_explorer_model){ .count = srv_count, .get = srv_get,
+			.set_pos = srv_set_pos },
+		&(bd_explorer_cb){ .activate = srv_activate },
+		BD_GROW_I, 1, BD_END);
 
 	bd_id bar = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,

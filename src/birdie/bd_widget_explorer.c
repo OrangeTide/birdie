@@ -12,11 +12,11 @@
  * Implemented: model query + grid/free layout, rendering (recessed panel,
  * icons or a placeholder, labels, selection highlight, disabled dimming),
  * click selection (replace / Ctrl-toggle), double-click activate, right-click
- * context callback, wheel scroll, and the accessor API.
+ * context callback, wheel scroll, drag-move of the selection (committing via
+ * model.set_pos + moved()), rubber-band rectangle selection (Ctrl = additive),
+ * and the accessor API.
  *
  * TODO (the interaction still to fill in):
- *   - drag-move of the selection, committing via model.set_pos + moved()
- *   - rubber-band rectangle selection (with Ctrl = additive)
  *   - Shift+click range selection from the anchor
  *   - scissor-clip the scrolled content to the widget bounds
  *   - keyboard navigation (arrows / Enter / Ctrl-A); needs focus traversal
@@ -44,10 +44,28 @@ struct explorer {
 	uint64_t  last_key;
 	double    last_time;
 
-	/* drag state (TODO) */
-	int       pressing;      /* a button is down inside the widget */
+	/* pointer drag state */
+	int       mode;          /* DRAG_* */
 	int       press_x, press_y;
+	uint64_t  press_key;     /* item pressed (0 if empty space) */
+	int       press_collapse;/* collapse multi-select to press_key on a click */
+
+	/* drag-move: base content positions of the dragged (selected) items */
+	uint64_t *drag_keys;
+	int      *drag_bx, *drag_by;
+	int       drag_n;
+	int       drag_dx, drag_dy;   /* live offset from the press point */
+
+	/* rubber-band: the selection that existed when the band started, so an
+	 * additive (Ctrl) band can union with it each move */
+	uint64_t *band_base;
+	int       band_base_n;
+	int       band_x0, band_y0, band_x1, band_y1;
 };
+
+enum { DRAG_NONE = 0, DRAG_PENDING, DRAG_MOVE, DRAG_BAND };
+
+#define DRAG_THRESHOLD 4     /* px the pointer must move to start a drag */
 
 static int explorer_type;
 
@@ -123,10 +141,40 @@ columns(bd_id id, const struct explorer *e)
 	return cols < 1 ? 1 : cols;
 }
 
+/* Index of `key` among the items currently being dragged, or -1. */
+static int
+drag_index(const struct explorer *e, uint64_t key)
+{
+	for (int i = 0; i < e->drag_n; i++)
+		if (e->drag_keys[i] == key)
+			return i;
+	return -1;
+}
+
 /*
- * On-screen rect of item `index` (with `item` already fetched). Items with a
- * saved position use it (content coords); others auto-place row-major. `slot`
- * counts auto-placed items seen so far and is advanced for each.
+ * Content-space position (pre-scroll, relative to the widget origin) of an
+ * item. Items with a saved position use it; others auto-place row-major, with
+ * `slot` counting the auto-placed items seen so far.
+ */
+static void
+item_content_pos(bd_id id, const struct explorer *e,
+    const bd_explorer_item *item, int *slot, int *cx, int *cy)
+{
+	if (item->x >= 0 && item->y >= 0) {
+		*cx = item->x;
+		*cy = item->y;
+	} else {
+		int cols = columns(id, e);
+		*cx = CELL_PAD + (*slot % cols) * cell_w(e);
+		*cy = CELL_PAD + (*slot / cols) * cell_h(e);
+		(*slot)++;
+	}
+}
+
+/*
+ * On-screen rect of an item. While a drag-move is in progress the dragged
+ * items follow the pointer (base position + live offset) instead of their
+ * model/auto position. `slot` advances for auto-placed items.
  */
 static void
 item_rect(bd_id id, const struct explorer *e, const bd_explorer_item *item,
@@ -136,15 +184,16 @@ item_rect(bd_id id, const struct explorer *e, const bd_explorer_item *item,
 	bd_widget_rect(id, &x, &y, &w, &h);
 	(void)w;
 	int cx, cy;
-	if (item->x >= 0 && item->y >= 0) {
-		cx = item->x;
-		cy = item->y;
-	} else {
-		int cols = columns(id, e);
-		cx = CELL_PAD + (*slot % cols) * cell_w(e);
-		cy = CELL_PAD + (*slot / cols) * cell_h(e);
-		(*slot)++;
+	item_content_pos(id, e, item, slot, &cx, &cy);
+
+	if (e->mode == DRAG_MOVE) {
+		int d = drag_index(e, item->key);
+		if (d >= 0) {
+			cx = e->drag_bx[d] + e->drag_dx;
+			cy = e->drag_by[d] + e->drag_dy;
+		}
 	}
+
 	*rx = x + cx;
 	*ry = y + cy - e->scroll_y;
 	*rw = cell_w(e);
@@ -172,6 +221,143 @@ hit_item(bd_id id, struct explorer *e, int px, int py, uint64_t *key)
 }
 
 /* ------------------------------------------------------------------ */
+/* drag-move                                                          */
+/* ------------------------------------------------------------------ */
+
+static void
+drag_free(struct explorer *e)
+{
+	free(e->drag_keys); e->drag_keys = NULL;
+	free(e->drag_bx);   e->drag_bx = NULL;
+	free(e->drag_by);   e->drag_by = NULL;
+	e->drag_n = 0;
+}
+
+/* Snapshot the content positions of the selected items and enter move mode. */
+static void
+drag_begin(bd_id id, struct explorer *e)
+{
+	drag_free(e);
+	if (e->sel_n == 0)
+		return;
+	e->drag_keys = malloc((size_t)e->sel_n * sizeof *e->drag_keys);
+	e->drag_bx   = malloc((size_t)e->sel_n * sizeof *e->drag_bx);
+	e->drag_by   = malloc((size_t)e->sel_n * sizeof *e->drag_by);
+	if (!e->drag_keys || !e->drag_bx || !e->drag_by) {
+		drag_free(e);
+		return;
+	}
+
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	int slot = 0;
+	e->drag_n = 0;
+	for (int i = 0; i < n; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		int cx, cy;
+		item_content_pos(id, e, &it, &slot, &cx, &cy);
+		if (sel_has(e, it.key)) {
+			e->drag_keys[e->drag_n] = it.key;
+			e->drag_bx[e->drag_n] = cx;
+			e->drag_by[e->drag_n] = cy;
+			e->drag_n++;
+		}
+	}
+	e->drag_dx = e->drag_dy = 0;
+	e->mode = DRAG_MOVE;
+}
+
+/* Commit the moved positions to the model and notify, then leave move mode. */
+static void
+drag_commit(bd_id id, struct explorer *e)
+{
+	for (int i = 0; i < e->drag_n; i++) {
+		int fx = e->drag_bx[i] + e->drag_dx;
+		int fy = e->drag_by[i] + e->drag_dy;
+		if (fx < 0) fx = 0;
+		if (fy < 0) fy = 0;
+		if (e->model.set_pos)
+			e->model.set_pos(e->model.ctx, e->drag_keys[i], fx, fy);
+		if (e->cb.moved)
+			e->cb.moved(id, e->drag_keys[i], fx, fy, e->cb.ctx);
+	}
+	drag_free(e);
+}
+
+/* ------------------------------------------------------------------ */
+/* rubber-band                                                        */
+/* ------------------------------------------------------------------ */
+
+static int
+rects_overlap(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh)
+{
+	return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+/* The band as a normalized rect (x0,y0 may be below/right of x1,y1). */
+static void
+band_rect(const struct explorer *e, int *rx, int *ry, int *rw, int *rh)
+{
+	int x0 = e->band_x0 < e->band_x1 ? e->band_x0 : e->band_x1;
+	int y0 = e->band_y0 < e->band_y1 ? e->band_y0 : e->band_y1;
+	int x1 = e->band_x0 > e->band_x1 ? e->band_x0 : e->band_x1;
+	int y1 = e->band_y0 > e->band_y1 ? e->band_y0 : e->band_y1;
+	*rx = x0; *ry = y0; *rw = x1 - x0; *rh = y1 - y0;
+}
+
+static void
+band_free(struct explorer *e)
+{
+	free(e->band_base);
+	e->band_base = NULL;
+	e->band_base_n = 0;
+}
+
+/* Enter band mode; snapshot the current selection for an additive band. */
+static void
+band_begin(struct explorer *e, int px, int py, int additive)
+{
+	band_free(e);
+	if (additive && e->sel_n > 0) {
+		e->band_base = malloc((size_t)e->sel_n * sizeof *e->band_base);
+		if (e->band_base) {
+			memcpy(e->band_base, e->sel,
+			    (size_t)e->sel_n * sizeof *e->band_base);
+			e->band_base_n = e->sel_n;
+		}
+	}
+	e->band_x0 = e->band_x1 = px;
+	e->band_y0 = e->band_y1 = py;
+	e->mode = DRAG_BAND;
+}
+
+/* Recompute the selection as the snapshot plus every item the band covers. */
+static void
+band_update(bd_id id, struct explorer *e, int px, int py)
+{
+	e->band_x1 = px;
+	e->band_y1 = py;
+
+	int bx, by, bw, bh;
+	band_rect(e, &bx, &by, &bw, &bh);
+
+	sel_clear(e);
+	for (int i = 0; i < e->band_base_n; i++)
+		sel_add(e, e->band_base[i]);
+
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	int slot = 0;
+	for (int i = 0; i < n; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		int rx, ry, rw, rh;
+		item_rect(id, e, &it, &slot, &rx, &ry, &rw, &rh);
+		if (rects_overlap(bx, by, bw, bh, rx, ry, rw, rh))
+			sel_add(e, it.key);
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* class hooks                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -191,6 +377,8 @@ explorer_destroy(bd_id id, void *state)
 	free(e->sel);
 	e->sel = NULL;
 	e->sel_n = e->sel_cap = 0;
+	drag_free(e);
+	band_free(e);
 }
 
 static void
@@ -265,7 +453,14 @@ explorer_render(bd_id id, void *state)
 		}
 	}
 
-	/* TODO: rubber-band rectangle and drag ghost overlays */
+	/* rubber-band overlay */
+	if (e->mode == DRAG_BAND) {
+		int bx, by, bw, bh;
+		band_rect(e, &bx, &by, &bw, &bh);
+		uint32_t fill = (th->focus & 0xFFFFFF00u) | 0x40u; /* translucent */
+		bd_draw_rect(bx, by, bw, bh, fill);
+		bd_draw_rect_lines(bx, by, bw, bh, th->focus);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -304,25 +499,32 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		if (ev->button != BD_MOUSE_LEFT)
 			return 0;
 
-		e->pressing = 1;
 		e->press_x = ev->x;
 		e->press_y = ev->y;
+		e->press_key = (idx >= 0) ? key : 0;
+		e->press_collapse = 0;
 
 		if (idx < 0) {
-			/* TODO: begin a rubber-band selection here */
-			if (!(ev->mods & (BD_MOD_CTRL | BD_MOD_SHIFT))) {
+			/* empty space: start a rubber-band (Ctrl = additive) */
+			int additive = (ev->mods & BD_MOD_CTRL) != 0;
+			if (!additive && e->sel_n) {
 				sel_clear(e);
 				sel_changed(id, e);
 			}
+			band_begin(e, ev->x, ev->y, additive);
 			return 1;
 		}
 
 		/* double-click activates */
 		double now = bd_backend_get()->time();
 		if (key == e->last_key && now - e->last_time < DBLCLICK_S) {
-			if (e->cb.activate)
-				e->cb.activate(id, key, NULL); /* TODO: pass item.user */
+			if (e->cb.activate) {
+				bd_explorer_item it = {0};
+				e->model.get(e->model.ctx, idx, &it);
+				e->cb.activate(id, key, it.user);
+			}
 			e->last_key = 0;
+			e->mode = DRAG_NONE;
 			return 1;
 		}
 		e->last_key = key;
@@ -333,28 +535,61 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 				sel_remove(e, key);
 			else
 				sel_add(e, key);
+			sel_changed(id, e);
 		} else if (ev->mods & BD_MOD_SHIFT) {
 			/* TODO: range-select from anchor to this item */
 			sel_add(e, key);
+			sel_changed(id, e);
 		} else if (!sel_has(e, key)) {
 			sel_clear(e);
 			sel_add(e, key);
+			sel_changed(id, e);
+		} else if (e->sel_n > 1) {
+			/* pressed an already-selected item in a multi-selection: keep
+			 * the group so a drag can move it, but collapse to just this
+			 * item if the press turns out to be a plain click */
+			e->press_collapse = 1;
 		}
 		e->anchor = key;
-		sel_changed(id, e);
-		/* TODO: arm a drag-move if the pointer leaves a small threshold */
+		e->mode = DRAG_PENDING;
 		return 1;
 	}
 
 	case BD_EV_MOUSE_MOVE:
-		/* TODO: update rubber-band, or move the selection if dragging */
-		return e->pressing;
+		if (e->mode == DRAG_PENDING) {
+			int dx = ev->x - e->press_x, dy = ev->y - e->press_y;
+			if (dx <= -DRAG_THRESHOLD || dx >= DRAG_THRESHOLD ||
+			    dy <= -DRAG_THRESHOLD || dy >= DRAG_THRESHOLD)
+				drag_begin(id, e);   /* -> DRAG_MOVE */
+		}
+		if (e->mode == DRAG_MOVE) {
+			e->drag_dx = ev->x - e->press_x;
+			e->drag_dy = ev->y - e->press_y;
+			return 1;
+		}
+		if (e->mode == DRAG_BAND) {
+			band_update(id, e, ev->x, ev->y);
+			return 1;
+		}
+		return 0;
 
-	case BD_EV_MOUSE_UP:
-		/* TODO: commit a drag-move via model.set_pos + moved(), or finish
-		 * the rubber-band selection */
-		e->pressing = 0;
-		return 1;
+	case BD_EV_MOUSE_UP: {
+		int was = e->mode;
+		e->mode = DRAG_NONE;
+		if (was == DRAG_MOVE) {
+			drag_commit(id, e);
+		} else if (was == DRAG_BAND) {
+			band_free(e);
+			sel_changed(id, e);
+		} else if (was == DRAG_PENDING && e->press_collapse) {
+			/* plain click on a selected item: reduce to just it */
+			sel_clear(e);
+			sel_add(e, e->press_key);
+			sel_changed(id, e);
+		}
+		e->press_collapse = 0;
+		return was != DRAG_NONE;
+	}
 
 	default:
 		return 0;

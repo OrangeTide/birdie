@@ -108,6 +108,7 @@ widget-test : bd_vt
 	    src/guitest/bd_backend_gles.c \
 	    src/birdie/widget.c src/birdie/bd_widget_vt.c \
 	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
+	    src/birdie/bd_widget_explorer.c \
 	    $(BUILDDIR)/bd_vt.a \
 	    -lX11 -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
 	@echo "built widget gallery: $(GALLERY_BIN)"

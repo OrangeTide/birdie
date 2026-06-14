@@ -12,6 +12,7 @@
 #include "widget_ext.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
+#include "bd_widget_explorer.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -99,6 +100,42 @@ static const bd_backend mwstub = {
 static int click_w1, click_w2;
 static void on_click_w1(bd_id id, void *a){ (void)id; (void)a; click_w1++; }
 static void on_click_w2(bd_id id, void *a){ (void)id; (void)a; click_w2++; }
+
+/* ---- in-memory explorer model (3 auto-placed icons) ---- */
+static struct exp_item { uint64_t key; const char *label; int x, y; } exp_items[] = {
+	{ 100, "a", -1, -1 }, { 101, "b", -1, -1 }, { 102, "c", -1, -1 },
+};
+static int exp_count(void *ctx){ (void)ctx; return 3; }
+static void
+exp_get(void *ctx, int i, bd_explorer_item *out)
+{
+	(void)ctx;
+	out->key = exp_items[i].key;
+	out->label = exp_items[i].label;
+	out->icon = (bd_texture){0};
+	out->enabled = 1;
+	out->x = exp_items[i].x;
+	out->y = exp_items[i].y;
+	out->user = &exp_items[i];
+}
+static int exp_setpos_n;
+static void
+exp_set_pos(void *ctx, uint64_t key, int x, int y)
+{
+	(void)ctx;
+	for (int i = 0; i < 3; i++)
+		if (exp_items[i].key == key) { exp_items[i].x = x; exp_items[i].y = y; }
+	exp_setpos_n++;
+}
+static int exp_moved_n; static uint64_t exp_moved_key; static int exp_moved_x, exp_moved_y;
+static void
+exp_moved(bd_id w, uint64_t key, int x, int y, void *ctx)
+{
+	(void)w; (void)ctx;
+	exp_moved_n++; exp_moved_key = key; exp_moved_x = x; exp_moved_y = y;
+}
+static int exp_selchg_n;
+static void exp_selchg(bd_id w, void *ctx){ (void)w; (void)ctx; exp_selchg_n++; }
 
 /* ---- click callback ---- */
 static int clicked;
@@ -388,6 +425,50 @@ main(void)
 	check("destroying frame-2 frees window 2", bd_frame_for_window(2) == BD_NONE);
 	(void)b2;
 
+	bd_gui_cleanup();
+
+	/* ---- explorer: drag-move and rubber-band selection ---- */
+	bd_gui_init(&stub, NULL);
+	bd_explorer_model emodel = {
+	    .count = exp_count, .get = exp_get, .set_pos = exp_set_pos };
+	bd_explorer_cb ecb = { .moved = exp_moved, .selection_changed = exp_selchg };
+
+	bd_id eframe = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id expl = bd_explorer_create(eframe, &emodel, &ecb, BD_GROW_I, 1, BD_END);
+	bd_explorer_set_icon_size(expl, 48);   /* cell 64 wide; row of 3 at x=8,72,136 */
+	bd_gui_layout(800, 600);
+
+	int ex, ey, ew, eh;
+	bd_widget_rect(expl, &ex, &ey, &ew, &eh);
+	check("explorer got geometry", ew > 200 && eh > 200);
+
+	/* press item 0 (cell at content 8,8), drag +100,+40, release */
+	int px = ex + 13, py = ey + 13;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=px, .y=py });
+	check("press selected item 0", bd_explorer_selection(expl, NULL, 0) == 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=px+100, .y=py+40 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=px+100, .y=py+40 });
+	check("drag-move committed via set_pos", exp_setpos_n == 1);
+	check("drag-move reported moved() to base+offset",
+	    exp_moved_n == 1 && exp_moved_key == 100 &&
+	    exp_moved_x == 108 && exp_moved_y == 48);
+	check("dragged item's saved position updated",
+	    exp_items[0].x == 108 && exp_items[0].y == 48);
+
+	/* reset to auto-placement and rubber-band over the whole first row */
+	for (int i = 0; i < 3; i++) { exp_items[i].x = -1; exp_items[i].y = -1; }
+	bd_gui_layout(800, 600);
+	int bdownx = ex + 10, bdowny = ey + 200;     /* empty space below the row */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bdownx, .y=bdowny });
+	check("band on empty space cleared selection",
+	    bd_explorer_selection(expl, NULL, 0) == 0);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=ex+200, .y=ey+5 });
+	uint64_t skeys[8];
+	check("rubber-band covers the three icons",
+	    bd_explorer_selection(expl, skeys, 8) == 3);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=ex+200, .y=ey+5 });
+
+	bd_gui_render();   /* exercises the band/selection render path */
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
