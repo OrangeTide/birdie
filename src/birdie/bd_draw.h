@@ -28,6 +28,16 @@ void bd_draw_shutdown(void);
 void bd_draw_begin(int win_w, int win_h);
 void bd_draw_end(void);
 
+/* Flush the pending batch now. An extension widget calls this before issuing
+ * its own custom-shader draws (via bd_backend_get()) so the chrome drawn so
+ * far lands beneath them; the toolkit resumes batching afterward. */
+void bd_draw_flush(void);
+
+/* The window size passed to the current bd_draw_begin (for widgets setting
+ * their own u_res-style uniform). */
+int bd_draw_win_w(void);
+int bd_draw_win_h(void);
+
 /* Solid fill / one-pixel outline. */
 void bd_draw_rect(float x, float y, float w, float h, uint32_t rgba);
 void bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba);

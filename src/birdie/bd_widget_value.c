@@ -3,6 +3,8 @@
 #include "bd_draw.h"
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <math.h>
 
 /*
  * Slider value widget. Built on the extension API: the core captures the
@@ -163,4 +165,316 @@ bd_slider_get(bd_id id)
 		return 0.0f;
 	struct slider *s = bd_widget_state(id);
 	return s ? s->t : 0.0f;
+}
+
+/* ================================================================== */
+/* knob: a chrome rotary control drawn entirely in a fragment shader  */
+/* ================================================================== */
+
+/* Standard UI vertex shader: pixel position -> clip via u_res, pass uv. */
+static const char *KNOB_VERT =
+	"#version 300 es\n"
+	"layout(location=0) in vec2 a_pos;\n"
+	"layout(location=1) in vec2 a_uv;\n"
+	"layout(location=2) in vec4 a_col;\n"
+	"uniform vec2 u_res;\n"
+	"out vec2 v_uv;\n"
+	"void main(){\n"
+	"    vec2 p = a_pos / u_res * 2.0 - 1.0;\n"
+	"    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);\n"
+	"    v_uv = a_uv;\n"
+	"}\n";
+
+/*
+ * One quad, the whole knob. p is centered [-1,1], y-down. A chrome face with a
+ * top-left key light, a brushed concentric texture, a beveled rim and drop
+ * shadow, an orange-red indicator at the value angle, and tick dots around a
+ * 300-degree sweep. Edges are anti-aliased with fwidth.
+ */
+static const char *KNOB_FRAG =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"out vec4 frag;\n"
+	"uniform float u_value;\n"
+	"uniform int u_marks;\n"     /* number of evenly spaced dial dots (0 = none) */
+	"#define SWEEP 4.712389\n"   /* 270 degrees (typical audio/panel pot) */
+	"float h(float x){ return fract(sin(x * 12.9898) * 43758.5453); }\n"
+	"void main(){\n"
+	"    vec2 p = (v_uv - 0.5) * 2.0;\n"
+	"    float r = length(p);\n"
+	"    float ang = atan(p.y, p.x);\n"
+	"    float aaw = fwidth(r) * 1.3;\n"
+	"    float R = 0.78;\n"
+	"    vec3 col = vec3(0.0);\n"
+	"    float alpha = 0.0;\n"
+	"    /* drop shadow */\n"
+	"    float sh = smoothstep(R + 0.16, R - 0.02, length(p - vec2(0.05, 0.07)));\n"
+	"    col = mix(col, vec3(0.0), sh); alpha = max(alpha, sh * 0.5);\n"
+	"    float body = smoothstep(R + aaw, R - aaw, r);\n"
+	"    /* flat turned-aluminum face: near-uniform tone + concentric grain */\n"
+	"    vec3 alum = vec3(0.55, 0.56, 0.58);\n"
+	"    float g = 0.6 * h(floor(r * 240.0)) + 0.4 * h(floor(r * 600.0));\n"
+	"    alum *= 0.93 + 0.11 * g;\n"
+	"    alum *= 0.995 + 0.005 * h(floor(ang * 200.0));\n"      /* tiny angular break */
+	"    /* anisotropic circular highlight (Ward): grooves run tangentially, so\n"
+	"       the spec is tight across the radius and smeared along the circle */\n"
+	"    vec2 rd = r > 0.0001 ? p / r : vec2(1.0, 0.0);\n"
+	"    vec3 Ll = normalize(vec3(-0.42, -0.52, 0.55));\n"
+	"    vec3 Hh = normalize(Ll + vec3(0.0, 0.0, 1.0));\n"
+	"    vec3 Tg = vec3(-rd.y, rd.x, 0.0);\n"   /* along grooves */
+	"    vec3 Bn = vec3(rd.x, rd.y, 0.0);\n"    /* across grooves */
+	"    float ht = dot(Hh, Tg) / 0.85;\n"
+	"    float hb = dot(Hh, Bn) / 0.09;\n"
+	"    float hn = dot(Hh, vec3(0.0, 0.0, 1.0));\n"
+	"    float aniso = exp(-2.0 * (ht * ht + hb * hb) / (1.0 + hn));\n"
+	"    alum += aniso * 1.0 + 0.05;\n"      /* highlight + faint ambient sheen */
+	"    /* edge: dark bevel + thin bright lip, so it reads as a raised knob */\n"
+	"    float bevel = smoothstep(R - 0.09, R, r);\n"
+	"    alum = mix(alum, alum * 0.46, bevel);\n"
+	"    alum += smoothstep(0.03, 0.0, abs(r - (R - 0.045))) * 0.16;\n"
+	"    col = mix(col, alum, body);\n"
+	"    alpha = max(alpha, body);\n"
+	"    /* indicator */\n"
+	"    float a = (u_value - 0.5) * SWEEP;\n"
+	"    vec2 dir = vec2(sin(a), -cos(a));\n"
+	"    float along = dot(p, dir);\n"
+	"    float perp = length(p - dir * along);\n"
+	"    float ind = smoothstep(0.044, 0.028, perp) *\n"
+	"                smoothstep(0.08, 0.11, along) *\n"
+	"                smoothstep(0.70, 0.67, along) * body;\n"
+	"    col = mix(col, vec3(0.98, 0.26, 0.05), ind);\n"
+	"    /* dial dots: u_marks evenly spaced over the sweep */\n"
+	"    for (int i = 0; i < 64; i++) {\n"
+	"        if (i >= u_marks) break;\n"
+	"        float ti = u_marks > 1 ? float(i) / float(u_marks - 1) : 0.5;\n"
+	"        float ai = (ti - 0.5) * SWEEP;\n"
+	"        vec2 dp = vec2(sin(ai), -cos(ai)) * 0.92;\n"
+	"        float d = smoothstep(0.05, 0.032, length(p - dp));\n"
+	"        col = mix(col, vec3(0.82), d); alpha = max(alpha, d);\n"
+	"    }\n"
+	"    frag = vec4(col, alpha);\n"
+	"}\n";
+
+#define KNOB_SWEEP 4.712389f   /* must match SWEEP in KNOB_FRAG (270 deg) */
+
+struct knob {
+	float       min, max, step;
+	float       value;
+	int         dial;
+	int         hex;
+	bd_value_cb cb;
+	void       *arg;
+	float       drag_v0;        /* value at drag start */
+	int         drag_y0;
+};
+
+static int       knob_type;
+static bd_shader knob_shader;
+
+static void
+ensure_knob_shader(void)
+{
+	if (knob_shader.id == 0)
+		knob_shader = bd_backend_get()->make_shader(KNOB_VERT, KNOB_FRAG);
+}
+
+/* clamp to range, then snap to the step grid (if any) */
+static float
+knob_snap(const struct knob *k, float v)
+{
+	if (v < k->min) v = k->min;
+	if (v > k->max) v = k->max;
+	if (k->step > 0.0f)
+		v = k->min + roundf((v - k->min) / k->step) * k->step;
+	if (v < k->min) v = k->min;
+	if (v > k->max) v = k->max;
+	return v;
+}
+
+/* normalized position [0,1] of the current value, for the indicator angle */
+static float
+knob_norm(const struct knob *k)
+{
+	return k->max > k->min ? (k->value - k->min) / (k->max - k->min) : 0.0f;
+}
+
+/* number of evenly spaced dial dots for the shader (0 = none) */
+static int
+knob_marks(const struct knob *k)
+{
+	int n;
+	switch (k->dial) {
+	case BD_DIAL_DOTS:
+		if (k->step > 0.0f) {
+			n = (int)((k->max - k->min) / k->step + 0.5f) + 1;
+			return n > 64 ? 64 : n;
+		}
+		return 11;
+	case BD_DIAL_BALANCE:
+		return 3;
+	default:                /* NONE and LABELS draw no shader dots */
+		return 0;
+	}
+}
+
+static void
+knob_init(bd_id id, void *state)
+{
+	struct knob *k = state;
+	k->min = 0.0f;
+	k->max = 1.0f;
+	k->step = 0.0f;
+	k->value = 0.0f;
+	k->dial = BD_DIAL_DOTS;
+	bd_set(id, BD_PREF_W_I, 56, BD_PREF_H_I, 56, BD_END);
+}
+
+/* numeric labels around the dial (BD_DIAL_LABELS): the ends plus round
+ * values between, decimal or hex */
+static void
+knob_labels(const struct knob *k, float cx, float cy, float radius)
+{
+	const bd_theme *th = bd_gui_theme();
+	float base = k->hex ? 16.0f : 10.0f;
+	float lh = bd_draw_line_height();
+	float ticks[24];
+	int nt = 0;
+	ticks[nt++] = k->min;
+	for (float v = ceilf(k->min / base) * base;
+	     v < k->max - 0.001f && nt < 23; v += base)
+		if (v > k->min + 0.001f)
+			ticks[nt++] = v;
+	ticks[nt++] = k->max;
+
+	for (int i = 0; i < nt; i++) {
+		float v = ticks[i];
+		float t = (v - k->min) / (k->max - k->min);
+		float a = (t - 0.5f) * KNOB_SWEEP;
+		float lx = cx + sinf(a) * radius;
+		float ly = cy - cosf(a) * radius;
+		char buf[16];
+		if (k->hex)
+			snprintf(buf, sizeof buf, "%X", (int)(v + 0.5f));
+		else
+			snprintf(buf, sizeof buf, "%d",
+			    (int)(v + (v < 0 ? -0.5f : 0.5f)));
+		float tw = bd_draw_text_width(buf);
+		bd_draw_text(buf, lx - tw * 0.5f, ly - lh * 0.5f, th->text);
+	}
+}
+
+static void
+knob_render(bd_id id, void *state)
+{
+	struct knob *k = state;
+	ensure_knob_shader();
+	const bd_backend *be = bd_backend_get();
+
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	int s = w < h ? w : h;
+	int ox = x + (w - s) / 2;     /* center the square knob in its rect */
+	int oy = y + (h - s) / 2;
+	float fx = (float)ox;
+	float fy = (float)oy;
+	float fs = (float)s;
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fs, 0, 1, 1, 1, 1, 1 },
+	};
+
+	bd_draw_flush();   /* land the chrome drawn so far beneath the knob */
+	be->use_shader(knob_shader);
+	be->set_uniform_vec2(knob_shader, "u_res",
+	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
+	be->set_uniform_float(knob_shader, "u_value", knob_norm(k));
+	be->set_uniform_int(knob_shader, "u_marks", knob_marks(k));
+	be->draw_verts(q, 6);
+
+	if (k->dial == BD_DIAL_LABELS)
+		knob_labels(k, fx + fs * 0.5f, fy + fs * 0.5f, fs * 0.5f * 0.92f);
+}
+
+static int
+knob_event(bd_id id, void *state, const bd_event *ev)
+{
+	struct knob *k = state;
+	if (ev->type == BD_EV_MOUSE_DOWN) {
+		k->drag_y0 = ev->y;
+		k->drag_v0 = k->value;
+		return 1;
+	}
+	if (ev->type == BD_EV_MOUSE_MOVE) {
+		float t = (k->drag_v0 - k->min) / (k->max - k->min) +
+		    (float)(k->drag_y0 - ev->y) / 150.0f;
+		float v = knob_snap(k, k->min + t * (k->max - k->min));
+		if (v != k->value) {
+			k->value = v;
+			if (k->cb)
+				k->cb(id, k->arg, v);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+static const bd_widget_class knob_class = {
+	.name = "knob",
+	.state_size = sizeof(struct knob),
+	.init = knob_init,
+	.render = knob_render,
+	.event = knob_event,
+};
+
+bd_id
+bd_knob_create(bd_id parent, const bd_knob_desc *desc, ...)
+{
+	if (knob_type == 0)
+		knob_type = bd_register_widget_class(&knob_class);
+
+	va_list ap;
+	va_start(ap, desc);
+	bd_id id = bd_create_va(parent, knob_type, ap);
+	va_end(ap);
+
+	struct knob *k = bd_widget_state(id);
+	if (k && desc) {
+		k->min = desc->min;
+		k->max = desc->max;
+		if (k->min == k->max) {     /* default range */
+			k->min = 0.0f;
+			k->max = 1.0f;
+		}
+		k->step = desc->step;
+		k->dial = desc->dial;
+		k->hex = desc->hex;
+		k->cb = desc->cb;
+		k->arg = desc->arg;
+		k->value = knob_snap(k, desc->value);
+	}
+	return id;
+}
+
+void
+bd_knob_set(bd_id id, float value)
+{
+	if (bd_widget_type(id) != knob_type)
+		return;
+	struct knob *k = bd_widget_state(id);
+	if (k)
+		k->value = knob_snap(k, value);
+}
+
+float
+bd_knob_get(bd_id id)
+{
+	if (bd_widget_type(id) != knob_type)
+		return 0.0f;
+	struct knob *k = bd_widget_state(id);
+	return k ? k->value : 0.0f;
 }

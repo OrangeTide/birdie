@@ -28,4 +28,36 @@ bd_id bd_slider_create(bd_id parent, int orient, float value,
 void  bd_slider_set(bd_id id, float value);   /* clamped to [0,1] */
 float bd_slider_get(bd_id id);
 
+/*
+ * A rotary knob rendered with a custom fragment shader: a brushed-aluminum
+ * 1970s-hifi body with an orange-red indicator over a 270-degree sweep.
+ * Vertical drag turns it (drag up to increase).
+ */
+
+/* Dial plate: the markings drawn around the knob. */
+enum {
+	BD_DIAL_NONE = 0,   /* no markings */
+	BD_DIAL_DOTS,       /* evenly spaced dots (one per detent if step set,
+	                       else 11) — the default */
+	BD_DIAL_BALANCE,    /* three dots: both ends and the center */
+	BD_DIAL_LABELS,     /* numeric labels at the ends and round values
+	                       between, decimal or hex (see .hex) */
+};
+
+typedef struct bd_knob_desc {
+	float       min, max;   /* value range; both 0 defaults to 0..1 */
+	float       step;       /* >0 quantizes the value into detents, turning
+	                           the knob into an N-way rotary switch; 0 = smooth */
+	float       value;      /* initial value, in [min,max] */
+	int         dial;       /* BD_DIAL_* dial-plate style */
+	int         hex;        /* BD_DIAL_LABELS in hexadecimal (e.g. MIDI CC) */
+	bd_value_cb cb;         /* change callback; reports the value in [min,max] */
+	void       *arg;
+} bd_knob_desc;
+
+bd_id bd_knob_create(bd_id parent, const bd_knob_desc *desc, ...);
+void  bd_knob_set(bd_id id, float value);   /* clamped to range, snapped to step */
+float bd_knob_get(bd_id id);                /* value in [min,max] */
+
 #endif
+

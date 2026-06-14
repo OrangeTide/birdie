@@ -74,10 +74,13 @@ static const bd_backend stub = {
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
 
-/* ---- slider callback ---- */
+/* ---- slider / knob callbacks ---- */
 static int slider_calls;
 static void on_slider_test(bd_id id, void *arg, float t)
 { (void)id; (void)arg; (void)t; slider_calls++; }
+static int knob_calls;
+static void on_knob_test(bd_id id, void *arg, float t)
+{ (void)id; (void)arg; (void)t; knob_calls++; }
 
 /* ---- drag-recording extension widget (stands in for a slider/knob) ---- */
 static int rec_down, rec_move, rec_up;
@@ -123,8 +126,14 @@ main(void)
 
 	bd_id sld = bd_slider_create(frame, BD_HORIZONTAL, 0.5f,
 	    on_slider_test, NULL, BD_PREF_H_I, 20, BD_END);
+	bd_id knb = bd_knob_create(frame, &(bd_knob_desc){
+	    .min = 0, .max = 1, .value = 0.5f, .cb = on_knob_test },
+	    BD_PREF_H_I, 56, BD_END);
+	bd_id ksw = bd_knob_create(frame, &(bd_knob_desc){
+	    .min = 0, .max = 6, .step = 1, .value = 2, .dial = BD_DIAL_DOTS },
+	    BD_PREF_H_I, 56, BD_END);
 
-	check("widgets created", frame && term && btn && rec && sld);
+	check("widgets created", frame && term && btn && rec && sld && knb);
 
 	bd_gui_layout(800, 500);
 
@@ -186,6 +195,27 @@ main(void)
 	bd_gui_event(&sl);
 	bd_gui_event(&slu);
 	check("slider drag to left edge -> ~0", bd_slider_get(sld) < 0.1f);
+
+	/* knob: vertical drag (up) raises the value past its capture */
+	check("knob initial value 0.5", bd_knob_get(knb) == 0.5f);
+	int kx, ky, kw, kh;
+	bd_widget_rect(knb, &kx, &ky, &kw, &kh);
+	int kcx = kx + kw / 2, kcy = ky + kh / 2;
+	bd_event kd = mouse(BD_EV_MOUSE_DOWN, kcx, kcy);
+	bd_event km = mouse(BD_EV_MOUSE_MOVE, kcx, kcy - 100);   /* drag up */
+	bd_event ku = mouse(BD_EV_MOUSE_UP, kcx, kcy - 100);
+	bd_gui_event(&kd);
+	bd_gui_event(&km);
+	bd_gui_event(&ku);
+	check("knob drag up raises value + callback",
+	    bd_knob_get(knb) > 0.9f && knob_calls > 0);
+
+	/* rotary switch: range 0..6 step 1 snaps to integer detents */
+	check("rotary switch initial value 2", bd_knob_get(ksw) == 2.0f);
+	bd_knob_set(ksw, 4.4f);
+	check("rotary switch snaps to step (4.4 -> 4)", bd_knob_get(ksw) == 4.0f);
+	bd_knob_set(ksw, 99.0f);
+	check("rotary switch clamps to max (6)", bd_knob_get(ksw) == 6.0f);
 
 	/* terminal write: plain text + bold + 256-color SGR */
 	bd_terminal_write(term,

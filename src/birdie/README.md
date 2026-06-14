@@ -2,15 +2,16 @@
 
 A small retained-mode GUI toolkit in C. You build a tree of widgets with a
 tagged varargs API, and the toolkit lays them out, draws them, and routes
-input. Rendering and windowing go through a backend interface, so the same
-widget code runs on ludica, SDL, raylib, or GLFW once a backend exists for it.
+input. Drawing runs on a small GPU interface (shaders, vertex draws, uniforms,
+textures, scissor) that ludica, SDL, raylib, or GLFW can all provide through
+GLES, so the same widget code runs on any of them once a backend exists.
 
 It has two API tiers:
 
 - **App API** (`widget.h`) for building UIs out of widgets.
 - **Extension API** (`widget_ext.h`) for defining new widget *types*. The VT
-  terminal (`bd_widget_vt.h`) is built entirely on it and is the reference
-  example.
+  terminal (`bd_widget_vt.h`) and the value widgets (`bd_widget_value.h`) are
+  built on it; `bd_widget_vt.c` is the reference.
 
 ## Usage
 
@@ -81,6 +82,7 @@ main(int argc, char **argv)
 {
     return lud_run(&(lud_desc_t){
         .app_name = "demo", .width = 800, .height = 500, .resizable = 1,
+        .gles_version = 3,   /* the toolkit's shaders are #version 300 es */
         .argc = argc, .argv = argv,
         .init = init, .frame = frame, .cleanup = cleanup, .event = on_event,
     });
@@ -109,11 +111,40 @@ pal.ansi[1] = 0xE06C75FFu;       /* remap palette index 1 (red) */
 bd_terminal_set_palette(terminal, &pal);
 ```
 
+## Value widgets
+
+The toolkit ships interactive value controls in `bd_widget_value.h`, built on
+the extension API. They drag to change, fire a `bd_value_cb`, and match the
+chrome theme.
+
+```c
+#include "bd_widget_value.h"
+
+/* horizontal slider, value normalized to [0,1] */
+bd_slider_create(row, BD_HORIZONTAL, 0.5f, on_change, NULL, BD_GROW_I, 1, BD_END);
+
+/* knob with a value range, optional step, and a dial plate */
+bd_knob_create(row, &(bd_knob_desc){
+    .min = 0, .max = 127, .value = 64,
+    .dial = BD_DIAL_LABELS, .hex = 1,    /* MIDI-CC style hex labels */
+    .cb = on_change,
+}, BD_PREF_W_I, 120, BD_END);
+```
+
+The knob is drawn entirely in a fragment shader: a brushed-aluminum face with
+an anisotropic circular highlight and an orange-red indicator over a 270-degree
+sweep. `.step` quantizes the value into detents, turning the knob into an
+N-way rotary switch, and the dial plate
+(`BD_DIAL_DOTS` / `BD_DIAL_BALANCE` / `BD_DIAL_LABELS` / `BD_DIAL_NONE`) sets the
+markings. `bd_knob_get`/`bd_knob_set` and the callback all use the real
+`[min,max]` value.
+
 ## Defining a widget type
 
 An extension fills a `bd_widget_class` and registers it for a type id, then
 wraps the core create call in a typed constructor. Hooks are optional; the
-core owns per-instance `state` of the size you declare.
+core owns per-instance `state` of the size you declare and routes pointer
+events (with drag capture) to the `event` hook.
 
 ```c
 #include "widget_ext.h"
@@ -147,28 +178,45 @@ gauge_create(bd_id parent, ...)
 }
 ```
 
-For a complete example with init/destroy/layout/event hooks and a libvt-backed
-implementation, read `bd_widget_vt.c`. As of 0.1 extension widgets draw quads
-and textures through the backend; proportional vector text is core-only.
+Render with the toolkit helpers in `bd_draw.h` (`bd_draw_rect`,
+`bd_draw_rect_lines`, `bd_draw_sprite`, `bd_draw_text`). For a fully custom look
+a widget can drop to the GPU: call `bd_draw_flush()` to land the batched chrome,
+then issue its own shader through `bd_backend_get()`
+(`make_shader` / `use_shader` / `set_uniform_*` / `draw_verts`). The knob in
+`bd_widget_value.c` is the reference for a shader-drawn widget; `bd_widget_vt.c`
+is the reference for a stateful, libvt-backed one.
 
 ## Porting to another backend
 
-Implement the `bd_backend` vtable in `bd_backend.h` (window/frame, quad batch,
-vector font, resource load/destroy), and translate your windowing library's
-events into the neutral `bd_event`. Pass your backend to `bd_gui_init`. The
-widget code does not change. `bd_backend_ludica.c` is the reference
-implementation, around 200 lines.
+Implement the `bd_backend` GPU interface in `bd_backend.h`:
+
+- window/frame: `width`, `height`, `time`, `viewport`, `clear`
+- shaders: `make_shader` / `destroy_shader` / `use_shader` and the
+  `set_uniform_*` setters
+- geometry: `draw_verts` (a triangle list of `bd_vertex`, layout
+  `a_pos`/`a_uv`/`a_col` at locations 0/1/2)
+- textures: `load_texture` / `make_texture` / `update_texture` / `bind_texture`
+  / `destroy_texture`
+- clipping: `scissor` / `scissor_off`
+
+Then translate your windowing library's input into the neutral `bd_event`. Pass
+your backend to `bd_gui_init`. The toolkit owns the renderer
+(`bd_draw.c`: one default shader, a dynamic quad batch, and an stb_truetype
+glyph atlas), so a backend supplies GPU plumbing, not drawing primitives.
+Shaders are GLES3 (`#version 300 es`); alpha blending is on.
+`bd_backend_ludica.c` is the reference.
 
 ## Dependencies
 
-- **ludica** is required only by the reference backend
-  (`bd_backend_ludica.c`) and ships the proportional GUI font that
-  `BD_ASSET_GUI_FONT` points at. Targeting another backend removes this
-  dependency.
+- A **GLES-capable backend**. ludica (the reference, `bd_backend_ludica.c`)
+  provides the window and GLES context; SDL, raylib, GLFW, or ANGLE can too.
 - **libvt** is required by the terminal widget (`bd_widget_vt.c`).
+- Vendored: **stb_truetype** (text rasterization) and a TTF the toolkit bakes
+  for chrome text.
 
-The assets the default theme loads (`assets/`) must be reachable at the paths
-in `widget.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*`.
+The assets the toolkit loads (`assets/` — the chrome TTF, the terminal's CP437
+atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
+`bd_widget_vt.c`, or overridden with `-DBD_ASSET_*`.
 
 ## License
 

@@ -226,6 +226,15 @@ bd_draw_end(void)
 }
 
 void
+bd_draw_flush(void)
+{
+	flush();
+}
+
+int bd_draw_win_w(void) { return (int)win_w; }
+int bd_draw_win_h(void) { return (int)win_h; }
+
+void
 bd_draw_rect(float x, float y, float w, float h, uint32_t rgba)
 {
 	quad(white, x, y, w, h, 0, 0, 1, 1, rgba);

@@ -35,6 +35,16 @@ on_slider(bd_id id, void *arg, float t)
 	bd_set(status_label, BD_LABEL_S, buf, BD_END);
 }
 
+static void
+on_knob(bd_id id, void *arg, float v)
+{
+	(void)id;
+	(void)arg;
+	static char buf[32];
+	snprintf(buf, sizeof buf, "Value: %g", v);
+	bd_set(status_label, BD_LABEL_S, buf, BD_END);
+}
+
 static int
 on_event(const lud_event_t *ev)
 {
@@ -99,6 +109,28 @@ init(void)
 		BD_PREF_H_I, 24,
 		BD_PAD_I, 4,
 		BD_END);
+
+	/* knob row: dots, balance, hex MIDI labels, and a 7-way rotary switch */
+	bd_id krow = bd_create(frame, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 96,
+		BD_PAD_I, 14,
+		BD_GAP_I, 18,
+		BD_BG_C, 0x313335FFu,
+		BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 1, .value = 0.3f,
+		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = -1, .max = 1, .value = 0,
+		.dial = BD_DIAL_BALANCE, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 127, .value = 64,
+		.dial = BD_DIAL_LABELS, .hex = 1, .cb = on_knob },
+		BD_PREF_W_I, 120, BD_END);
+	bd_knob_create(krow, &(bd_knob_desc){
+		.min = 0, .max = 6, .step = 1, .value = 2,
+		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
 
 	/* button bar */
 	bd_id bar = bd_create(frame, BD_PANEL,
