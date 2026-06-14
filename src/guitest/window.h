@@ -29,6 +29,7 @@ enum win_ev_type {
     WIN_EV_KEY_DOWN,
     WIN_EV_KEY_UP,
     WIN_EV_CHAR,
+    WIN_EV_TEXT_COMMIT,   /* committed text (IME / compose): `text` */
 };
 
 /* Mouse buttons. */
@@ -79,6 +80,7 @@ typedef struct {
     int      key;           /* WIN_KEY_* (key down / up) */
     int      repeat;        /* key down: 1 if an auto-repeat */
     unsigned codepoint;     /* Unicode codepoint (char) */
+    char     text[64];      /* UTF-8 committed text (WIN_EV_TEXT_COMMIT) */
     int      width, height; /* new size (resize) */
     int      window;        /* originating window id (1 = primary) */
 } win_event;
@@ -123,5 +125,10 @@ void win_window_set_title(int id, const char *title);
  * clipboard call, or NULL if empty. */
 void        win_clipboard_set(const char *utf8);
 const char *win_clipboard_get(void);
+
+/* input method: focus/unfocus the X input context (so it only intercepts keys
+ * while a text field is focused), and place its candidate window at the caret. */
+void win_ime_set_enabled(int on);
+void win_ime_set_cursor_rect(int x, int y, int w, int h);
 
 #endif

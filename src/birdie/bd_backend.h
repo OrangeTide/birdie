@@ -38,6 +38,8 @@ enum bd_ev_type {
 	BD_EV_KEY_DOWN,
 	BD_EV_CHAR,
 	BD_EV_KEY_UP,
+	BD_EV_TEXT_COMMIT,  /* committed text (IME / compose / dead keys): `text` */
+	BD_EV_TEXT_PREEDIT, /* in-progress composition: `text` + `caret` (bytes) */
 };
 
 /* Mouse buttons. */
@@ -88,6 +90,9 @@ typedef struct {
 	int      key;           /* BD_KEY_* (key down / up) */
 	int      repeat;        /* key down: 1 if an auto-repeat, else 0 */
 	unsigned codepoint;     /* Unicode codepoint (char) */
+	const char *text;       /* UTF-8 for TEXT_COMMIT / TEXT_PREEDIT; valid for
+	                           the dispatch only */
+	int      caret;         /* TEXT_PREEDIT: caret byte offset within `text` */
 	int      window;        /* originating window id (0 = primary). Backends
 	                           without multi_window leave this 0. */
 } bd_event;
@@ -173,6 +178,15 @@ typedef struct bd_backend {
 	 * next clipboard call) or NULL if empty/unsupported. */
 	void        (*clipboard_set)(const char *utf8);
 	const char *(*clipboard_get)(void);
+
+	/* ---- input method (IME / compose; optional) ----
+	 * The toolkit enables the IME when a text widget gains focus and disables
+	 * it otherwise (so it does not swallow keys elsewhere), and reports the
+	 * caret rectangle so the platform places its own candidate window there.
+	 * The platform delivers finished text as BD_EV_TEXT_COMMIT (and, where
+	 * supported, in-progress text as BD_EV_TEXT_PREEDIT). */
+	void (*ime_set_enabled)(int on);
+	void (*ime_set_cursor_rect)(int x, int y, int w, int h);
 } bd_backend;
 
 #endif

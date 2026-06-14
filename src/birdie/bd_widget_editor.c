@@ -449,6 +449,14 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 			editor_insert(e, ev->codepoint);
 		return 1;
 
+	case BD_EV_TEXT_COMMIT:        /* IME / compose / dead-key commit */
+		if (!e->locked && ev->text) {
+			int n = (int)strlen(ev->text);
+			e_splice(e, e->cursor, 0, ev->text, n);
+			e->cursor += n;
+		}
+		return 1;
+
 	case BD_EV_KEY_DOWN:
 		break;
 	default:

@@ -314,6 +314,10 @@ static void be_window_set_title(int id, const char *t) { win_window_set_title(id
 static void        be_clipboard_set(const char *s) { win_clipboard_set(s); }
 static const char *be_clipboard_get(void)          { return win_clipboard_get(); }
 
+static void be_ime_set_enabled(int on) { win_ime_set_enabled(on); }
+static void be_ime_set_cursor_rect(int x, int y, int w, int h)
+{ win_ime_set_cursor_rect(x, y, w, h); }
+
 /* ------------------------------------------------------------------ */
 /* vtable                                                             */
 /* ------------------------------------------------------------------ */
@@ -351,6 +355,8 @@ const bd_backend bd_backend_gles = {
 	.window_set_title  = be_window_set_title,
 	.clipboard_set     = be_clipboard_set,
 	.clipboard_get     = be_clipboard_get,
+	.ime_set_enabled     = be_ime_set_enabled,
+	.ime_set_cursor_rect = be_ime_set_cursor_rect,
 };
 
 /* ------------------------------------------------------------------ */
@@ -399,6 +405,10 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 		e.type = BD_EV_CHAR;
 		e.codepoint = ev->codepoint;
 		e.repeat = ev->repeat;
+		break;
+	case WIN_EV_TEXT_COMMIT:
+		e.type = BD_EV_TEXT_COMMIT;
+		e.text = ev->text;
 		break;
 	default:
 		return 0;       /* close, resize: no bd_event */

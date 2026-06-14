@@ -330,6 +330,15 @@ Shaders are GLES3 (`#version 300 es`); alpha blending is on.
 and the text fields gain Ctrl-C/X/V; the GLES backend implements them on the
 X11 CLIPBOARD selection. Leave them NULL for no clipboard (a safe no-op).
 
+**IME / compose (optional).** Deliver finished text as `BD_EV_TEXT_COMMIT`
+(`bd_event.text`, the full UTF-8 string) so multi-codepoint commits, dead
+keys, and compose work, and provide `ime_set_enabled(on)` /
+`ime_set_cursor_rect(x,y,w,h)` so the toolkit can focus the input method only
+on text fields and place the candidate window at the caret. Optionally emit
+`BD_EV_TEXT_PREEDIT` for inline composition. The GLES backend does this on
+X11/XIM (the IME draws its own candidate window). With no hooks, plain
+`BD_EV_CHAR` still types ASCII.
+
 **Multiple windows (optional).** Set `multi_window = 1` and provide the
 `window_*` hooks (`window_open` / `close` / `begin` / `swap` / `width` /
 `height` / `set_title`). Each top-level `BD_FRAME` then maps to a native

@@ -174,9 +174,11 @@ What is built:
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 - **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`
   (X11 CLIPBOARD on the GLES backend; ludica backend NULL for now).
+- **IME / compose** — `BD_EV_TEXT_COMMIT`/`BD_EV_TEXT_PREEDIT` + backend
+  `ime_set_enabled`/`ime_set_cursor_rect`; X11 XIM on the GLES backend (native
+  candidate window). Key-up + an auto-repeat flag on `bd_event`.
 
-Not yet built: IME/compose; multitouch; pen. These are tracked in the roadmap
-section.
+Not yet built: multitouch; pen. These are tracked in the roadmap section.
 
 ## v1.0 widget set
 
@@ -494,41 +496,37 @@ build order is mouse-only core first, then rename, keyboard nav, and a richer
 context menu as those dependencies (text widget, focus traversal,
 popup-anywhere) land.
 
-### IME, compose, and dead keys
+### IME, compose, and dead keys — implemented
 
-Today the only text channel is `BD_EV_CHAR`, which carries a single
-codepoint. That cannot represent a multi-codepoint commit, a compose/dead-key
-sequence, or an in-progress composition, so CJK input, accented-letter
-compose, and emoji variants are all broken or truncated at the source. The
-gap is structural, not an X11 quirk: `bd_event` has no way to carry a string
-or a preedit, so every backend hits the same wall. (A reference X11 backend
-got as far as an `XIC` with `Xutf8LookupString` but had to disable preedit
-and forward only the first codepoint of each commit.)
+The four seams (identical across X11 (XIM/IBus), Win32 (IMM/TSF), macOS
+(`NSTextInputClient`), and Wayland (text-input-v3)) are in place:
 
-The complete solution is four seams, identical across X11 (XIM/IBus), Win32
-(IMM/TSF), macOS (`NSTextInputClient`), and Wayland (text-input-v3):
+- **Commit as a UTF-8 string.** `BD_EV_TEXT_COMMIT` carries `bd_event.text`
+  (valid for the dispatch only). The text widgets insert it (replacing the
+  selection; newlines kept in `BD_MULTILINE`); the editor handles it too. This
+  is what makes multi-codepoint commits, dead keys, and compose work. `BD_CHAR`
+  stays for the simple single-codepoint path (ludica still uses it).
+- **Preedit event.** `BD_EV_TEXT_PREEDIT` carries the in-progress string plus
+  a caret offset; the focused single-line field renders it inline (underlined
+  at the caret) without inserting until commit. (The X11 backend below uses the
+  IME's own preedit window, so it does not emit this yet; the ABI + rendering
+  are ready for an over-the-spot backend.)
+- **Caret-rect reporting (toolkit → backend).** `ime_set_cursor_rect(x,y,w,h)`
+  is called each frame for the focused field so the platform places its
+  candidate window at the caret (X11 `XNSpotLocation`).
+- **Enable/disable on focus.** `ime_set_enabled(on)` fires as focus enters or
+  leaves a text field, so the IME does not swallow keys elsewhere.
 
-- **Commit as a UTF-8 string.** Add `BD_EV_TEXT_COMMIT` carrying a
-  `const char *` valid for the dispatch only. This also makes dead keys,
-  compose, and paste fall out for free. `BD_EV_CHAR` may stay as a
-  convenience for the ASCII path or be retired.
-- **Preedit event.** `BD_EV_TEXT_PREEDIT` carries the in-progress string
-  plus a caret offset (and optionally an underline/attribute range). The
-  text widget renders it inline but does **not** insert it into the buffer
-  until commit.
-- **Caret-rect reporting (toolkit → backend).** The reverse channel that is
-  missing today: `ime_set_cursor_rect(x, y, w, h)` so the platform positions
-  its candidate window at the caret (XNSpotLocation / ImmSetCompositionWindow
-  / `set_cursor_rectangle`).
-- **Enable/disable on focus.** `ime_set_enabled(on)` as focus enters or
-  leaves a text widget, so the IME does not swallow keys in games or other
-  non-text widgets.
+**Decision (kept):** the platform IME draws its own candidate window; the
+toolkit only reports the caret rect.
 
-**Decision:** the platform IME draws its own candidate/conversion window;
-the toolkit only reports the caret rect. Native candidate UI is the default
-for XIM/IMM/TSF/macOS, so this is the smallest portable surface that is still
-complete for CJK, compose, and dead keys. A toolkit-drawn candidate window
-is only needed for a fully custom IME, which is out of scope.
+The raw GLES backend implements it on X11/XIM: an `XIC` (PreeditNothing, so the
+IME shows its own preedit/candidates) focused via `XSetICFocus`, with
+`Xutf8LookupString` emitting the full committed UTF-8 string as
+`BD_EV_TEXT_COMMIT`. Verified headlessly (commit insert incl. multi-byte CJK,
+preedit, enable/disable on focus). The ludica backend leaves the IME hooks
+NULL and keeps the `BD_EV_CHAR` path. Still to do: an over-the-spot X11 preedit
+(emit `BD_EV_TEXT_PREEDIT` via `XIMPreeditCallbacks`); Win32/macOS/Wayland.
 
 ### Real text and multiline widgets
 

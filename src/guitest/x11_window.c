@@ -362,28 +362,6 @@ map_key(KeySym sym)
     }
 }
 
-/* Decode the first UTF-8 codepoint of a byte buffer; returns the raw lead byte
- * on malformed input. */
-static unsigned
-utf8_first(const char *s, int len)
-{
-    if (len <= 0)
-        return 0;
-    unsigned char c = (unsigned char)s[0];
-    if (c < 0x80)
-        return c;
-    int n = (c >= 0xF0) ? 3 : (c >= 0xE0) ? 2 : (c >= 0xC0) ? 1 : 0;
-    if (n == 0 || n + 1 > len)
-        return c;
-    unsigned cp = c & (0x3F >> n);
-    for (int i = 1; i <= n; i++) {
-        if (((unsigned char)s[i] & 0xC0) != 0x80)
-            return c;
-        cp = (cp << 6) | ((unsigned char)s[i] & 0x3F);
-    }
-    return cp;
-}
-
 /* Translate one XEvent into *ev. Returns 1 if it produced an event, else 0. */
 static int
 translate(XEvent *xev, win_event *ev)
@@ -473,10 +451,16 @@ translate(XEvent *xev, win_event *ev)
 
         if (got_text && (unsigned char)buf[0] >= 0x20
             && !(mods & (WIN_MOD_CTRL | WIN_MOD_ALT))) {
-            ev->type = WIN_EV_CHAR;
+            /* committed text (ASCII, IME, compose, dead keys): the whole
+             * UTF-8 string, not just the first codepoint */
+            ev->type = WIN_EV_TEXT_COMMIT;
             ev->mods = mods;
             ev->key = map_key(sym);
-            ev->codepoint = utf8_first(buf, len);
+            int n = len;
+            if (n >= (int)sizeof ev->text)
+                n = (int)sizeof ev->text - 1;
+            memcpy(ev->text, buf, (size_t)n);
+            ev->text[n] = '\0';
             return 1;
         }
         ev->type = WIN_EV_KEY_DOWN;
@@ -538,6 +522,37 @@ win_clipboard_set(const char *utf8)
     snprintf(g.clip, sizeof g.clip, "%s", utf8 ? utf8 : "");
     XSetSelectionOwner(g.xdisplay, g.a_clipboard, clip_owner_window(),
         CurrentTime);
+}
+
+/* ------------------------------------------------------------------ */
+/* input method                                                       */
+/* ------------------------------------------------------------------ */
+
+void
+win_ime_set_enabled(int on)
+{
+    struct win_slot *s = slot_by_id(1);
+    if (!s || !s->xic)
+        return;
+    if (on)
+        XSetICFocus(s->xic);
+    else
+        XUnsetICFocus(s->xic);
+}
+
+void
+win_ime_set_cursor_rect(int x, int y, int w, int h)
+{
+    struct win_slot *s = slot_by_id(1);
+    if (!s || !s->xic)
+        return;
+    (void)w;
+    XPoint spot = { (short)x, (short)(y + h) };   /* baseline of the caret */
+    XVaNestedList pre = XVaCreateNestedList(0, XNSpotLocation, &spot, NULL);
+    if (pre) {
+        XSetICValues(s->xic, XNPreeditAttributes, pre, (void *)NULL);
+        XFree(pre);
+    }
 }
 
 const char *

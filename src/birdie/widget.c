@@ -126,6 +126,13 @@ static double list_last_time;
 static bd_id        active_notice = BD_NONE;
 static bd_notice_cb notice_cb;
 static void        *notice_arg;
+/* IME: in-progress preedit shown at the focused field's caret, and the last
+ * reported enabled state */
+static char  preedit_buf[256];
+static int   preedit_len;
+static int   preedit_caret;
+static bd_id preedit_owner = BD_NONE;
+static int   ime_enabled;
 
 /* Single-line editable text widgets share the same edit/render/focus paths.
  * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT is
@@ -1200,13 +1207,20 @@ render_widget(bd_id id)
 			queue_text(w->text_buf,
 			    vis_x - w->scroll_x, base_y, w->fg);
 
+		/* IME preedit: composing text shown inline at the caret, underlined */
+		float caret_x = vis_x + cursor_px - w->scroll_x;
+		if (preedit_owner == id && preedit_len > 0) {
+			queue_text(preedit_buf, caret_x, base_y, w->fg);
+			float pw = chrome_text_w(preedit_buf);
+			fill_rect((int)caret_x, w->y + w->h - 3, (int)pw, 1, w->fg);
+			caret_x += input_text_px(preedit_buf, preedit_caret);
+		}
+
 		/* blinking cursor */
 		if (focused) {
 			double t = be->time() - (double)cursor_blink;
-			if (((int)(t * 2.0)) % 2 == 0) {
-				float cx = vis_x + cursor_px - w->scroll_x;
-				fill_rect((int)cx, w->y + 2, 2, w->h - 4, w->fg);
-			}
+			if (((int)(t * 2.0)) % 2 == 0)
+				fill_rect((int)caret_x, w->y + 2, 2, w->h - 4, w->fg);
 		}
 		break;
 	}
@@ -2381,6 +2395,55 @@ render_notice(int w, int h)
 	bd_draw_end();
 }
 
+/* On-screen caret rectangle of a focused text field (for IME positioning). */
+static int
+caret_rect(bd_id id, int *cx, int *cy, int *cw, int *ch)
+{
+	struct widget *w = &pool[id];
+	int pad = w->pad;
+	if (w->type == BD_MULTILINE) {
+		int ls = ml_line_start(w->text_buf, w->cursor);
+		int line = ml_line_index(w->text_buf, w->cursor);
+		float px = ml_span_px(w->text_buf, ls, w->cursor);
+		*cx = w->x + pad + (int)(px - w->scroll_x);
+		*cy = w->y + pad + line * ml_line_h() - (int)w->scroll_y;
+		*cw = 2;
+		*ch = ml_line_h();
+		return 1;
+	}
+	if (w->type == BD_INPUT_LINE || w->type == BD_TEXT) {
+		float px = input_text_px(w->text_buf, w->cursor);
+		*cx = w->x + pad + (int)(px - w->scroll_x);
+		*cy = w->y;
+		*cw = 2;
+		*ch = w->h;
+		return 1;
+	}
+	return 0;
+}
+
+/* Drive the backend IME: enable only while a text field is focused, and report
+ * the caret so the platform places its candidate window there. */
+static void
+handle_ime_state(void)
+{
+	int want = (focus_id != BD_NONE && pool[focus_id].alive &&
+	    is_text_field(pool[focus_id].type));
+	if (be->ime_set_enabled && want != ime_enabled) {
+		be->ime_set_enabled(want);
+		ime_enabled = want;
+	}
+	if (want && be->ime_set_cursor_rect) {
+		int x, y, w, h;
+		if (caret_rect(focus_id, &x, &y, &w, &h))
+			be->ime_set_cursor_rect(x, y, w, h);
+	}
+	if (!want) {
+		preedit_len = 0;
+		preedit_owner = BD_NONE;
+	}
+}
+
 /* Render one top-level frame's tree plus the popups it owns into the currently
  * bound draw target of size w x h. */
 static void
@@ -2424,6 +2487,8 @@ bd_gui_render(void)
 		render_frame(root, be->width(), be->height());
 		render_notice(be->width(), be->height());
 	}
+
+	handle_ime_state();
 }
 
 /* A widget that can hold keyboard focus via Tab. */
@@ -2703,6 +2768,37 @@ bd_gui_event(const bd_event *ev)
 
 	if (handle_menu_event(ev, frame))
 		return 1;
+
+	/* IME text: a finished commit inserts; a preedit updates the inline
+	 * composition shown at the caret */
+	if (ev->type == BD_EV_TEXT_COMMIT || ev->type == BD_EV_TEXT_PREEDIT) {
+		if (focus_id == BD_NONE || !pool[focus_id].alive)
+			return 0;
+		if (is_text_field(pool[focus_id].type)) {
+			if (ev->type == BD_EV_TEXT_PREEDIT) {
+				int n = ev->text ? (int)strlen(ev->text) : 0;
+				if (n >= (int)sizeof(preedit_buf))
+					n = (int)sizeof(preedit_buf) - 1;
+				if (n > 0)
+					memcpy(preedit_buf, ev->text, (size_t)n);
+				preedit_buf[n] = '\0';
+				preedit_len = n;
+				preedit_caret = ev->caret;
+				preedit_owner = n > 0 ? focus_id : BD_NONE;
+			} else {
+				preedit_len = 0;
+				preedit_owner = BD_NONE;
+				input_insert_text(&pool[focus_id], ev->text,
+				    pool[focus_id].type != BD_MULTILINE);
+			}
+			return 1;
+		}
+		/* extension widgets (e.g. the editor) handle text themselves */
+		const bd_widget_class *cls = class_of(pool[focus_id].type);
+		if (cls && cls->event && ext_event(focus_id, ev))
+			return 1;
+		return 0;
+	}
 
 	/* Tab / Shift-Tab cycles keyboard focus among the frame's widgets,
 	 * before the event reaches whatever currently has focus */

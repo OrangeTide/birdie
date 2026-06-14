@@ -65,6 +65,10 @@ static char be_clip[256];
 static void be_clip_set(const char *s){ snprintf(be_clip, sizeof be_clip, "%s", s ? s : ""); }
 static const char *be_clip_get(void){ return be_clip; }
 
+static int be_ime_on = -1, be_ime_rects;
+static void be_ime_enable(int on){ be_ime_on = on; }
+static void be_ime_rect(int x,int y,int w,int h){ (void)x;(void)y;(void)w;(void)h; be_ime_rects++; }
+
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
 	.clear=be_clear,
@@ -76,6 +80,7 @@ static const bd_backend stub = {
 	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
 	.clipboard_set=be_clip_set, .clipboard_get=be_clip_get,
+	.ime_set_enabled=be_ime_enable, .ime_set_cursor_rect=be_ime_rect,
 };
 
 /* ---- multi-window stub: like `stub` but advertises native windows ---- */
@@ -950,6 +955,40 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_UP,   .key=BD_KEY_A });
 	check("extension receives key-down, repeat, and key-up",
 	    key_dn == 2 && key_rep == 1 && key_up == 1);
+	bd_gui_cleanup();
+
+	/* ---- IME: commit / preedit / enable-on-focus ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id imf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id itx = bd_create(imf, BD_TEXT, BD_PREF_H_I, 24, BD_END);
+	bd_gui_layout(800, 600);
+	int imx, imy, imw, imh;
+	bd_widget_rect(itx, &imx, &imy, &imw, &imh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=imx+5, .y=imy+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=imx+5, .y=imy+5 });
+
+	be_ime_on = -1;
+	bd_gui_render();
+	check("IME enabled while a text field is focused", be_ime_on == 1);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_TEXT_COMMIT, .text="ni" });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TEXT_COMMIT, .text="hao" });
+	check("TEXT_COMMIT inserts committed text",
+	    strcmp(bd_get_s(itx, BD_LABEL_S), "nihao") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_TEXT_PREEDIT, .text="X", .caret=1 });
+	check("preedit does not change the buffer",
+	    strcmp(bd_get_s(itx, BD_LABEL_S), "nihao") == 0);
+
+	/* a multi-byte commit (CJK) replaces the preedit and inserts */
+	bd_gui_event(&(bd_event){ .type=BD_EV_TEXT_COMMIT, .text="\xe6\x97\xa5" });
+	check("multi-byte TEXT_COMMIT inserts + clears preedit",
+	    strcmp(bd_get_s(itx, BD_LABEL_S), "nihao\xe6\x97\xa5") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	be_ime_on = -1;
+	bd_gui_render();
+	check("IME disabled when focus leaves the field", be_ime_on == 0);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
