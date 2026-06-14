@@ -1,9 +1,14 @@
 # GUI
 
 Birdie implements a **thin retained-mode widget layer** of its own, drawing
-through `ludica` primitives. No third-party widget toolkit (no ImGui, no
-Nuklear, no GTK/FLTK). The API style follows XView: objects are created with
-an attribute-list constructor, queried and mutated through get/set calls.
+through a small backend abstraction (a GPU interface implemented on `ludica`
+or on raw OpenGL ES; see Rendering). No third-party widget toolkit (no ImGui,
+no Nuklear, no GTK/FLTK). The API style follows XView: objects are created
+with an attribute-list constructor, queried and mutated through get/set calls.
+
+The toolkit has outgrown "birdie's GUI": it is packaged as **birdie-gui**, a
+reusable library (`make dist`), with birdie as one consumer. See the
+Implementation status section below for what is built today.
 
 ## Why retained-mode, not immediate-mode
 
@@ -139,29 +144,58 @@ tree. Anyone adding a new attribute must extend this test. The Pi dual-
 userland scenario (armhf + aarch64 sharing `/usr/include`) is the
 canonical target.
 
+## Implementation status
+
+As of 2026-06 the toolkit is at GUI v0.2 with v0.3 features in progress.
+What is built:
+
+- **Backend abstraction** — the `bd_backend` GPU vtable + neutral `bd_event`;
+  the toolkit never touches a windowing/render library directly. Two backends:
+  the reference **ludica** binding (`bd_backend_ludica.c`, what birdie runs on)
+  and a raw **OpenGL ES 3 / X11** binding (`src/guitest/`, what the gallery
+  runs on). Runtime-verified on both.
+- **Renderer** — `bd_draw.c` builds rects, textured sprites, and stb_truetype
+  text on the GPU interface; widgets can also drop to a custom fragment shader.
+- **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
+  `BD_MENU` (+ pinnable pushpins), `BD_INPUT_LINE`, and the `BD_TERMINAL`
+  extension (libvt). Flexbox row/col + fixed layout.
+- **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
+  wheel, jog dial, X-Y pad.
+- **Explorer widget** (extension) — model-driven icon grid with selection
+  (single / Ctrl / Shift-range / rubber-band), drag-move, double-click
+  activate, right-click context, keyboard nav, in-place rename, scissor clip.
+- **Multiple native windows** — on the GLES backend (see the v0.3 section).
+- **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
+
+Not yet built: `BD_TEXT`, `BD_MULTILINE`, `BD_LIST`, `BD_SCROLLBAR`,
+`BD_NOTICE`, `BD_TAB_BAR` (still enum-only); IME/compose; clipboard;
+multitouch; pen. These are tracked in the roadmap and widget-set sections.
+
 ## v1.0 widget set
 
-Kept intentionally small. If it is not on this list, it is not in v1.0.
+Kept intentionally small. If it is not on this list, it is not in v1.0. The
+"done" column marks what is implemented today; value widgets and the explorer
+are extensions (`widget_ext.h`) and so are not in this core set.
 
-| widget           | role                                                |
-|------------------|-----------------------------------------------------|
-| `BD_FRAME`       | top-level window                                    |
-| `BD_PANEL`       | layout container                                    |
-| `BD_LABEL`       | read-only text                                      |
-| `BD_BUTTON`      | clickable action                                    |
-| `BD_TEXT`        | single-line text input                              |
-| `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    |
-| `BD_LIST`        | scrolling list (MUD list, log sink list)            |
-| `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    |
-| `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable |
-| `BD_NOTICE`      | modal confirmation / alert                          |
-| `BD_TAB_BAR`     | tabs for multiple concurrent MUD sessions           |
-| `BD_TERMINAL`    | the MUD output widget (custom renderer)             |
-| `BD_INPUT_LINE`  | the MUD command input (history, completion)         |
+| widget           | role                                                | done |
+|------------------|-----------------------------------------------------|------|
+| `BD_FRAME`       | top-level window                                    | yes  |
+| `BD_PANEL`       | layout container                                    | yes  |
+| `BD_LABEL`       | read-only text                                      | yes  |
+| `BD_BUTTON`      | clickable action                                    | yes  |
+| `BD_TEXT`        | single-line text input                              | no   |
+| `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    | no   |
+| `BD_LIST`        | scrolling list (MUD list, log sink list)            | no   |
+| `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | no   |
+| `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
+| `BD_NOTICE`      | modal confirmation / alert                          | no   |
+| `BD_TAB_BAR`     | tabs for multiple concurrent MUD sessions           | no   |
+| `BD_TERMINAL`    | the MUD output widget (custom renderer)             | yes  |
+| `BD_INPUT_LINE`  | the MUD command input (history, completion)         | yes  |
 
 `BD_TERMINAL` and `BD_INPUT_LINE` are the only two widgets birdie couldn't
-have built against an off-the-shelf toolkit anyway; they will be the
-largest widgets by code volume. The rest are small.
+have built against an off-the-shelf toolkit anyway; they are the largest
+widgets by code volume. The rest are small.
 
 Explicitly deferred to later versions: drop targets, file chooser, color
 chooser, property sheets, split views inside the terminal pane, dockable
@@ -191,19 +225,27 @@ The terminal widget emits line events upstream into the trigger engine
 
 ## Rendering
 
-All drawing goes through `ludica`. Widgets render themselves via a small
-set of primitives:
+All drawing goes through the **`bd_backend` GPU interface**, not any specific
+library. That interface is a GLES-class subset: compile a shader, set
+uniforms, bind a texture, draw a triangle list of `bd_vertex` (pos / uv /
+rgba), and a scissor rectangle. ludica and raw OpenGL ES both provide it; a
+host implements the vtable and injects it via `bd_gui_init()`.
 
-- filled / stroked rect, rounded rect (OPEN LOOK obround buttons)
-- line, polyline
-- triangle (for pull-down / pull-right glyphs, in the OPEN LOOK style)
-- textured quad (glyph atlas, SIXEL tiles, MXP images later)
-- text run (using the CP437 atlas from `ludica/samples/ansiview` for the
-  terminal; a separate proportional atlas for chrome)
+On top of that, the toolkit's renderer **`bd_draw.c`** offers the higher-level
+primitives widgets actually call:
 
-A dirty-region list drives per-frame redraws; when the dirty list is
-empty the main loop blocks on the event queue (network fd + input) with
-no GPU work.
+- filled / stroked rect (chrome panels, borders, selection)
+- textured sprite / quad (glyph atlas, icon textures, SIXEL/MXP later)
+- text run (a stb_truetype atlas baked from the chrome TTF; the terminal
+  extension keeps its own CP437 atlas)
+
+These batch into one dynamic vertex buffer that flushes on texture change or
+on `bd_draw_flush()`. A widget that needs an effect (the shaded knob, and the
+explorer's scissor clip) flushes the batch and issues its own shader / scissor
+through the backend, then resumes batching.
+
+A dirty-region list driving per-frame redraws (idle to 0 Hz) is still planned;
+the loop currently redraws each frame.
 
 ## Pinnable menus (olvwm-style pushpins)
 
@@ -218,11 +260,11 @@ Why: batch operations on similar GUI actions are the killer use case
 - replaying a set of scripted commands while tuning them;
 - running the same log-viewer filter against several session files.
 
-Implementation sketch: a pinned menu is just a menu whose lifetime is
-decoupled from the SELECT release that opened it. The widget gains
-`BD_MENU_PIN_B` (a `BD_B` boolean attribute) that the user can read or
-set programmatically. The pin glyph is drawn with our existing
-primitives (circle + rect stem). No new widget type.
+Implemented: a pinned menu is a menu whose lifetime is decoupled from the
+SELECT release that opened it. The widget carries `BD_MENU_PIN_B` (a `BD_B`
+boolean attribute) the user can read or set programmatically. The pin glyph is
+a textured sprite (`pushpin-out`/`pushpin-in` PNGs; replacing these with
+scalable vector art is a todo). No new widget type.
 
 Attribute suffix `_B` — `int` used as boolean; added to the suffix list
 above for completeness.

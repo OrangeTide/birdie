@@ -10,8 +10,9 @@ It has two API tiers:
 
 - **App API** (`widget.h`) for building UIs out of widgets.
 - **Extension API** (`widget_ext.h`) for defining new widget *types*. The VT
-  terminal (`bd_widget_vt.h`) and the value widgets (`bd_widget_value.h`) are
-  built on it; `bd_widget_vt.c` is the reference.
+  terminal (`bd_widget_vt.h`), the value widgets (`bd_widget_value.h`), and the
+  explorer/icon browser (`bd_widget_explorer.h`) are built on it;
+  `bd_widget_vt.c` is the reference.
 
 ## Usage
 
@@ -161,6 +162,45 @@ anisotropic circular highlight and an orange-red indicator over a 270-degree
 sweep. The toggle, wheel, X-Y pad puck, and jog dial reuse that metal shading
 (`bd_widget_value.c` is the reference for shader-drawn widgets).
 
+## Explorer widget
+
+`bd_widget_explorer.h` is a model-driven icon browser (Explorer / PROGMAN /
+Finder style): an arrangeable grid of labeled icons. It is not tied to files;
+you supply a model (item count, per-item fetch, optional position/name
+persistence) and the widget renders and edits a view of it, re-querying on
+`bd_explorer_refresh()` so dynamic data stays in sync.
+
+```c
+#include "bd_widget_explorer.h"
+
+static int   srv_count(void *c) { (void)c; return n_servers; }
+static void  srv_get(void *c, int i, bd_explorer_item *out) {
+    (void)c;
+    out->key = servers[i].id;        /* stable id; selection/state key on this */
+    out->label = servers[i].name;
+    out->icon = servers[i].icon;     /* 0 = default placeholder */
+    out->enabled = 1;
+    out->x = servers[i].x; out->y = servers[i].y;  /* <0 = auto-place */
+    out->user = &servers[i];
+}
+static void  srv_set_pos(void *c, uint64_t key, int x, int y)  { /* persist */ }
+static void  srv_set_name(void *c, uint64_t key, const char *s){ /* rename  */ }
+
+bd_explorer_create(parent,
+    &(bd_explorer_model){ .count = srv_count, .get = srv_get,
+        .set_pos = srv_set_pos, .set_name = srv_set_name },
+    &(bd_explorer_cb){ .activate = on_open, .context = on_menu },
+    BD_GROW_I, 1, BD_END);
+```
+
+Interaction: click / Ctrl-click / Shift-range / rubber-band selection,
+drag-move (commits via `set_pos`), double-click `activate`, right-click
+`context` (screen coords, for the app to pop a menu), wheel scroll, keyboard
+nav (focus it, then arrows / Home / End / Ctrl-A / Enter), and in-place rename
+(F2 or `bd_explorer_begin_rename`, committing via `set_name`). Content is
+scissor-clipped to the panel. Query/poke selection with
+`bd_explorer_selection` / `bd_explorer_select`.
+
 ## Defining a widget type
 
 An extension fills a `bd_widget_class` and registers it for a type id, then
@@ -226,7 +266,17 @@ your backend to `bd_gui_init`. The toolkit owns the renderer
 (`bd_draw.c`: one default shader, a dynamic quad batch, and an stb_truetype
 glyph atlas), so a backend supplies GPU plumbing, not drawing primitives.
 Shaders are GLES3 (`#version 300 es`); alpha blending is on.
-`bd_backend_ludica.c` is the reference.
+`bd_backend_ludica.c` is the reference; a raw X11/EGL/GLES backend lives in
+`src/guitest/` (which also has a standalone widget gallery).
+
+**Multiple windows (optional).** Set `multi_window = 1` and provide the
+`window_*` hooks (`window_open` / `close` / `begin` / `swap` / `width` /
+`height` / `set_title`). Each top-level `BD_FRAME` then maps to a native
+window: the toolkit renders each between `window_begin`/`window_swap` and tags
+events with the originating window id (`bd_event.window`); `bd_frame_for_window`
+maps an id back to its frame. Leave the hooks NULL and `multi_window = 0` for a
+single-window host, the default. Keyboard focus moves on click and on
+Tab / Shift-Tab; `bd_focused()` reports it.
 
 ## Dependencies
 
