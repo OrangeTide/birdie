@@ -81,6 +81,9 @@ static void on_slider_test(bd_id id, void *arg, float t)
 static int knob_calls;
 static void on_knob_test(bd_id id, void *arg, float t)
 { (void)id; (void)arg; (void)t; knob_calls++; }
+static int toggle_calls, toggle_last;
+static void on_toggle_test(bd_id id, void *arg, int on)
+{ (void)id; (void)arg; toggle_calls++; toggle_last = on; }
 
 /* ---- drag-recording extension widget (stands in for a slider/knob) ---- */
 static int rec_down, rec_move, rec_up;
@@ -132,6 +135,8 @@ main(void)
 	bd_id ksw = bd_knob_create(frame, &(bd_knob_desc){
 	    .min = 0, .max = 6, .step = 1, .value = 2, .dial = BD_DIAL_DOTS },
 	    BD_PREF_H_I, 56, BD_END);
+	bd_id tg = bd_toggle_create(frame, 0, on_toggle_test, NULL,
+	    BD_PREF_H_I, 26, BD_END);
 
 	check("widgets created", frame && term && btn && rec && sld && knb);
 
@@ -216,6 +221,19 @@ main(void)
 	check("rotary switch snaps to step (4.4 -> 4)", bd_knob_get(ksw) == 4.0f);
 	bd_knob_set(ksw, 99.0f);
 	check("rotary switch clamps to max (6)", bd_knob_get(ksw) == 6.0f);
+
+	/* toggle: click flips, set/get */
+	check("toggle initial off", bd_toggle_get(tg) == 0);
+	int tgx, tgy, tgw, tgh;
+	bd_widget_rect(tg, &tgx, &tgy, &tgw, &tgh);
+	bd_event tdn = mouse(BD_EV_MOUSE_DOWN, tgx + tgw / 2, tgy + tgh / 2);
+	bd_event tup = mouse(BD_EV_MOUSE_UP, tgx + tgw / 2, tgy + tgh / 2);
+	bd_gui_event(&tdn);
+	bd_gui_event(&tup);
+	check("toggle click flips on + callback",
+	    bd_toggle_get(tg) == 1 && toggle_calls == 1 && toggle_last == 1);
+	bd_toggle_set(tg, 0);
+	check("toggle set off", bd_toggle_get(tg) == 0);
 
 	/* terminal write: plain text + bold + 256-color SGR */
 	bd_terminal_write(term,

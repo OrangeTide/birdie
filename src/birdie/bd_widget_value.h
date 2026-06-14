@@ -59,5 +59,17 @@ bd_id bd_knob_create(bd_id parent, const bd_knob_desc *desc, ...);
 void  bd_knob_set(bd_id id, float value);   /* clamped to range, snapped to step */
 float bd_knob_get(bd_id id);                /* value in [min,max] */
 
+/*
+ * A sliding on/off switch (modern mobile style): a rounded pill track with a
+ * circular thumb that slides between the ends, the track tinting to the theme
+ * accent when on. Serves the role of both a checkbox and a switch. Click flips
+ * it; the thumb animates.
+ */
+typedef void (*bd_toggle_cb)(bd_id id, void *arg, int on);
+
+bd_id bd_toggle_create(bd_id parent, int on, bd_toggle_cb cb, void *arg, ...);
+void  bd_toggle_set(bd_id id, int on);
+int   bd_toggle_get(bd_id id);
+
 #endif
 

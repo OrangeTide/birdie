@@ -478,3 +478,202 @@ bd_knob_get(bd_id id)
 	struct knob *k = bd_widget_state(id);
 	return k ? k->value : 0.0f;
 }
+
+/* ================================================================== */
+/* toggle: a sliding on/off switch drawn in a fragment shader         */
+/* ================================================================== */
+
+/*
+ * A skeuomorphic sliding switch: a recessed pill slot (theme accent when on,
+ * dark gray when off, with an OPEN-LOOK inset bevel) holding a brushed-aluminum
+ * chrome thumb that reuses the knob's anisotropic-highlight metal. u_size is the
+ * pill size in px, u_pos the animated 0..1 on-amount, u_accent the on color.
+ */
+static const char *TOGGLE_FRAG =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"out vec4 frag;\n"
+	"uniform vec2 u_size;\n"
+	"uniform float u_pos;\n"
+	"uniform vec3 u_accent;\n"
+	"float sdbox(vec2 p, vec2 b, float r){\n"
+	"    vec2 d = abs(p) - b + r;\n"
+	"    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;\n"
+	"}\n"
+	"float hsh(float x){ return fract(sin(x * 12.9898) * 43758.5453); }\n"
+	"void main(){\n"
+	"    vec2 q = v_uv * u_size;\n"
+	"    float H = u_size.y;\n"
+	"    float aa = 1.3;\n"
+	"    vec3 col = vec3(0.0);\n"
+	"    float alpha = 0.0;\n"
+	"    /* recessed track slot */\n"
+	"    float tr = sdbox(q - u_size * 0.5, u_size * 0.5 - 1.0, H * 0.5 - 1.0);\n"
+	"    float track = smoothstep(aa, -aa, tr);\n"
+	"    vec3 tcol = mix(vec3(0.11, 0.12, 0.13), u_accent, u_pos);\n"
+	"    tcol *= 0.74 + 0.34 * v_uv.y;\n"                /* inset: dark top, lit base */
+	"    col = tcol; alpha = track;\n"
+	"    float lipd = abs(tr + 1.5);\n"
+	"    col += smoothstep(2.0, 0.0, lipd) * (v_uv.y - 0.5) * 0.5;\n"  /* rim bevel */
+	"    /* brushed-aluminum chrome thumb */\n"
+	"    float m = 2.0;\n"
+	"    float rad = H * 0.5 - m;\n"
+	"    float cx = mix(rad + m, u_size.x - rad - m, u_pos);\n"
+	"    vec2 tc = vec2(cx, H * 0.5);\n"
+	"    float dsh = length(q - tc - vec2(0.0, 1.5)) - rad;\n"
+	"    col = mix(col, col * 0.45, smoothstep(aa + 2.5, -aa, dsh) * 0.45 * track);\n"
+	"    vec2 lp = (q - tc) / rad;\n"          /* -1..1 within thumb */
+	"    float lr = length(lp);\n"
+	"    float thumb = smoothstep(0.07, -0.02, lr - 1.0);\n"
+	"    vec3 al = vec3(0.60, 0.61, 0.63);\n"
+	"    float g = 0.6 * hsh(floor(atan(lp.y, lp.x) * 36.0)) +\n"
+	"              0.4 * hsh(floor(lr * 36.0));\n"
+	"    al *= 0.92 + 0.11 * g;\n"
+	"    vec2 rd = lr > 0.001 ? lp / lr : vec2(1.0, 0.0);\n"
+	"    vec3 Hh = normalize(normalize(vec3(-0.4, -0.5, 0.55)) + vec3(0.0, 0.0, 1.0));\n"
+	"    vec3 Tg = vec3(-rd.y, rd.x, 0.0);\n"
+	"    vec3 Bn = vec3(rd.x, rd.y, 0.0);\n"
+	"    float ht = dot(Hh, Tg) / 0.85, hb = dot(Hh, Bn) / 0.18;\n"
+	"    float hn = dot(Hh, vec3(0.0, 0.0, 1.0));\n"
+	"    al += exp(-2.0 * (ht * ht + hb * hb) / (1.0 + hn)) * 0.42 + 0.07;\n"
+	"    al = mix(al, al * 0.5, smoothstep(0.82, 1.0, lr));\n"   /* rim */
+	"    col = mix(col, al, thumb);\n"
+	"    alpha = max(alpha, thumb);\n"
+	"    frag = vec4(col, alpha);\n"
+	"}\n";
+
+struct toggle {
+	int          on;
+	float        pos;       /* animated 0..1 thumb position */
+	bd_toggle_cb cb;
+	void        *arg;
+};
+
+static int       toggle_type;
+static bd_shader toggle_shader;
+
+static void
+ensure_toggle_shader(void)
+{
+	if (toggle_shader.id == 0)
+		toggle_shader = bd_backend_get()->make_shader(KNOB_VERT, TOGGLE_FRAG);
+}
+
+static void
+toggle_init(bd_id id, void *state)
+{
+	struct toggle *t = state;
+	t->on = 0;
+	t->pos = 0.0f;
+	bd_set(id, BD_PREF_W_I, 48, BD_PREF_H_I, 26, BD_END);
+}
+
+static void
+toggle_render(bd_id id, void *state)
+{
+	struct toggle *t = state;
+	ensure_toggle_shader();
+	const bd_backend *be = bd_backend_get();
+
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	int ph = h > 26 ? 26 : (h < 16 ? 16 : h);
+	int pw = ph * 9 / 5;          /* ~1.8 aspect pill */
+	if (pw > w) pw = w;
+	int px = x + (w - pw) / 2;
+	int py = y + (h - ph) / 2;
+	float fx = (float)px, fy = (float)py;
+	float fw = (float)pw, fh = (float)ph;
+
+	/* ease the thumb toward the target each frame */
+	float target = t->on ? 1.0f : 0.0f;
+	t->pos += (target - t->pos) * 0.25f;
+	if (fabsf(target - t->pos) < 0.002f)
+		t->pos = target;
+
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fh, 0, 1, 1, 1, 1, 1 },
+	};
+
+	const bd_theme *th = bd_gui_theme();
+	uint32_t a = th->focus;
+	float ar = ((a >> 24) & 0xFF) / 255.0f;
+	float ag = ((a >> 16) & 0xFF) / 255.0f;
+	float ab = ((a >>  8) & 0xFF) / 255.0f;
+
+	bd_draw_flush();
+	be->use_shader(toggle_shader);
+	be->set_uniform_vec2(toggle_shader, "u_res",
+	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
+	be->set_uniform_vec2(toggle_shader, "u_size", fw, fh);
+	be->set_uniform_float(toggle_shader, "u_pos", t->pos);
+	be->set_uniform_vec3(toggle_shader, "u_accent", ar, ag, ab);
+	be->draw_verts(q, 6);
+}
+
+static int
+toggle_event(bd_id id, void *state, const bd_event *ev)
+{
+	struct toggle *t = state;
+	if (ev->type == BD_EV_MOUSE_DOWN) {
+		t->on = !t->on;
+		if (t->cb)
+			t->cb(id, t->arg, t->on);
+		return 1;
+	}
+	return 0;
+}
+
+static const bd_widget_class toggle_class = {
+	.name = "toggle",
+	.state_size = sizeof(struct toggle),
+	.init = toggle_init,
+	.render = toggle_render,
+	.event = toggle_event,
+};
+
+bd_id
+bd_toggle_create(bd_id parent, int on, bd_toggle_cb cb, void *arg, ...)
+{
+	if (toggle_type == 0)
+		toggle_type = bd_register_widget_class(&toggle_class);
+
+	va_list ap;
+	va_start(ap, arg);
+	bd_id id = bd_create_va(parent, toggle_type, ap);
+	va_end(ap);
+
+	struct toggle *t = bd_widget_state(id);
+	if (t) {
+		t->on = on ? 1 : 0;
+		t->pos = (float)t->on;
+		t->cb = cb;
+		t->arg = arg;
+	}
+	return id;
+}
+
+void
+bd_toggle_set(bd_id id, int on)
+{
+	if (bd_widget_type(id) != toggle_type)
+		return;
+	struct toggle *t = bd_widget_state(id);
+	if (t)
+		t->on = on ? 1 : 0;
+}
+
+int
+bd_toggle_get(bd_id id)
+{
+	if (bd_widget_type(id) != toggle_type)
+		return 0;
+	struct toggle *t = bd_widget_state(id);
+	return t ? t->on : 0;
+}

@@ -45,6 +45,15 @@ on_knob(bd_id id, void *arg, float v)
 	bd_set(status_label, BD_LABEL_S, buf, BD_END);
 }
 
+static void
+on_toggle(bd_id id, void *arg, int on)
+{
+	(void)id;
+	(void)arg;
+	bd_set(status_label, BD_LABEL_S, on ? "Switch: ON" : "Switch: OFF",
+		BD_END);
+}
+
 static int
 on_event(const lud_event_t *ev)
 {
@@ -131,6 +140,7 @@ init(void)
 	bd_knob_create(krow, &(bd_knob_desc){
 		.min = 0, .max = 6, .step = 1, .value = 2,
 		.dial = BD_DIAL_DOTS, .cb = on_knob }, BD_PREF_W_I, 64, BD_END);
+	bd_toggle_create(krow, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
 
 	/* button bar */
 	bd_id bar = bd_create(frame, BD_PANEL,
