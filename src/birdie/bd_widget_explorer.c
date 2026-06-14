@@ -14,12 +14,14 @@
  * click selection (replace / Ctrl-toggle / Shift-range), double-click
  * activate, right-click context callback, wheel scroll, drag-move of the
  * selection (committing via model.set_pos + moved()), rubber-band rectangle
- * selection (Ctrl = additive), and the accessor API.
+ * selection (Ctrl = additive), keyboard navigation (arrows / Home / End /
+ * Enter / Ctrl-A, Shift extends), a focus ring, and the accessor API. The
+ * widget takes keyboard focus when clicked.
  *
  * TODO (the interaction still to fill in):
  *   - scissor-clip the scrolled content to the widget bounds
- *   - keyboard navigation (arrows / Enter / Ctrl-A); needs focus traversal
- *   - label truncation / ellipsis and a focus ring
+ *   - Tab focus traversal between widgets (a toolkit-wide v0.3 item)
+ *   - label truncation / ellipsis
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -37,7 +39,8 @@ struct explorer {
 
 	uint64_t *sel;           /* selected keys */
 	int       sel_n, sel_cap;
-	uint64_t  anchor;        /* for shift-range selection (TODO) */
+	uint64_t  anchor;        /* fixed origin for shift-range selection */
+	uint64_t  cursor;        /* keyboard-nav cursor / focus item */
 
 	/* double-click tracking */
 	uint64_t  last_key;
@@ -145,6 +148,18 @@ sel_add_range(struct explorer *e, int lo, int hi)
 	}
 }
 
+/* Key of the item at model index, or 0 if out of range. */
+static uint64_t
+key_at(const struct explorer *e, int index)
+{
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	if (index < 0 || index >= n)
+		return 0;
+	bd_explorer_item it = {0};
+	e->model.get(e->model.ctx, index, &it);
+	return it.key;
+}
+
 /* ------------------------------------------------------------------ */
 /* geometry                                                           */
 /* ------------------------------------------------------------------ */
@@ -242,6 +257,39 @@ hit_item(bd_id id, struct explorer *e, int px, int py, uint64_t *key)
 		}
 	}
 	return -1;
+}
+
+/* Content-space position (pre-scroll) of the item at model index. */
+static void
+content_pos_of_index(bd_id id, const struct explorer *e, int index,
+    int *cx, int *cy)
+{
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	int slot = 0;
+	*cx = *cy = 0;
+	for (int i = 0; i <= index && i < n; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		item_content_pos(id, e, &it, &slot, cx, cy);
+	}
+}
+
+/* Scroll so the item at model index is fully visible. */
+static void
+ensure_visible(bd_id id, struct explorer *e, int index)
+{
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	(void)x; (void)w;
+	int cx, cy;
+	content_pos_of_index(id, e, index, &cx, &cy);
+	int ch = cell_h(e);
+	if (cy - e->scroll_y < 0)
+		e->scroll_y = cy;
+	else if (cy + ch - e->scroll_y > h)
+		e->scroll_y = cy + ch - h;
+	if (e->scroll_y < 0)
+		e->scroll_y = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -453,6 +501,8 @@ explorer_render(bd_id id, void *state)
 		int selected = sel_has(e, it.key);
 		if (selected)
 			bd_draw_rect(rx, ry, rw, rh, th->select);
+		if (it.key == e->cursor)         /* keyboard-nav focus ring */
+			bd_draw_rect_lines(rx, ry, rw, rh, th->focus);
 
 		int ix = rx + (rw - e->icon_size) / 2;
 		int iy = ry + CELL_PAD;
@@ -591,6 +641,7 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 				e->press_collapse = 1;
 			e->anchor = key;
 		}
+		e->cursor = key;        /* keyboard nav continues from here */
 		e->mode = DRAG_PENDING;
 		return 1;
 	}
@@ -629,6 +680,59 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		}
 		e->press_collapse = 0;
 		return was != DRAG_NONE;
+	}
+
+	case BD_EV_KEY_DOWN: {
+		int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+		if (n == 0)
+			return 0;
+
+		/* Ctrl+A selects everything */
+		if ((ev->mods & BD_MOD_CTRL) && ev->key == BD_KEY_A) {
+			sel_clear(e);
+			sel_add_range(e, 0, n - 1);
+			sel_changed(id, e);
+			return 1;
+		}
+
+		int cols = columns(id, e);
+		int ci = e->cursor ? index_of_key(e, e->cursor) : -1;
+		int ni;
+		switch (ev->key) {
+		case BD_KEY_LEFT:  ni = (ci < 0) ? 0 : ci - 1;    break;
+		case BD_KEY_RIGHT: ni = (ci < 0) ? 0 : ci + 1;    break;
+		case BD_KEY_UP:    ni = (ci < 0) ? 0 : ci - cols; break;
+		case BD_KEY_DOWN:  ni = (ci < 0) ? 0 : ci + cols; break;
+		case BD_KEY_HOME:  ni = 0;                        break;
+		case BD_KEY_END:   ni = n - 1;                    break;
+		case BD_KEY_ENTER:
+			if (ci >= 0 && e->cb.activate) {
+				bd_explorer_item it = {0};
+				e->model.get(e->model.ctx, ci, &it);
+				e->cb.activate(id, it.key, it.user);
+			}
+			return 1;
+		default:
+			return 0;
+		}
+		if (ni < 0)  ni = 0;
+		if (ni >= n) ni = n - 1;
+
+		e->cursor = key_at(e, ni);
+		if (ev->mods & BD_MOD_SHIFT) {
+			int ai = e->anchor ? index_of_key(e, e->anchor) : ni;
+			if (ai < 0)
+				ai = ni;
+			sel_clear(e);
+			sel_add_range(e, ai < ni ? ai : ni, ai < ni ? ni : ai);
+		} else {
+			sel_clear(e);
+			sel_add(e, e->cursor);
+			e->anchor = e->cursor;
+		}
+		ensure_visible(id, e, ni);
+		sel_changed(id, e);
+		return 1;
 	}
 
 	default:

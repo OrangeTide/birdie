@@ -137,6 +137,8 @@ exp_moved(bd_id w, uint64_t key, int x, int y, void *ctx)
 }
 static int exp_selchg_n;
 static void exp_selchg(bd_id w, void *ctx){ (void)w; (void)ctx; exp_selchg_n++; }
+static int exp_act_n; static uint64_t exp_act_key;
+static void exp_act(bd_id w, uint64_t key, void *user){ (void)w; (void)user; exp_act_n++; exp_act_key = key; }
 
 /* ---- click callback ---- */
 static int clicked;
@@ -432,7 +434,8 @@ main(void)
 	bd_gui_init(&stub, NULL);
 	bd_explorer_model emodel = {
 	    .count = exp_count, .get = exp_get, .set_pos = exp_set_pos };
-	bd_explorer_cb ecb = { .moved = exp_moved, .selection_changed = exp_selchg };
+	bd_explorer_cb ecb = { .moved = exp_moved, .selection_changed = exp_selchg,
+	    .activate = exp_act };
 
 	bd_id eframe = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
 	bd_id expl = bd_explorer_create(eframe, &emodel, &ecb, BD_GROW_I, 1, BD_END);
@@ -489,6 +492,31 @@ main(void)
 	    bd_explorer_selection(expl, NULL, 0) == 2);
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
 	    .mods=BD_MOD_SHIFT, .x=i1x, .y=iy });
+
+	/* keyboard navigation: clicking the explorer focuses it for key events */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	uint64_t k = 0;
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
+	bd_explorer_selection(expl, &k, 1);
+	check("Right arrow moves selection to the next item",
+	    bd_explorer_selection(expl, NULL, 0) == 1 && k == 101);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_END });
+	bd_explorer_selection(expl, &k, 1);
+	check("End selects the last item", k == 102);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_explorer_selection(expl, &k, 1);
+	check("Home selects the first item", k == 100);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_END, .mods=BD_MOD_SHIFT });
+	check("Shift+End extends the range to the end",
+	    bd_explorer_selection(expl, NULL, 0) == 3);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A, .mods=BD_MOD_CTRL });
+	check("Ctrl+A selects all", bd_explorer_selection(expl, NULL, 0) == 3);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter activates the cursor item",
+	    exp_act_n == 1 && exp_act_key == 100);
 
 	bd_gui_render();   /* exercises the band/selection render path */
 	bd_gui_cleanup();

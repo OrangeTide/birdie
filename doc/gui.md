@@ -344,10 +344,17 @@ view refreshes from live data without the app rebuilding it.
 In `src/birdie/bd_widget_explorer.{c,h}`. Working: model query, grid/free
 layout, rendering, click selection (replace / Ctrl-toggle / **Shift-range**,
 the latter additive with Ctrl), double-click activate, right-click context,
-wheel scroll, **drag-move** (commit via `set_pos` + `moved()`), and
-**rubber-band** selection (Ctrl = additive). Still to come: keyboard nav,
-in-place rename, scissor clipping, list/details modes. Exhibited in the
-widget gallery's "New Window" dialog.
+wheel scroll, **drag-move** (commit via `set_pos` + `moved()`),
+**rubber-band** selection (Ctrl = additive), and **keyboard navigation**
+(click to focus, then arrows / Home / End to move the cursor, Shift to extend
+the range, Ctrl-A select all, Enter activate; a focus ring marks the cursor).
+Still to come: in-place rename, scissor clipping, list/details modes.
+Exhibited in the widget gallery's "New Window" dialog.
+
+Keyboard focus: the toolkit now routes key events to a focused extension
+widget and gives an extension keyboard focus when it is clicked (the same path
+that already focused `BD_INPUT_LINE`). Tab traversal between widgets is still a
+separate v0.3 item.
 
 **Model — the widget owns no data.** Items carry a *stable key* so selection
 and saved positions survive a refresh when indices shift:

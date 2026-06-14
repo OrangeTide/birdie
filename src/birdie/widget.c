@@ -1691,6 +1691,14 @@ bd_gui_event(const bd_event *ev)
 			return input_key(focus_id, ev->key, ev->mods);
 	}
 
+	/* keyboard events for a focused extension widget (e.g. explorer nav) */
+	if (focus_id != BD_NONE && pool[focus_id].alive &&
+	    (ev->type == BD_EV_KEY_DOWN || ev->type == BD_EV_CHAR)) {
+		const bd_widget_class *cls = class_of(pool[focus_id].type);
+		if (cls && cls->event && ext_event(focus_id, ev))
+			return 1;
+	}
+
 	switch (ev->type) {
 	case BD_EV_MOUSE_MOVE:
 		/* a captured extension widget keeps the pointer through a drag */
@@ -1709,6 +1717,16 @@ bd_gui_event(const bd_event *ev)
 	}
 
 	case BD_EV_MOUSE_DOWN:
+		/* non-left press on an extension widget (e.g. right-click for an
+		 * explorer context menu): deliver without grabbing a drag */
+		if (ev->button != BD_MOUSE_LEFT) {
+			bd_id ext = hit_extension(frame, ev->x, ev->y);
+			if (ext != BD_NONE) {
+				focus_id = ext;
+				return ext_event(ext, ev);
+			}
+			return 0;
+		}
 		if (ev->button == BD_MOUSE_LEFT) {
 			int mx = ev->x;
 			int my = ev->y;
@@ -1723,10 +1741,12 @@ bd_gui_event(const bd_event *ev)
 
 			focus_id = BD_NONE;
 
-			/* a value widget grabs the pointer for the drag */
+			/* a value widget grabs the pointer for the drag; an explorer
+			 * also takes keyboard focus for arrow-key navigation */
 			bd_id ext = hit_extension(frame, mx, my);
 			if (ext != BD_NONE) {
 				pointer_capture = ext;
+				focus_id = ext;
 				ext_event(ext, ev);
 				return 1;
 			}
