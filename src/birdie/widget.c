@@ -87,6 +87,7 @@ struct widget {
 	int cursor;
 	int sel_anchor;
 	float scroll_x;
+	float scroll_y;         /* BD_MULTILINE vertical scroll */
 
 	int win_id;             /* backend window id for a top-level frame; 0 = none */
 
@@ -124,7 +125,7 @@ static float cursor_blink;
 static int
 is_text_field(int type)
 {
-	return type == BD_INPUT_LINE || type == BD_TEXT;
+	return type == BD_INPUT_LINE || type == BD_TEXT || type == BD_MULTILINE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,6 +338,76 @@ input_text_px(const char *buf, int end)
 }
 
 /* ------------------------------------------------------------------ */
+/* multi-line text helpers (BD_MULTILINE)                             */
+/* ------------------------------------------------------------------ */
+
+static int
+ml_line_start(const char *s, int pos)
+{
+	while (pos > 0 && s[pos - 1] != '\n')
+		pos--;
+	return pos;
+}
+
+static int
+ml_line_end(const char *s, int len, int pos)
+{
+	while (pos < len && s[pos] != '\n')
+		pos++;
+	return pos;
+}
+
+static int
+ml_line_h(void)
+{
+	int h = (int)bd_draw_line_height();
+	return h > 0 ? h : (int)CHROME_FONT_SZ + 2;
+}
+
+/* pixel width of buf[a..b) */
+static float
+ml_span_px(const char *buf, int a, int b)
+{
+	char tmp[1024];
+	int n = b - a;
+	if (n <= 0)
+		return 0.0f;
+	if (n >= (int)sizeof(tmp))
+		n = (int)sizeof(tmp) - 1;
+	memcpy(tmp, buf + a, n);
+	tmp[n] = '\0';
+	return chrome_text_w(tmp);
+}
+
+/* byte offset in [start,end] whose x from `start` is nearest `target` px */
+static int
+ml_col_at_px(const char *buf, int start, int end, float target)
+{
+	int pos = start;
+	float w = 0.0f;
+	while (pos < end) {
+		int nx = utf8_next(buf, pos, end);
+		float cw = ml_span_px(buf, pos, nx);
+		if (w + cw * 0.5f >= target)
+			return pos;
+		w += cw;
+		pos = nx;
+	}
+	return end;
+}
+
+/* count of '\n' in buf[0,pos) == the caret's line index */
+static int
+ml_line_index(const char *buf, int pos)
+{
+	int n = 0;
+	for (int i = 0; i < pos; i++)
+		if (buf[i] == '\n')
+			n++;
+	return n;
+}
+
+/* ------------------------------------------------------------------ */
 /* attribute application                                              */
 /* ------------------------------------------------------------------ */
 
@@ -509,6 +580,13 @@ defaults(struct widget *w, int type)
 		w->bg = theme.press;
 		w->fg = theme.text_hi;
 		w->pref_h = (int)CHROME_FONT_SZ + 8;
+		w->pad = 4;
+		w->sel_anchor = -1;
+		break;
+	case BD_MULTILINE:
+		w->bg = theme.press;
+		w->fg = theme.text_hi;
+		w->pref_h = (int)CHROME_FONT_SZ * 6 + 8;   /* ~6 lines */
 		w->pad = 4;
 		w->sel_anchor = -1;
 		break;
@@ -982,6 +1060,75 @@ render_widget(bd_id id)
 				fill_rect((int)cx, w->y + 2, 2, w->h - 4, w->fg);
 			}
 		}
+		break;
+	}
+
+	case BD_MULTILINE: {
+		int focused = (focus_id == id);
+		uint32_t border = focused ? theme.focus : theme.border;
+		fill_rect(w->x, w->y, w->w, w->h, w->bg);
+		stroke_rect(w->x, w->y, w->w, w->h, border);
+
+		int pad = w->pad;
+		int ix = w->x + pad, iy = w->y + pad;
+		int iw = w->w - 2 * pad, ih = w->h - 2 * pad;
+		int lh = ml_line_h();
+
+		/* caret position, then keep it in view */
+		int cls = ml_line_start(w->text_buf, w->cursor);
+		int caret_line = ml_line_index(w->text_buf, w->cursor);
+		float caret_px = ml_span_px(w->text_buf, cls, w->cursor);
+		int caret_top = caret_line * lh;
+		if (caret_top - (int)w->scroll_y < 0)
+			w->scroll_y = (float)caret_top;
+		if (caret_top + lh - (int)w->scroll_y > ih)
+			w->scroll_y = (float)(caret_top + lh - ih);
+		if (w->scroll_y < 0.0f)
+			w->scroll_y = 0.0f;
+		if (caret_px - w->scroll_x > (float)iw)
+			w->scroll_x = caret_px - (float)iw;
+		if (caret_px - w->scroll_x < 0.0f)
+			w->scroll_x = caret_px;
+		if (w->scroll_x < 0.0f)
+			w->scroll_x = 0.0f;
+
+		/* clip the scrolling text to the interior */
+		bd_draw_flush();
+		be->scissor(ix, iy, iw, ih);
+
+		char tmp[1024];
+		int li = 0, pos = 0;
+		for (;;) {
+			int le = ml_line_end(w->text_buf, w->text_len, pos);
+			int line_top = iy + li * lh - (int)w->scroll_y;
+			if (line_top + lh >= iy && line_top <= iy + ih) {
+				int n = le - pos;
+				if (n >= (int)sizeof(tmp))
+					n = (int)sizeof(tmp) - 1;
+				if (n > 0) {
+					memcpy(tmp, w->text_buf + pos, n);
+					tmp[n] = '\0';
+					bd_draw_text(tmp, (float)ix - w->scroll_x,
+					    (float)line_top, w->fg);
+				}
+			}
+			if (le >= w->text_len)
+				break;
+			pos = le + 1;
+			li++;
+		}
+
+		if (focused) {
+			double t = be->time() - (double)cursor_blink;
+			if (((int)(t * 2.0)) % 2 == 0) {
+				int cx = ix + (int)(caret_px - w->scroll_x);
+				int cy = iy + caret_top - (int)w->scroll_y;
+				fill_rect(cx, cy, 2, lh, w->fg);
+			}
+		}
+
+		bd_draw_flush();
+		be->scissor_off();
 		break;
 	}
 
@@ -1552,6 +1699,85 @@ input_key(bd_id id, int key, unsigned mods)
 	return 1;
 }
 
+/*
+ * Key handling for BD_MULTILINE. Home/End are line-relative, Up/Down move
+ * across lines preserving the caret's x, and Enter inserts a newline; every
+ * other key (Left/Right/Backspace/Delete/Ctrl-A/Escape) reuses input_key,
+ * which edits the shared buffer and treats '\n' as an ordinary byte.
+ */
+static int
+multiline_key(bd_id id, int key, unsigned mods)
+{
+	struct widget *w = &pool[id];
+	int ls = ml_line_start(w->text_buf, w->cursor);
+
+	switch (key) {
+	case BD_KEY_HOME:
+		w->cursor = ls;
+		break;
+	case BD_KEY_END:
+		w->cursor = ml_line_end(w->text_buf, w->text_len, w->cursor);
+		break;
+	case BD_KEY_UP: {
+		if (ls == 0) {
+			w->cursor = 0;
+			break;
+		}
+		float x = ml_span_px(w->text_buf, ls, w->cursor);
+		int pstart = ml_line_start(w->text_buf, ls - 1);
+		w->cursor = ml_col_at_px(w->text_buf, pstart, ls - 1, x);
+		break;
+	}
+	case BD_KEY_DOWN: {
+		int le = ml_line_end(w->text_buf, w->text_len, w->cursor);
+		if (le >= w->text_len) {
+			w->cursor = w->text_len;
+			break;
+		}
+		float x = ml_span_px(w->text_buf, ls, w->cursor);
+		int nstart = le + 1;
+		int nend = ml_line_end(w->text_buf, w->text_len, nstart);
+		w->cursor = ml_col_at_px(w->text_buf, nstart, nend, x);
+		break;
+	}
+	case BD_KEY_ENTER:
+		input_insert_char(id, '\n');
+		return 1;
+	default:
+		return input_key(id, key, mods);
+	}
+	w->sel_anchor = -1;
+	cursor_blink = (float)be->time();
+	return 1;
+}
+
+/* Place the caret at the clicked line and column. */
+static void
+multiline_click(bd_id id, int mx, int my)
+{
+	struct widget *w = &pool[id];
+	int pad = w->pad;
+	int ix = w->x + pad, iy = w->y + pad;
+	int lh = ml_line_h();
+
+	int line = (my - iy + (int)w->scroll_y) / (lh > 0 ? lh : 1);
+	if (line < 0)
+		line = 0;
+
+	int pos = 0, li = 0;
+	while (li < line && pos < w->text_len) {
+		pos = ml_line_end(w->text_buf, w->text_len, pos);
+		if (pos < w->text_len)
+			pos++;
+		li++;
+	}
+	int le = ml_line_end(w->text_buf, w->text_len, pos);
+	float target = (float)(mx - ix) + w->scroll_x;
+	w->cursor = ml_col_at_px(w->text_buf, pos, le, target);
+	w->sel_anchor = -1;
+	cursor_blink = (float)be->time();
+}
+
 /* ------------------------------------------------------------------ */
 /* public: lifecycle                                                  */
 /* ------------------------------------------------------------------ */
@@ -1771,7 +1997,9 @@ bd_gui_event(const bd_event *ev)
 			return 1;
 		}
 		if (ev->type == BD_EV_KEY_DOWN)
-			return input_key(focus_id, ev->key, ev->mods);
+			return pool[focus_id].type == BD_MULTILINE
+			    ? multiline_key(focus_id, ev->key, ev->mods)
+			    : input_key(focus_id, ev->key, ev->mods);
 	}
 
 	/* Enter or Space activates a focused button */
@@ -1831,7 +2059,10 @@ bd_gui_event(const bd_event *ev)
 			if (hit != BD_NONE &&
 			    is_text_field(pool[hit].type)) {
 				focus_id = hit;
-				input_click(hit, mx);
+				if (pool[hit].type == BD_MULTILINE)
+					multiline_click(hit, mx, my);
+				else
+					input_click(hit, mx);
 				return 1;
 			}
 

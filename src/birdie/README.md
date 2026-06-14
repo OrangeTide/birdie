@@ -95,10 +95,13 @@ id / value pairs. Pass `BD_NONE` as the parent for the root. Attributes cover
 geometry (`BD_PREF_W_I`, `BD_GROW_I`, `BD_PAD_I`, `BD_GAP_I`), layout
 (`BD_LAYOUT_I` with `BD_LAYOUT_ROW`/`COL`/`FIXED`), text (`BD_LABEL_S`), color
 (`BD_FG_C`, `BD_BG_C`), and callbacks (`BD_ON_CLICK_F`). Built-in types include
-`BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`, and
-`BD_INPUT_LINE`. `BD_TEXT` is a single-line field: set/read its contents with
-`bd_set`/`bd_get_s(id, BD_LABEL_S)`; Enter fires `BD_ON_CLICK_F` without
-clearing (`BD_INPUT_LINE` clears, for a command line).
+`BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`,
+`BD_MULTILINE`, and `BD_INPUT_LINE`. `BD_TEXT` is a single-line field:
+set/read its contents with `bd_set`/`bd_get_s(id, BD_LABEL_S)`; Enter fires
+`BD_ON_CLICK_F` without clearing (`BD_INPUT_LINE` clears, for a command line).
+`BD_MULTILINE` is the multi-line editor (Enter inserts a newline; Up/Down,
+line-relative Home/End, vertical scroll, click-to-caret); same
+`BD_LABEL_S`/`bd_get_s` for its `\n`-separated text.
 
 ## Theme and palette
 

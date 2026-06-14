@@ -622,6 +622,54 @@ main(void)
 	check("Tab reaches the BD_TEXT field", bd_focused() == tedit);
 	bd_gui_cleanup();
 
+	/* ---- BD_MULTILINE multi-line editor ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id mlf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ml = bd_create(mlf, BD_MULTILINE, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+
+	int mlx, mly, mlw, mlh;
+	bd_widget_rect(ml, &mlx, &mly, &mlw, &mlh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mlx+5, .y=mly+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mlx+5, .y=mly+5 });
+	check("clicking BD_MULTILINE focuses it", bd_focused() == ml);
+
+	/* type "ab", Enter, "cd" -> two lines */
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='a' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='b' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='c' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='d' });
+	check("Enter inserts a newline", strcmp(bd_get_s(ml, BD_LABEL_S), "ab\ncd") == 0);
+
+	/* Up to the first line, then insert -> lands on line 0 */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='X' });
+	check("Up moves the caret to the previous line",
+	    strcmp(bd_get_s(ml, BD_LABEL_S), "abX\ncd") == 0);
+
+	/* Home to line start, then insert */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='Y' });
+	check("Home goes to the line start",
+	    strcmp(bd_get_s(ml, BD_LABEL_S), "YabX\ncd") == 0);
+
+	/* Down then End reach the end of the line below */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_END });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='Z' });
+	check("Down + End reach the end of the next line",
+	    strcmp(bd_get_s(ml, BD_LABEL_S), "YabX\ncdZ") == 0);
+
+	/* Backspace at a line start joins with the previous line */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_BACKSPACE });
+	check("Backspace at line start joins lines",
+	    strcmp(bd_get_s(ml, BD_LABEL_S), "YabXcdZ") == 0);
+
+	bd_gui_render();   /* exercises the multiline render/scissor path */
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

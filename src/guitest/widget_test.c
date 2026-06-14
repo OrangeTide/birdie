@@ -182,6 +182,9 @@ on_new_window(bd_id id, void *arg)
 	if (getenv("GALLERY_AUTORENAME"))   /* open the rename editor for a shot */
 		bd_explorer_begin_rename(ex, 1);
 
+	bd_create(body, BD_MULTILINE, BD_PREF_H_I, 76,
+		BD_LABEL_S, "X:1\nT:Demo\nK:C\nCDEF GABc|", BD_END);
+
 	bd_id bar = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
 		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);

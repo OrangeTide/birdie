@@ -159,8 +159,8 @@ What is built:
   text on the GPU interface; widgets can also drop to a custom fragment shader.
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
   `BD_MENU` (+ pinnable pushpins), `BD_TEXT` (single-line field),
-  `BD_INPUT_LINE`, and the `BD_TERMINAL` extension (libvt). Flexbox
-  row/col + fixed layout.
+  `BD_MULTILINE` (multi-line editor), `BD_INPUT_LINE`, and the `BD_TERMINAL`
+  extension (libvt). Flexbox row/col + fixed layout.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
 - **Explorer widget** (extension) — model-driven icon grid with selection
@@ -169,9 +169,9 @@ What is built:
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 
-Not yet built: `BD_MULTILINE`, `BD_LIST`, `BD_SCROLLBAR`, `BD_NOTICE`,
-`BD_TAB_BAR` (still enum-only); IME/compose; clipboard; multitouch; pen.
-These are tracked in the roadmap and widget-set sections.
+Not yet built: `BD_LIST`, `BD_SCROLLBAR`, `BD_NOTICE`, `BD_TAB_BAR` (still
+enum-only); the rich-text editor widget; IME/compose; clipboard; multitouch;
+pen. These are tracked in the roadmap and widget-set sections.
 
 ## v1.0 widget set
 
@@ -186,7 +186,7 @@ are extensions (`widget_ext.h`) and so are not in this core set.
 | `BD_LABEL`       | read-only text                                      | yes  |
 | `BD_BUTTON`      | clickable action                                    | yes  |
 | `BD_TEXT`        | single-line text input                              | yes  |
-| `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    | no   |
+| `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    | yes  |
 | `BD_LIST`        | scrolling list (MUD list, log sink list)            | no   |
 | `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | no   |
 | `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
@@ -523,12 +523,17 @@ is only needed for a fully custom IME, which is out of scope.
 
 ### Real text and multiline widgets
 
-`BD_TEXT` (single-line field) is **done**: it shares `BD_INPUT_LINE`'s editor
-(`is_text_field()` covers both) and differs only in that Enter commits without
-clearing. Initial text via `BD_LABEL_S`, read back with `bd_get_s(id,
-BD_LABEL_S)`, set with `bd_set`. `BD_MULTILINE` (prefs notes, script editing)
-is still to do. Both will pick up the IME preedit/commit path above when it
-lands.
+Both **done**. `BD_TEXT` (single-line field) shares `BD_INPUT_LINE`'s editor
+(`is_text_field()` covers all three) and differs only in that Enter commits
+without clearing. `BD_MULTILINE` (prefs notes, script editing) holds `\n`-
+separated text in the same buffer: it reuses `input_key` for
+Left/Right/Backspace/Delete and the char path, adds line-relative Home/End,
+Up/Down (preserving caret x), Enter-inserts-newline, vertical scroll, and
+scissor-clipped multi-line rendering; click positions the caret by line/column.
+Initial text via `BD_LABEL_S`, read back with `bd_get_s(id, BD_LABEL_S)`, set
+with `bd_set`. Both will pick up the IME preedit/commit path above when it
+lands; cross-line selection in `BD_MULTILINE` is still to do, and it is the
+base the rich-text editor widget composes over.
 
 ### Editor widget (rich-text, row-oriented)
 
