@@ -30,6 +30,9 @@ enum win_ev_type {
     WIN_EV_KEY_UP,
     WIN_EV_CHAR,
     WIN_EV_TEXT_COMMIT,   /* committed text (IME / compose): `text` */
+    WIN_EV_TOUCH_DOWN,    /* touch point `touch` at `x`,`y` */
+    WIN_EV_TOUCH_MOVE,
+    WIN_EV_TOUCH_UP,
 };
 
 /* Mouse buttons. */
@@ -76,6 +79,7 @@ typedef struct {
     int      mods;          /* WIN_MOD_* bitmask */
     int      x, y;          /* mouse position (move / button) */
     int      button;        /* WIN_MOUSE_* (mouse down / up) */
+    int      touch;         /* touch-point id (WIN_EV_TOUCH_*) */
     float    scroll_dy;     /* wheel delta (scroll) */
     int      key;           /* WIN_KEY_* (key down / up) */
     int      repeat;        /* key down: 1 if an auto-repeat */

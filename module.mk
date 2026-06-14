@@ -143,6 +143,6 @@ widget-test : bd_vt
 	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
 	    src/birdie/bd_widget_explorer.c src/birdie/bd_widget_editor.c \
 	    $(BUILDDIR)/bd_vt.a \
-	    -lX11 -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
+	    -lX11 -lXi -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
 	@echo "built widget gallery: $(GALLERY_BIN)"
 	@echo "run it from the repo root: $(GALLERY_BIN)"

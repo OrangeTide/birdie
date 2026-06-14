@@ -24,6 +24,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
+#include <X11/extensions/XInput2.h>
 
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -72,6 +73,7 @@ static struct {
     struct win_slot windows[MAX_WINDOWS];   /* slot 0 is window id 1 */
     int        next_id;
     char       clip[4096];                  /* our owned clipboard text */
+    int        xi_opcode;                   /* XInput2 major opcode, 0 = none */
 } g;
 
 /* ------------------------------------------------------------------ */
@@ -137,6 +139,15 @@ window_create(const char *title, int width, int height)
     XStoreName(g.xdisplay, xw, title);
     XMapWindow(g.xdisplay, xw);
 
+    if (g.xi_opcode) {          /* receive multitouch events on this window */
+        unsigned char mask[XIMaskLen(XI_LASTEVENT)] = { 0 };
+        XISetMask(mask, XI_TouchBegin);
+        XISetMask(mask, XI_TouchUpdate);
+        XISetMask(mask, XI_TouchEnd);
+        XIEventMask em = { XIAllMasterDevices, sizeof mask, mask };
+        XISelectEvents(g.xdisplay, xw, &em, 1);
+    }
+
     EGLSurface surf = eglCreateWindowSurface(g.egl_display, g.egl_config,
         xw, NULL);
     if (surf == EGL_NO_SURFACE) {
@@ -199,6 +210,17 @@ win_open(const char *title, int width, int height)
     g.a_utf8      = XInternAtom(g.xdisplay, "UTF8_STRING", False);
     g.a_targets   = XInternAtom(g.xdisplay, "TARGETS", False);
     g.a_prop      = XInternAtom(g.xdisplay, "BD_CLIPBOARD", False);
+
+    /* XInput2 for multitouch (optional) */
+    int xi_ev, xi_err;
+    if (XQueryExtension(g.xdisplay, "XInputExtension", &g.xi_opcode,
+            &xi_ev, &xi_err)) {
+        int major = 2, minor = 2;
+        if (XIQueryVersion(g.xdisplay, &major, &minor) != Success)
+            g.xi_opcode = 0;
+    } else {
+        g.xi_opcode = 0;
+    }
 
     g.egl_display = eglGetDisplay(g.xdisplay);
     if (g.egl_display == EGL_NO_DISPLAY)
@@ -608,6 +630,31 @@ win_poll(win_event *ev)
             continue;
         if (xev.type == SelectionRequest) {
             clip_serve(&xev.xselectionrequest);
+            continue;
+        }
+        /* XInput2 multitouch */
+        if (xev.type == GenericEvent && g.xi_opcode
+            && xev.xcookie.extension == g.xi_opcode
+            && XGetEventData(g.xdisplay, &xev.xcookie)) {
+            XIDeviceEvent *de = xev.xcookie.data;
+            int t = xev.xcookie.evtype;
+            struct win_slot *s = slot_by_xwindow(de->event);
+            int handled = 0;
+            if (s && (t == XI_TouchBegin || t == XI_TouchUpdate
+                || t == XI_TouchEnd)) {
+                memset(ev, 0, sizeof(*ev));
+                ev->window = s->id;
+                ev->x = (int)de->event_x;
+                ev->y = (int)de->event_y;
+                ev->touch = (int)de->detail;
+                ev->type = (t == XI_TouchBegin) ? WIN_EV_TOUCH_DOWN
+                    : (t == XI_TouchUpdate) ? WIN_EV_TOUCH_MOVE
+                    : WIN_EV_TOUCH_UP;
+                handled = 1;
+            }
+            XFreeEventData(g.xdisplay, &xev.xcookie);
+            if (handled)
+                return 1;
             continue;
         }
         /* X11 auto-repeat is a KeyRelease immediately followed by a KeyPress

@@ -410,6 +410,16 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 		e.type = BD_EV_TEXT_COMMIT;
 		e.text = ev->text;
 		break;
+	case WIN_EV_TOUCH_DOWN:
+	case WIN_EV_TOUCH_MOVE:
+	case WIN_EV_TOUCH_UP:
+		e.type = ev->type == WIN_EV_TOUCH_DOWN ? BD_EV_TOUCH_DOWN
+		    : ev->type == WIN_EV_TOUCH_MOVE ? BD_EV_TOUCH_MOVE
+		    : BD_EV_TOUCH_UP;
+		e.x = ev->x;
+		e.y = ev->y;
+		e.touch = ev->touch;
+		break;
 	default:
 		return 0;       /* close, resize: no bd_event */
 	}

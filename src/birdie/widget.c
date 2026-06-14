@@ -109,6 +109,10 @@ static bd_id windows[MAX_WINDOWS];
 static int   window_count;
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
+/* per-finger capture: each active touch id grabs the widget it landed on, so
+ * several widgets (e.g. knobs) can be dragged at once */
+#define MAX_TOUCHES 10
+static struct { int active; int id; bd_id widget; } touches[MAX_TOUCHES];
 static bd_id active_menu = BD_NONE;
 static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
@@ -2257,6 +2261,7 @@ bd_gui_cleanup(void)
 	active_notice = BD_NONE;
 	notice_cb = NULL;
 	notice_arg = NULL;
+	memset(touches, 0, sizeof touches);
 }
 
 /* Place one top-level frame and its tree at the origin of the given size. */
@@ -2713,6 +2718,55 @@ bd_notice_open(const char *message, const char *buttons,
 	return n;
 }
 
+/* Route a touch to a per-finger captured widget, synthesizing mouse events so
+ * existing extension widgets (knobs, sliders, ...) work unchanged. Several
+ * fingers can drive several widgets at once. */
+static int
+handle_touch(const bd_event *ev, bd_id frame)
+{
+	bd_event m;
+	int i;
+
+	if (ev->type == BD_EV_TOUCH_DOWN) {
+		int s = -1;
+		for (i = 0; i < MAX_TOUCHES; i++)
+			if (!touches[i].active) { s = i; break; }
+		if (s < 0)
+			return 1;
+		touches[s].active = 1;
+		touches[s].id = ev->touch;
+		touches[s].widget = hit_extension(frame, ev->x, ev->y);
+		if (touches[s].widget != BD_NONE) {
+			m = (bd_event){0};
+			m.type = BD_EV_MOUSE_DOWN;
+			m.button = BD_MOUSE_LEFT;
+			m.x = ev->x; m.y = ev->y; m.window = ev->window;
+			ext_event(touches[s].widget, &m);
+		}
+		return 1;
+	}
+
+	for (i = 0; i < MAX_TOUCHES; i++)
+		if (touches[i].active && touches[i].id == ev->touch)
+			break;
+	if (i == MAX_TOUCHES)
+		return 1;
+
+	if (touches[i].widget != BD_NONE) {
+		m = (bd_event){0};
+		m.type = (ev->type == BD_EV_TOUCH_UP) ? BD_EV_MOUSE_UP
+		    : BD_EV_MOUSE_MOVE;
+		m.button = BD_MOUSE_LEFT;
+		m.x = ev->x; m.y = ev->y; m.window = ev->window;
+		ext_event(touches[i].widget, &m);
+	}
+	if (ev->type == BD_EV_TOUCH_UP) {
+		touches[i].active = 0;
+		touches[i].widget = BD_NONE;
+	}
+	return 1;
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2799,6 +2853,10 @@ bd_gui_event(const bd_event *ev)
 			return 1;
 		return 0;
 	}
+
+	if (ev->type == BD_EV_TOUCH_DOWN || ev->type == BD_EV_TOUCH_MOVE ||
+	    ev->type == BD_EV_TOUCH_UP)
+		return handle_touch(ev, frame);
 
 	/* Tab / Shift-Tab cycles keyboard focus among the frame's widgets,
 	 * before the event reaches whatever currently has focus */

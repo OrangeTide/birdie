@@ -177,8 +177,10 @@ What is built:
 - **IME / compose** — `BD_EV_TEXT_COMMIT`/`BD_EV_TEXT_PREEDIT` + backend
   `ime_set_enabled`/`ime_set_cursor_rect`; X11 XIM on the GLES backend (native
   candidate window). Key-up + an auto-repeat flag on `bd_event`.
+- **Multitouch** — `BD_EV_TOUCH_DOWN/MOVE/UP` with per-pointer ids + per-finger
+  capture (several knobs at once); X11 XInput2 on the GLES backend.
 
-Not yet built: multitouch; pen. These are tracked in the roadmap section.
+Not yet built: pen. Tracked in the roadmap section.
 
 ## v1.0 widget set
 
@@ -625,19 +627,23 @@ copy/cut still needs a selection, so it is single-line-field-only until
   one repeat key-down). Key-up routes to the focused extension widget; core
   widgets act on key-down only.
 
-### Multitouch gestures
+### Multitouch — implemented
 
-`bd_event` carries a single pointer position today. Multitouch adds touch
-events with a **per-pointer id** (`BD_EV_TOUCH_DOWN/MOVE/UP`, each with an
-id and position) so simultaneous contacts route independently. This extends
-the existing single-global pointer-capture to **per-pointer capture**: the
-headline use case is turning several knobs at once, one finger per knob, with
-each contact captured by the widget it landed on. Baseline is raw per-finger
-delivery; pinch/rotate gesture recognition can sit on top as optional
-toolkit helpers or be left to the application.
+`BD_EV_TOUCH_DOWN/MOVE/UP` each carry a **per-pointer id** (`bd_event.touch`)
+plus position. The toolkit keeps a small per-finger capture table: a touch-down
+grabs the extension widget it landed on, and that finger's moves/up route to it
+until release — so several widgets drag at once. Each finger is delivered to its
+widget as a synthesized mouse event, so existing value widgets (knobs, sliders,
+X-Y pads) work unchanged: the headline case, **turning several knobs at once
+with one finger each**, just works. Pinch/rotate gesture recognition can sit on
+top later (app- or helper-side).
 
-Backends surface touches from their platform source (X11 XInput2 touch,
-Win32 pointer input, Wayland touch, macOS).
+The raw GLES backend sources touches from **X11 XInput2** (selects
+`XI_TouchBegin/Update/End` per window; reads the touch id and coords from the
+`XIDeviceEvent`). Verified headlessly (two fingers driving two widgets with
+interleaved down/move/up); not live-tested for want of a touchscreen. ludica
+exposes no touch, so birdie has none there. Win32 pointer input / Wayland touch
+/ macOS are future.
 
 ### Pen tablet input and a drawing canvas
 

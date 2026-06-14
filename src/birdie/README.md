@@ -339,6 +339,11 @@ on text fields and place the candidate window at the caret. Optionally emit
 X11/XIM (the IME draws its own candidate window). With no hooks, plain
 `BD_EV_CHAR` still types ASCII.
 
+**Multitouch (optional).** Emit `BD_EV_TOUCH_DOWN/MOVE/UP` with a per-pointer
+`bd_event.touch` id and the toolkit captures each finger independently,
+synthesizing mouse events to the widget it landed on — so several knobs/sliders
+drag at once. The GLES backend sources touches from X11 XInput2 (`-lXi`).
+
 **Multiple windows (optional).** Set `multi_window = 1` and provide the
 `window_*` hooks (`window_open` / `close` / `begin` / `swap` / `width` /
 `height` / `set_title`). Each top-level `BD_FRAME` then maps to a native
@@ -374,7 +379,7 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
    backend-gles/bd_backend_gles.c \
    src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
    src/bd_widget_explorer.c src/bd_widget_editor.c <libvt.a> \
-   -lX11 -lEGL -lGLESv2 -lm -o gallery
+   -lX11 -lXi -lEGL -lGLESv2 -lm -o gallery
 ```
 
 Run `./gallery` from the bundle root so those relative asset paths resolve.

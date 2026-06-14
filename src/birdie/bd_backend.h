@@ -40,6 +40,9 @@ enum bd_ev_type {
 	BD_EV_KEY_UP,
 	BD_EV_TEXT_COMMIT,  /* committed text (IME / compose / dead keys): `text` */
 	BD_EV_TEXT_PREEDIT, /* in-progress composition: `text` + `caret` (bytes) */
+	BD_EV_TOUCH_DOWN,   /* a finger touched down: `touch` id at `x`,`y` */
+	BD_EV_TOUCH_MOVE,
+	BD_EV_TOUCH_UP,
 };
 
 /* Mouse buttons. */
@@ -84,8 +87,9 @@ enum {
 typedef struct {
 	int      type;          /* enum bd_ev_type */
 	int      mods;          /* BD_MOD_* bitmask */
-	int      x, y;          /* mouse position (move / button) */
+	int      x, y;          /* mouse / touch position */
 	int      button;        /* BD_MOUSE_* (mouse down / up) */
+	int      touch;         /* touch-point id (BD_EV_TOUCH_*) */
 	float    scroll_dy;     /* wheel delta (scroll) */
 	int      key;           /* BD_KEY_* (key down / up) */
 	int      repeat;        /* key down: 1 if an auto-repeat, else 0 */

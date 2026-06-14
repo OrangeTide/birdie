@@ -217,6 +217,22 @@ static const bd_widget_class keyrec_class = {
 	.name = "keyrec", .state_size = 0, .event = keyrec_event,
 };
 
+/* ---- per-instance pointer recorder (for multitouch routing) ---- */
+struct mt_state { int down, move, up; };
+static int
+mt_event(bd_id id, void *st, const bd_event *ev)
+{
+	(void)id;
+	struct mt_state *m = st;
+	if (ev->type == BD_EV_MOUSE_DOWN)      m->down++;
+	else if (ev->type == BD_EV_MOUSE_MOVE) m->move++;
+	else if (ev->type == BD_EV_MOUSE_UP)   m->up++;
+	return 1;
+}
+static const bd_widget_class mt_class = {
+	.name = "mt", .state_size = sizeof(struct mt_state), .event = mt_event,
+};
+
 static bd_event
 mouse(int type, int x, int y)
 {
@@ -989,6 +1005,32 @@ main(void)
 	be_ime_on = -1;
 	bd_gui_render();
 	check("IME disabled when focus leaves the field", be_ime_on == 0);
+	bd_gui_cleanup();
+
+	/* ---- multitouch: two fingers drive two widgets at once ---- */
+	bd_gui_init(&stub, NULL);
+	int mtt = bd_register_widget_class(&mt_class);
+	bd_id mtf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_ROW, BD_END);
+	bd_id ma = bd_create(mtf, mtt, BD_GROW_I, 1, BD_END);
+	bd_id mb = bd_create(mtf, mtt, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+	int ax, ay, aw, ah, bx2, by2, bw2, bh2;
+	bd_widget_rect(ma, &ax, &ay, &aw, &ah);
+	bd_widget_rect(mb, &bx2, &by2, &bw2, &bh2);
+	int acx = ax + aw/2, acy = ay + ah/2, bcx = bx2 + bw2/2, bcy = by2 + bh2/2;
+
+	/* finger 1 on A and finger 2 on B, interleaved */
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_DOWN, .touch=1, .x=acx, .y=acy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_DOWN, .touch=2, .x=bcx, .y=bcy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_MOVE, .touch=1, .x=acx, .y=acy-10 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_MOVE, .touch=2, .x=bcx, .y=bcy+10 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_UP,   .touch=1, .x=acx, .y=acy-10 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_TOUCH_UP,   .touch=2, .x=bcx, .y=bcy+10 });
+
+	struct mt_state *sa = bd_widget_state(ma), *smb = bd_widget_state(mb);
+	check("each finger drives its own widget (down/move/up)",
+	    sa->down == 1 && sa->move == 1 && sa->up == 1 &&
+	    smb->down == 1 && smb->move == 1 && smb->up == 1);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
