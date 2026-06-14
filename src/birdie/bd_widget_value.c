@@ -286,8 +286,10 @@ struct knob {
 	float       phase;          /* accumulated rotation (relative mode) */
 	bd_value_cb cb;
 	void       *arg;
-	float       drag_v0;        /* value at drag start */
-	int         drag_y0;
+	int         drag_x0, drag_y0;  /* previous / start pointer */
+	int         drag_sy;           /* start y (gesture detection) */
+	float       drag_ang;          /* previous pointer angle */
+	int         drag_mode;         /* 0 undecided, 1 slide, 2 circular */
 };
 
 static int       knob_type;
@@ -424,35 +426,82 @@ knob_render(bd_id id, void *state)
 		knob_labels(k, fx + fs * 0.5f, fy + fs * 0.5f, fs * 0.5f * 0.92f);
 }
 
+/*
+ * Combined drag, per jherrm.github.io/knobs: a vertical slide (with precision
+ * that increases as you drag away from the knob) and a circular spin (grab near
+ * the rim and rotate). The first decisive move picks the mode: a tangential
+ * move around the knob -> circular, otherwise slide.
+ */
 static int
 knob_event(bd_id id, void *state, const bd_event *ev)
 {
 	struct knob *k = state;
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	float cx = (float)x + w * 0.5f, cy = (float)y + h * 0.5f;
+	float R = (w < h ? w : h) * 0.5f;
+
 	if (ev->type == BD_EV_MOUSE_DOWN) {
+		k->drag_x0 = ev->x;
 		k->drag_y0 = ev->y;
-		k->drag_v0 = k->value;
+		k->drag_sy = ev->y;
+		k->drag_ang = atan2f((float)ev->y - cy, (float)ev->x - cx);
+		k->drag_mode = 0;
 		return 1;
 	}
-	if (ev->type == BD_EV_MOUSE_MOVE) {
-		if (k->relative) {
-			int d = k->drag_y0 - ev->y;       /* up = + */
-			k->drag_y0 = ev->y;
-			k->phase += (float)d * 0.02f;     /* spin the dimples */
-			if (d != 0 && k->cb)
-				k->cb(id, k->arg, (float)d * 0.01f);
-			return 1;
+	if (ev->type != BD_EV_MOUSE_MOVE)
+		return 0;
+
+	float dxc = (float)ev->x - cx, dyc = (float)ev->y - cy;
+	float ang = atan2f(dyc, dxc);
+
+	if (k->drag_mode == 0) {
+		float mdx = (float)(ev->x - k->drag_x0);
+		float mdy = (float)(ev->y - k->drag_sy);
+		if (mdx * mdx + mdy * mdy >= 16.0f) {       /* moved > 4px */
+			float rx = (float)k->drag_x0 - cx, ry = (float)k->drag_sy - cy;
+			float rl = sqrtf(rx * rx + ry * ry);
+			if (rl < R * 0.35f) {
+				k->drag_mode = 1;                   /* center grab -> slide */
+			} else {
+				rx /= rl; ry /= rl;
+				float radial = mdx * rx + mdy * ry;
+				float tang = mdx * -ry + mdy * rx;
+				k->drag_mode = fabsf(tang) > fabsf(radial) ? 2 : 1;
+			}
 		}
-		float t = (k->drag_v0 - k->min) / (k->max - k->min) +
-		    (float)(k->drag_y0 - ev->y) / 150.0f;
-		float v = knob_snap(k, k->min + t * (k->max - k->min));
+	}
+
+	float delta = 0.0f;
+	if (k->drag_mode == 2) {                        /* circular */
+		float da = ang - k->drag_ang;
+		if (da >  3.14159265f) da -= 6.2831853f;
+		if (da < -3.14159265f) da += 6.2831853f;
+		delta = da / KNOB_SWEEP;                    /* fraction of the sweep */
+	} else if (k->drag_mode == 1) {                 /* slide + precision */
+		float hd = fabsf(dxc);   /* drag to the side -> finer control */
+		float prec = R / (hd > R ? hd : R);
+		delta = (float)(k->drag_y0 - ev->y) / 150.0f * prec;
+	}
+	k->drag_ang = ang;
+	k->drag_y0 = ev->y;
+
+	if (delta == 0.0f)
+		return 1;
+
+	if (k->relative) {
+		k->phase += delta * KNOB_SWEEP;             /* spin the dimples */
+		if (k->cb)
+			k->cb(id, k->arg, delta);
+	} else {
+		float v = knob_snap(k, k->value + delta * (k->max - k->min));
 		if (v != k->value) {
 			k->value = v;
 			if (k->cb)
 				k->cb(id, k->arg, v);
 		}
-		return 1;
 	}
-	return 0;
+	return 1;
 }
 
 static const bd_widget_class knob_class = {
@@ -878,15 +927,17 @@ static const char *XYPAD_FRAG =
 	"    vec2 c = u_size * 0.5;\n"
 	"    float S = min(u_size.x, u_size.y);\n"
 	"    float aa = 1.3;\n"
+	"    float pr = S * 0.12;\n"
+	"    float dishR = S * 0.5 - 1.0;\n"
+	"    float travel = dishR - pr;\n"          /* keep the puck inside the dish */
 	"    float field = u_circle > 0.5\n"
-	"        ? smoothstep(aa, -aa, length(q - c) - (S * 0.5 - 1.0))\n"
-	"        : smoothstep(aa, -aa, sdbox(q - c, u_size * 0.5 - 1.0, 6.0));\n"
+	"        ? smoothstep(aa, -aa, length(q - c) - dishR)\n"
+	"        : smoothstep(aa, -aa, sdbox(q - c, vec2(dishR), 6.0));\n"
 	"    vec3 col = vec3(0.11, 0.12, 0.14) * (0.82 + 0.32 * v_uv.y);\n"
 	"    float alpha = field;\n"
-	"    vec2 pp = u_pos * u_size;\n"
+	"    vec2 pp = c + (u_pos - 0.5) * 2.0 * travel;\n"
 	"    col += (smoothstep(1.5, 0.0, abs(q.x - pp.x)) +\n"
 	"            smoothstep(1.5, 0.0, abs(q.y - pp.y))) * 0.05 * field;\n"
-	"    float pr = S * 0.13;\n"
 	"    float ds = length(q - pp - vec2(0.0, 2.0)) - pr;\n"
 	"    col = mix(col, col * 0.5, smoothstep(3.0, -1.0, ds) * 0.4 * field);\n"
 	"    vec2 lp = (q - pp) / pr;\n"
@@ -909,6 +960,7 @@ struct xypad {
 	int      shape;
 	int      spring;
 	float    x, y;          /* [0,1], y up */
+	int      dragging;
 	bd_xy_cb cb;
 	void    *arg;
 };
@@ -933,6 +985,14 @@ xypad_square(bd_id id, int *sx, int *sy, int *ss)
 	*sx = x + (w - s) / 2;
 	*sy = y + (h - s) / 2;
 	*ss = s;
+}
+
+/* the puck's travel radius in pixels (matches the shader inset) */
+static float
+xypad_travel(int ss)
+{
+	float t = (ss * 0.5f - 1.0f) - ss * 0.12f;
+	return t < 1.0f ? 1.0f : t;
 }
 
 static void
@@ -969,6 +1029,18 @@ xypad_render(bd_id id, void *state)
 	struct xypad *p = state;
 	ensure_xypad_shader();
 	const bd_backend *be = bd_backend_get();
+
+	/* spring joystick eases back to center when released */
+	if (p->spring && !p->dragging &&
+	    (fabsf(p->x - 0.5f) > 0.001f || fabsf(p->y - 0.5f) > 0.001f)) {
+		p->x += (0.5f - p->x) * 0.25f;
+		p->y += (0.5f - p->y) * 0.25f;
+		if (fabsf(p->x - 0.5f) < 0.003f) p->x = 0.5f;
+		if (fabsf(p->y - 0.5f) < 0.003f) p->y = 0.5f;
+		if (p->cb)
+			p->cb(id, p->arg, p->x, p->y);
+	}
+
 	int sx, sy, ss;
 	xypad_square(id, &sx, &sy, &ss);
 	float fx = (float)sx, fy = (float)sy, fs = (float)ss;
@@ -998,20 +1070,20 @@ xypad_event(bd_id id, void *state, const bd_event *ev)
 	if (ev->type == BD_EV_MOUSE_DOWN || ev->type == BD_EV_MOUSE_MOVE) {
 		int sx, sy, ss;
 		xypad_square(id, &sx, &sy, &ss);
-		float x = (float)(ev->x - sx) / (float)ss;
-		float y = 1.0f - (float)(ev->y - sy) / (float)ss;
+		float cx = (float)sx + ss * 0.5f, cy = (float)sy + ss * 0.5f;
+		float travel = xypad_travel(ss);
+		float x = 0.5f + ((float)ev->x - cx) / (2.0f * travel);
+		float y = 0.5f - ((float)ev->y - cy) / (2.0f * travel);
 		xypad_clamp(p, &x, &y);
 		p->x = x;
 		p->y = y;
+		p->dragging = 1;
 		if (p->cb)
 			p->cb(id, p->arg, x, y);
 		return 1;
 	}
-	if (ev->type == BD_EV_MOUSE_UP && p->spring) {
-		p->x = 0.5f;
-		p->y = 0.5f;
-		if (p->cb)
-			p->cb(id, p->arg, 0.5f, 0.5f);
+	if (ev->type == BD_EV_MOUSE_UP) {
+		p->dragging = 0;   /* a spring pad eases back in render */
 		return 1;
 	}
 	return 0;
