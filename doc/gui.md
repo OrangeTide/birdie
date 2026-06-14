@@ -247,6 +247,181 @@ received bytes into a lock-free ring; the UI thread parses (libvt),
 appends to the terminal widget's scrollback, and walks the trigger engine.
 This matches the decision left open in `doc/triggers.md`.
 
+## Roadmap: proposed v0.3 features
+
+Targeted for GUI v0.3 (after the current v0.2 GPU-drawing/value-widget
+work). Recorded here so today's design does not foreclose them.
+
+Several of these break the input ABI (`bd_event` and the `bd_backend`
+vtable): multi-window adds a window id, IME needs a string-carrying commit
+event and a reverse caret channel, multitouch needs per-pointer ids, and
+the pen needs pressure/tilt fields. Land them together as one v0.3 ABI
+break rather than churning the struct repeatedly.
+
+The prototyping vehicle is the **second backend** (below): ludica exposes
+none of the per-pointer/valuator input these features need, but the owned
+GLES backend talks X11 directly and can grow XInput2 touch/pen and a real
+IME path. The widget gallery on that backend is where the new input is
+exercised, while birdie keeps running on ludica.
+
+### Reference GLES backend and widget gallery
+
+birdie the MUD client runs on ludica. To keep a second backend honest and
+to have somewhere to exhibit and exercise widgets, the toolkit also ships a
+raw OpenGL ES 3 backend plus a standalone widget gallery:
+
+- `src/guitest/window.h` + `x11_window.c` — a neutral window/event layer
+  over X11 + EGL (no Xlib leaks past the header), adopted from smoltrek.
+- `src/guitest/bd_backend_gles.{c,h}` — the `bd_backend` GPU vtable on raw
+  GLES3 (shader compile, streaming vertex buffer, textures, scissor).
+- `src/guitest/widget_test.c` — the gallery: menus (incl. a pinnable one),
+  terminal, input line, every value widget, sliders, buttons, with an event
+  readout. Built by `make widget-test` (Linux/X11, opt-in), run from the
+  repo root.
+
+Owning this backend means birdie-gui has a non-ludica reference
+implementation. The plan is to **bundle both the GLES backend and the
+gallery into the `make dist` ZIP** so downstream consumers get a working
+example backend and a widget showcase, not just headers and sources.
+
+### Multiple native windows
+
+Open more than one top-level window so pop-up dialogs and genuinely
+multi-window applications are possible. This is the natural companion to
+pinnable menus: a pinned menu wants to outlive its parent and float as its
+own window, and tear-off palettes/inspectors follow the same model.
+
+Not every backend can reasonably create multiple OS windows. Backends that
+can (X11, Win32, Wayland, SDL) map each `bd_frame` to a real window.
+Backends that cannot (a single-surface or embedded host) must run their
+own in-surface window manager that lays out and decorates birdie-gui
+windows inside the one surface they own. The toolkit therefore treats
+"a window" as a backend capability, not a guarantee:
+
+- The `bd_backend` vtable gains window create/destroy/raise/move hooks plus
+  a capability flag the toolkit can query.
+- Each top-level `BD_FRAME` owns an optional backend window handle; when the
+  backend lacks multi-window support the toolkit composites frames itself.
+- Input/event routing already flows through the neutral `bd_event`
+  ([[birdie-backend-layer]]); it grows a window id so events dispatch to the
+  right frame.
+
+### Explorer / icon-browser widget
+
+A new widget type (v0.3, built as a `widget_ext` extension) modeled on
+Explorer / PROGMAN.EXE (Win 3.x) / Finder / NeXTSTEP File Viewer: an
+arrangeable grid of labeled icons with persistent positional state.
+
+It is **not** tied to files. The widget is driven by a callback/model
+interface so the items can be any collection: a MUD client's server list, a
+DAW's known-plugin list, and so on. Because items come from a model rather
+than a fixed array, the view refreshes correctly when the underlying data
+changes.
+
+Capabilities:
+
+- **Icons** carry an image, a label, and an enabled/disabled state.
+- **Per-item events** delivered back to the application so it can mutate
+  items in app-specific ways: right-click for a context pop-up, double-click
+  to activate, enable/disable, etc.
+- **Drag-and-drop** to rearrange icons; positions are tracked and can
+  optionally be saved and restored (the model owns persistence).
+- **Multi-selection**: rubber-band rectangle drag, plus Ctrl/Shift
+  additive and range selection as on Windows Explorer.
+- **Model callbacks** for item count, item contents, and change
+  notification so dynamic data stays in sync without the app rebuilding the
+  view.
+
+The drag/capture plumbing this needs (pointer down/move/up routed to an
+extension widget, with capture held through a drag) already landed for the
+value widgets, so the selection rectangle and icon dragging build on
+existing toolkit support.
+
+### IME, compose, and dead keys
+
+Today the only text channel is `BD_EV_CHAR`, which carries a single
+codepoint. That cannot represent a multi-codepoint commit, a compose/dead-key
+sequence, or an in-progress composition, so CJK input, accented-letter
+compose, and emoji variants are all broken or truncated at the source. The
+gap is structural, not an X11 quirk: `bd_event` has no way to carry a string
+or a preedit, so every backend hits the same wall. (A reference X11 backend
+got as far as an `XIC` with `Xutf8LookupString` but had to disable preedit
+and forward only the first codepoint of each commit.)
+
+The complete solution is four seams, identical across X11 (XIM/IBus), Win32
+(IMM/TSF), macOS (`NSTextInputClient`), and Wayland (text-input-v3):
+
+- **Commit as a UTF-8 string.** Add `BD_EV_TEXT_COMMIT` carrying a
+  `const char *` valid for the dispatch only. This also makes dead keys,
+  compose, and paste fall out for free. `BD_EV_CHAR` may stay as a
+  convenience for the ASCII path or be retired.
+- **Preedit event.** `BD_EV_TEXT_PREEDIT` carries the in-progress string
+  plus a caret offset (and optionally an underline/attribute range). The
+  text widget renders it inline but does **not** insert it into the buffer
+  until commit.
+- **Caret-rect reporting (toolkit → backend).** The reverse channel that is
+  missing today: `ime_set_cursor_rect(x, y, w, h)` so the platform positions
+  its candidate window at the caret (XNSpotLocation / ImmSetCompositionWindow
+  / `set_cursor_rectangle`).
+- **Enable/disable on focus.** `ime_set_enabled(on)` as focus enters or
+  leaves a text widget, so the IME does not swallow keys in games or other
+  non-text widgets.
+
+**Decision:** the platform IME draws its own candidate/conversion window;
+the toolkit only reports the caret rect. Native candidate UI is the default
+for XIM/IMM/TSF/macOS, so this is the smallest portable surface that is still
+complete for CJK, compose, and dead keys. A toolkit-drawn candidate window
+is only needed for a fully custom IME, which is out of scope.
+
+### Real text and multiline widgets
+
+`BD_TEXT` (single-line) and `BD_MULTILINE` are in the v1.0 widget table but
+are not actually implemented; only `BD_INPUT_LINE` exists. v0.3 implements
+both for real. They are a prerequisite for explorer rename-in-place, prefs
+notes, and script editing, and they share the IME preedit/commit path above.
+
+### Clipboard
+
+Copy / cut / paste, backed by per-platform hooks (X11 selections, Win32
+clipboard, macOS pasteboard, Wayland data-device). Paste reuses the same
+string channel as IME commit, so it lands naturally alongside it. A text
+editor without paste is incomplete.
+
+### Focus traversal, key-up, and repeat
+
+- **Tab / Shift-Tab** traversal between focusable widgets, needed once
+  dialogs and multiple windows exist.
+- **Key-up events and a repeat flag** on `bd_event`. Cheap to add while the
+  struct is already being broken, and useful for held-key interactions.
+
+### Multitouch gestures
+
+`bd_event` carries a single pointer position today. Multitouch adds touch
+events with a **per-pointer id** (`BD_EV_TOUCH_DOWN/MOVE/UP`, each with an
+id and position) so simultaneous contacts route independently. This extends
+the existing single-global pointer-capture to **per-pointer capture**: the
+headline use case is turning several knobs at once, one finger per knob, with
+each contact captured by the widget it landed on. Baseline is raw per-finger
+delivery; pinch/rotate gesture recognition can sit on top as optional
+toolkit helpers or be left to the application.
+
+Backends surface touches from their platform source (X11 XInput2 touch,
+Win32 pointer input, Wayland touch, macOS).
+
+### Pen tablet input and a drawing canvas
+
+Support a pressure-sensitive pen (MPP 2.0 baseline: pressure, tilt X/Y,
+barrel button, eraser, and hover/proximity). The pointer/touch event grows
+pen fields: `pressure` (0..1), `tilt_x` / `tilt_y`, and a pen-flags field
+(eraser, barrel button, in-range/hover). Backends source these from XInput2
+valuators (X11), the Windows Ink / Pointer API (Win32), or tablet-v2
+(Wayland).
+
+The compelling consumer is a **drawing-canvas widget** that turns pen data
+into variable-width strokes (pressure → width, tilt → nib shape), with hover
+shown before contact and the eraser end recognized. It is a natural
+`widget_ext` that renders through the v0.2 GPU interface.
+
 ## Open questions
 
 - Text shaping for chrome: stick with bitmap atlas (fits GLES2 cleanly,
