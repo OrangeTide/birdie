@@ -902,7 +902,8 @@ render_widget(bd_id id)
 		else if (w->hover)
 			bg = theme.hover;
 		fill_rect(w->x, w->y, w->w, w->h, bg);
-		stroke_rect(w->x, w->y, w->w, w->h, theme.border);
+		stroke_rect(w->x, w->y, w->w, w->h,
+		    (focus_id == id) ? theme.focus : theme.border);
 		if (w->label) {
 			float tw = chrome_text_w(w->label);
 			float tx = (float)w->x + ((float)w->w - tw) * 0.5f;
@@ -1578,6 +1579,7 @@ bd_gui_cleanup(void)
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
 	drag_menu = BD_NONE;
+	focus_id = BD_NONE;
 }
 
 /* Place one top-level frame and its tree at the origin of the given size. */
@@ -1665,6 +1667,65 @@ bd_gui_render(void)
 	}
 }
 
+/* A widget that can hold keyboard focus via Tab. */
+static int
+is_focusable(bd_id id)
+{
+	struct widget *w = &pool[id];
+	if (!w->alive || !w->visible || !w->enabled)
+		return 0;
+	if (w->type == BD_INPUT_LINE)
+		return 1;
+	if (w->type == BD_BUTTON)
+		return w->on_click != NULL;
+	const bd_widget_class *cls = class_of(w->type);
+	return cls && cls->event != NULL; /* extension widgets (explorer, ...) */
+}
+
+/* Append focusable widgets under `id` to list[], depth-first in child order.
+ * Does not descend into menus (their items are not in the Tab order). */
+static void
+collect_focusable(bd_id id, bd_id *list, int *n, int max)
+{
+	struct widget *w = &pool[id];
+	if (!w->alive || !w->visible)
+		return;
+	if (is_focusable(id) && *n < max)
+		list[(*n)++] = id;
+	if (w->type == BD_MENU)
+		return;
+	for (bd_id c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
+		collect_focusable(c, list, n, max);
+}
+
+/* Move keyboard focus to the next (dir +1) or previous (dir -1) focusable
+ * widget within `frame`, wrapping around. */
+static void
+focus_advance(bd_id frame, int dir)
+{
+	static bd_id list[MAX_WIDGETS];
+	int n = 0;
+	collect_focusable(frame, list, &n, MAX_WIDGETS);
+	if (n == 0) {
+		focus_id = BD_NONE;
+		return;
+	}
+	int cur = -1;
+	for (int i = 0; i < n; i++)
+		if (list[i] == focus_id) {
+			cur = i;
+			break;
+		}
+	int next = (cur < 0) ? (dir > 0 ? 0 : n - 1) : ((cur + dir + n) % n);
+	focus_id = list[next];
+}
+
+bd_id
+bd_focused(void)
+{
+	return focus_id;
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -1679,6 +1740,13 @@ bd_gui_event(const bd_event *ev)
 	if (handle_menu_event(ev, frame))
 		return 1;
 
+	/* Tab / Shift-Tab cycles keyboard focus among the frame's widgets,
+	 * before the event reaches whatever currently has focus */
+	if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_TAB) {
+		focus_advance(frame, (ev->mods & BD_MOD_SHIFT) ? -1 : 1);
+		return 1;
+	}
+
 	/* keyboard events for focused input line */
 	if (focus_id != BD_NONE &&
 	    pool[focus_id].alive &&
@@ -1689,6 +1757,19 @@ bd_gui_event(const bd_event *ev)
 		}
 		if (ev->type == BD_EV_KEY_DOWN)
 			return input_key(focus_id, ev->key, ev->mods);
+	}
+
+	/* Enter or Space activates a focused button */
+	if (focus_id != BD_NONE && pool[focus_id].alive &&
+	    pool[focus_id].type == BD_BUTTON) {
+		int activate = (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ENTER)
+		    || (ev->type == BD_EV_CHAR && ev->codepoint == ' ');
+		if (activate) {
+			struct widget *b = &pool[focus_id];
+			if (b->on_click && b->enabled)
+				b->on_click(focus_id, b->on_click_data);
+			return 1;
+		}
 	}
 
 	/* keyboard events for a focused extension widget (e.g. explorer nav) */

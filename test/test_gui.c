@@ -521,6 +521,36 @@ main(void)
 	bd_gui_render();   /* exercises the band/selection render path */
 	bd_gui_cleanup();
 
+	/* ---- Tab focus traversal across widget kinds ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id tf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ti = bd_create(tf, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_END);
+	bd_id ba = bd_create(tf, BD_BUTTON, BD_LABEL_S, "A",
+	    BD_ON_CLICK_F, on_click, BD_PREF_H_I, 24, BD_END);
+	bd_id bb = bd_create(tf, BD_BUTTON, BD_LABEL_S, "B",
+	    BD_ON_CLICK_F, on_click, BD_PREF_H_I, 24, BD_END);
+	bd_explorer_model em2 = { .count = exp_count, .get = exp_get };
+	bd_id tex = bd_explorer_create(tf, &em2, NULL, BD_GROW_I, 1, BD_END);
+	bd_create(tf, BD_LABEL, BD_LABEL_S, "not focusable", BD_PREF_H_I, 18, BD_END);
+	bd_gui_layout(800, 600);
+
+	bd_event tab  = { .type=BD_EV_KEY_DOWN, .key=BD_KEY_TAB };
+	bd_event stab = { .type=BD_EV_KEY_DOWN, .key=BD_KEY_TAB, .mods=BD_MOD_SHIFT };
+	bd_gui_event(&tab); check("Tab focuses the input line", bd_focused() == ti);
+	bd_gui_event(&tab); check("Tab -> button A", bd_focused() == ba);
+	bd_gui_event(&tab); check("Tab -> button B", bd_focused() == bb);
+	bd_gui_event(&tab); check("Tab -> explorer", bd_focused() == tex);
+	bd_gui_event(&tab); check("Tab wraps to the input line", bd_focused() == ti);
+	bd_gui_event(&stab); check("Shift-Tab wraps back to the explorer", bd_focused() == tex);
+	bd_gui_event(&stab); check("Shift-Tab -> button B", bd_focused() == bb);
+
+	int before = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter activates the focused button", clicked == before + 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint=' ' });
+	check("Space activates the focused button", clicked == before + 2);
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

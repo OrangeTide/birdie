@@ -351,10 +351,14 @@ the range, Ctrl-A select all, Enter activate; a focus ring marks the cursor).
 Still to come: in-place rename, scissor clipping, list/details modes.
 Exhibited in the widget gallery's "New Window" dialog.
 
-Keyboard focus: the toolkit now routes key events to a focused extension
-widget and gives an extension keyboard focus when it is clicked (the same path
-that already focused `BD_INPUT_LINE`). Tab traversal between widgets is still a
-separate v0.3 item.
+Keyboard focus: the toolkit routes key events to a focused extension widget
+and gives a widget keyboard focus when it is clicked (the same path that
+already focused `BD_INPUT_LINE`). **Tab / Shift-Tab** now traverse the
+focusable widgets of the current frame (input lines, buttons, and extension
+widgets), wrapping around; a focused button shows a focus ring and is
+activated by Enter or Space. `bd_focused()` reports the focused widget. Menus
+are excluded from the Tab order. (A latent bug where focus survived
+`bd_gui_cleanup` was fixed in passing.)
 
 **Model — the widget owns no data.** Items carry a *stable key* so selection
 and saved positions survive a refresh when indices shift:
@@ -485,10 +489,13 @@ editor without paste is incomplete.
 
 ### Focus traversal, key-up, and repeat
 
-- **Tab / Shift-Tab** traversal between focusable widgets, needed once
-  dialogs and multiple windows exist.
+- **Tab / Shift-Tab** traversal between focusable widgets — **done**: cycles
+  the current frame's input lines, buttons, and extension widgets (menus
+  excluded), wrapping; focused buttons get a ring and Enter/Space activation;
+  `bd_focused()` exposes the focus. Per-window scoping uses `ev->window`.
 - **Key-up events and a repeat flag** on `bd_event`. Cheap to add while the
-  struct is already being broken, and useful for held-key interactions.
+  struct is already being broken, and useful for held-key interactions. Still
+  to do.
 
 ### Multitouch gestures
 
