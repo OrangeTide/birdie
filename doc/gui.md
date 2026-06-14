@@ -146,7 +146,8 @@ canonical target.
 
 ## Implementation status
 
-As of 2026-06 the toolkit is at GUI v0.2 with v0.3 features in progress.
+As of 2026-06 the toolkit is at GUI v0.3 (multi-window, explorer, and Tab
+focus traversal have landed; the remaining v0.3 items are noted below).
 What is built:
 
 - **Backend abstraction** — the `bd_backend` GPU vtable + neutral `bd_event`;
@@ -291,8 +292,9 @@ This matches the decision left open in `doc/triggers.md`.
 
 ## Roadmap: proposed v0.3 features
 
-Targeted for GUI v0.3 (after the current v0.2 GPU-drawing/value-widget
-work). Recorded here so today's design does not foreclose them.
+The v0.3 line, built on the v0.2 GPU-drawing/value-widget work. Multi-window,
+the explorer widget, and Tab focus traversal have landed (marked below); the
+rest are recorded here so today's design does not foreclose them.
 
 Several of these break the input ABI (`bd_event` and the `bd_backend`
 vtable): multi-window adds a window id, IME needs a string-carrying commit
