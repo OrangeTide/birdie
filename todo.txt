@@ -8,6 +8,8 @@
   stb_truetype.h, and the chrome TTF (DejaVuSans.ttf) to the staging, and bump
   GUI_VERSION. The current bundle is missing the renderer + value widgets and
   won't compile standalone.
+  - also add bd_widget_explorer.{c,h} (v0.3 explorer widget) once it is past
+    the skeleton stage.
   - also bundle the GLES reference backend + widget gallery (src/guitest/:
     window.h, x11_window.c, bd_backend_gles.{c,h}, widget_test.c) and the
     vendored stb_image.h, so the dist ships a working non-ludica backend and

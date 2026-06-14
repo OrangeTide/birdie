@@ -335,33 +335,91 @@ Still to do:
 ### Explorer / icon-browser widget
 
 A new widget type (v0.3, built as a `widget_ext` extension) modeled on
-Explorer / PROGMAN.EXE (Win 3.x) / Finder / NeXTSTEP File Viewer: an
-arrangeable grid of labeled icons with persistent positional state.
+Explorer / PROGMAN.EXE (Win 3.x) / Finder: an arrangeable grid of labeled
+icons with persistent positional state. It is
+**not** tied to files; a callback/model interface lets the items be any
+collection (a MUD client's server list, a DAW's known-plugin list), so the
+view refreshes from live data without the app rebuilding it.
 
-It is **not** tied to files. The widget is driven by a callback/model
-interface so the items can be any collection: a MUD client's server list, a
-DAW's known-plugin list, and so on. Because items come from a model rather
-than a fixed array, the view refreshes correctly when the underlying data
-changes.
+API stubbed in `src/birdie/bd_widget_explorer.{c,h}`; interaction is being
+filled in.
 
-Capabilities:
+**Model — the widget owns no data.** Items carry a *stable key* so selection
+and saved positions survive a refresh when indices shift:
 
-- **Icons** carry an image, a label, and an enabled/disabled state.
-- **Per-item events** delivered back to the application so it can mutate
-  items in app-specific ways: right-click for a context pop-up, double-click
-  to activate, enable/disable, etc.
-- **Drag-and-drop** to rearrange icons; positions are tracked and can
-  optionally be saved and restored (the model owns persistence).
-- **Multi-selection**: rubber-band rectangle drag, plus Ctrl/Shift
-  additive and range selection as on Windows Explorer.
-- **Model callbacks** for item count, item contents, and change
-  notification so dynamic data stays in sync without the app rebuilding the
-  view.
+    typedef struct {
+        uint64_t    key;      /* stable identity; selection/state keyed on this */
+        const char *label;    /* caption; valid for the get() call only */
+        bd_texture  icon;     /* 0 = default placeholder */
+        int         enabled;  /* 0 = dimmed, not activatable */
+        int         x, y;     /* saved position; <0 = auto-place on the grid */
+        void       *user;     /* app payload */
+    } bd_explorer_item;
 
-The drag/capture plumbing this needs (pointer down/move/up routed to an
-extension widget, with capture held through a drag) already landed for the
-value widgets, so the selection rectangle and icon dragging build on
-existing toolkit support.
+    typedef struct {
+        int  (*count)(void *ctx);
+        void (*get)(void *ctx, int index, bd_explorer_item *out);
+        void (*set_pos)(void *ctx, uint64_t key, int x, int y); /* optional persist */
+        void *ctx;
+    } bd_explorer_model;
+
+The widget caches nothing authoritative: it re-queries `count`/`get` on
+layout, and the app calls `bd_explorer_refresh()` when data changes. Label
+and icon need only be valid during `get()`; the widget keeps only keys and
+positions.
+
+**Per-item events** go back to the app:
+
+    typedef struct {
+        void (*activate)(bd_id w, uint64_t key, void *user);            /* dbl-click/Enter */
+        void (*context)(bd_id w, uint64_t key, int sx, int sy, void *); /* right-click */
+        void (*selection_changed)(bd_id w, void *ctx);
+        void (*moved)(bd_id w, uint64_t key, int x, int y, void *);     /* after a drag */
+        void *ctx;
+    } bd_explorer_cb;
+
+`context()` hands the app screen coords so it can pop a `BD_MENU` — the hook
+for app-specific right-click menus, tying into pinnable menus and (for a
+torn-off menu) multi-window.
+
+**Create / accessors**, in the value-widget style:
+
+    bd_id bd_explorer_create(bd_id parent, const bd_explorer_model *m,
+                             const bd_explorer_cb *cb, ...);   /* attrs, BD_END */
+    void  bd_explorer_refresh(bd_id id);
+    int   bd_explorer_selection(bd_id id, uint64_t *keys, int max); /* -> count */
+    void  bd_explorer_select(bd_id id, uint64_t key, int add);
+    void  bd_explorer_set_icon_size(bd_id id, int px);
+
+**Interaction (Windows-Explorer semantics):** left-click selects one (sets
+the anchor); Ctrl+click toggles; Shift+click range-selects from the anchor;
+drag on empty space rubber-bands (Ctrl = additive); drag on a selected icon
+moves the whole selection and commits via `set_pos` + `moved()`; double-click
+activates; right-click selects-then-`context()`; wheel scrolls; arrows/Enter/
+Ctrl-A drive grid nav (needs focus traversal). This rides the existing
+pointer-capture path (down/move/up routed to the captured extension, held
+through the drag) that the value widgets already use.
+
+**Rendering** through `bd_draw` + `scissor`: a recessed bevelled panel; per
+cell a translucent selection highlight (`theme.focus`), the icon quad
+(`bd_draw_sprite`, dimmed when disabled), a centred truncated label, and a
+focus ring; a translucent rubber-band rect; ghost copies of dragged icons.
+Scissor clips the content while `scroll_y` offsets the cells.
+
+**Layout & persistence:** cell = icon + label + pad; columns = view width /
+cell width. Items with `x,y >= 0` are placed there (free desktop-icon
+layout); `x < 0` auto-places row-major and may be written back via `set_pos`.
+The model owns persistence (CSV for the MUD server list per this project's
+MUD-list format, prefs for a DAW), keyed by the stable key.
+
+**Scope.** First cut: icon grid, single/multi-select (rubber-band +
+Ctrl/Shift), drag-move, double-click activate, right-click context,
+enabled/disabled, wheel scroll, refresh. Later: list/details view modes,
+in-place rename (needs the real `BD_TEXT` widget), type-to-find, drag-drop
+between explorers, a `BD_SCROLLBAR`, per-icon accessibility roles. Sensible
+build order is mouse-only core first, then rename, keyboard nav, and a richer
+context menu as those dependencies (text widget, focus traversal,
+popup-anywhere) land.
 
 ### IME, compose, and dead keys
 
