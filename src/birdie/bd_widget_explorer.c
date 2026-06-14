@@ -11,13 +11,12 @@
  *
  * Implemented: model query + grid/free layout, rendering (recessed panel,
  * icons or a placeholder, labels, selection highlight, disabled dimming),
- * click selection (replace / Ctrl-toggle), double-click activate, right-click
- * context callback, wheel scroll, drag-move of the selection (committing via
- * model.set_pos + moved()), rubber-band rectangle selection (Ctrl = additive),
- * and the accessor API.
+ * click selection (replace / Ctrl-toggle / Shift-range), double-click
+ * activate, right-click context callback, wheel scroll, drag-move of the
+ * selection (committing via model.set_pos + moved()), rubber-band rectangle
+ * selection (Ctrl = additive), and the accessor API.
  *
  * TODO (the interaction still to fill in):
- *   - Shift+click range selection from the anchor
  *   - scissor-clip the scrolled content to the widget bounds
  *   - keyboard navigation (arrows / Enter / Ctrl-A); needs focus traversal
  *   - label truncation / ellipsis and a focus ring
@@ -119,6 +118,31 @@ sel_changed(bd_id id, struct explorer *e)
 {
 	if (e->cb.selection_changed)
 		e->cb.selection_changed(id, e->cb.ctx);
+}
+
+/* Model index of `key`, or -1. */
+static int
+index_of_key(const struct explorer *e, uint64_t key)
+{
+	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
+	for (int i = 0; i < n; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		if (it.key == key)
+			return i;
+	}
+	return -1;
+}
+
+/* Select every item with index in [lo,hi]. Caller clears first if replacing. */
+static void
+sel_add_range(struct explorer *e, int lo, int hi)
+{
+	for (int i = lo; i <= hi; i++) {
+		bd_explorer_item it = {0};
+		e->model.get(e->model.ctx, i, &it);
+		sel_add(e, it.key);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -530,27 +554,43 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		e->last_key = key;
 		e->last_time = now;
 
-		if (ev->mods & BD_MOD_CTRL) {
+		if (ev->mods & BD_MOD_SHIFT) {
+			/* range-select from the anchor to this item, in model order.
+			 * Ctrl+Shift extends the current selection; Shift alone
+			 * replaces it. The anchor does not move. */
+			int ai = e->anchor ? index_of_key(e, e->anchor) : -1;
+			if (ai < 0) {
+				sel_clear(e);
+				sel_add(e, key);
+				e->anchor = key;
+			} else {
+				int lo = ai < idx ? ai : idx;
+				int hi = ai < idx ? idx : ai;
+				if (!(ev->mods & BD_MOD_CTRL))
+					sel_clear(e);
+				sel_add_range(e, lo, hi);
+			}
+			sel_changed(id, e);
+		} else if (ev->mods & BD_MOD_CTRL) {
 			if (sel_has(e, key))
 				sel_remove(e, key);
 			else
 				sel_add(e, key);
-			sel_changed(id, e);
-		} else if (ev->mods & BD_MOD_SHIFT) {
-			/* TODO: range-select from anchor to this item */
-			sel_add(e, key);
+			e->anchor = key;
 			sel_changed(id, e);
 		} else if (!sel_has(e, key)) {
 			sel_clear(e);
 			sel_add(e, key);
+			e->anchor = key;
 			sel_changed(id, e);
-		} else if (e->sel_n > 1) {
-			/* pressed an already-selected item in a multi-selection: keep
-			 * the group so a drag can move it, but collapse to just this
-			 * item if the press turns out to be a plain click */
-			e->press_collapse = 1;
+		} else {
+			/* pressed an already-selected item: keep the group so a drag
+			 * can move it, but collapse to just this item if the press
+			 * turns out to be a plain click */
+			if (e->sel_n > 1)
+				e->press_collapse = 1;
+			e->anchor = key;
 		}
-		e->anchor = key;
 		e->mode = DRAG_PENDING;
 		return 1;
 	}

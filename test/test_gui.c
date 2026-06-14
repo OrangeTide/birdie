@@ -32,7 +32,8 @@ static unsigned next_texid = 1;   /* distinct id per texture, like a real backen
 
 static int    be_width(void)  { return 800; }
 static int    be_height(void) { return 500; }
-static double be_time(void)   { return 0.0; }
+/* advance each call so consecutive clicks aren't mistaken for double-clicks */
+static double be_time(void)   { static double t; t += 1.0; return t; }
 static void   be_viewport(int x,int y,int w,int h){(void)x;(void)y;(void)w;(void)h;}
 static void   be_clear(float r,float g,float b,float a){(void)r;(void)g;(void)b;(void)a;}
 
@@ -467,6 +468,27 @@ main(void)
 	check("rubber-band covers the three icons",
 	    bd_explorer_selection(expl, skeys, 8) == 3);
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=ex+200, .y=ey+5 });
+
+	/* Shift-range selection: items 0,1,2 sit at content x=8,72,136 (row 0) */
+	int i0x = ex + 13, i1x = ex + 77, i2x = ex + 141, iy = ey + 13;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=i0x, .y=iy });
+	check("plain click selects one (sets the anchor)",
+	    bd_explorer_selection(expl, NULL, 0) == 1);
+	/* Shift-click item 2 -> range [0..2] */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .mods=BD_MOD_SHIFT, .x=i2x, .y=iy });
+	check("Shift-click selects the anchor..clicked range",
+	    bd_explorer_selection(expl, NULL, 0) == 3);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .mods=BD_MOD_SHIFT, .x=i2x, .y=iy });
+	/* Shift-click item 1 re-ranges from the same anchor -> [0..1] */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .mods=BD_MOD_SHIFT, .x=i1x, .y=iy });
+	check("Shift-click re-ranges from the unchanged anchor",
+	    bd_explorer_selection(expl, NULL, 0) == 2);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .mods=BD_MOD_SHIFT, .x=i1x, .y=iy });
 
 	bd_gui_render();   /* exercises the band/selection render path */
 	bd_gui_cleanup();

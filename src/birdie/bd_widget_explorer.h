@@ -15,8 +15,8 @@
  * calls bd_explorer_refresh() when the data changes. Items carry a stable key
  * so selection and saved positions survive a refresh when indices shift.
  *
- * Status: selection, drag-move, and rubber-band work; Shift-range selection,
- * keyboard nav, and in-place rename are still to come (see
+ * Status: selection (single / Ctrl-toggle / Shift-range), drag-move, and
+ * rubber-band work; keyboard nav and in-place rename are still to come (see
  * bd_widget_explorer.c).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)

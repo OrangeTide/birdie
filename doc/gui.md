@@ -342,12 +342,12 @@ collection (a MUD client's server list, a DAW's known-plugin list), so the
 view refreshes from live data without the app rebuilding it.
 
 In `src/birdie/bd_widget_explorer.{c,h}`. Working: model query, grid/free
-layout, rendering, click selection (replace / Ctrl-toggle), double-click
-activate, right-click context, wheel scroll, **drag-move** (commit via
-`set_pos` + `moved()`), and **rubber-band** selection (Ctrl = additive).
-Still to come: Shift-range selection, keyboard nav, in-place rename, scissor
-clipping, list/details modes. Exhibited in the widget gallery's "New Window"
-dialog.
+layout, rendering, click selection (replace / Ctrl-toggle / **Shift-range**,
+the latter additive with Ctrl), double-click activate, right-click context,
+wheel scroll, **drag-move** (commit via `set_pos` + `moved()`), and
+**rubber-band** selection (Ctrl = additive). Still to come: keyboard nav,
+in-place rename, scissor clipping, list/details modes. Exhibited in the
+widget gallery's "New Window" dialog.
 
 **Model — the widget owns no data.** Items carry a *stable key* so selection
 and saved positions survive a refresh when indices shift:
