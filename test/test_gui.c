@@ -11,6 +11,7 @@
 #include "widget.h"
 #include "widget_ext.h"
 #include "bd_widget_vt.h"
+#include "bd_widget_value.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -73,6 +74,11 @@ static const bd_backend stub = {
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
 
+/* ---- slider callback ---- */
+static int slider_calls;
+static void on_slider_test(bd_id id, void *arg, float t)
+{ (void)id; (void)arg; (void)t; slider_calls++; }
+
 /* ---- drag-recording extension widget (stands in for a slider/knob) ---- */
 static int rec_down, rec_move, rec_up;
 static int
@@ -115,7 +121,10 @@ main(void)
 	rec_type = bd_register_widget_class(&rec_class);
 	bd_id rec = bd_create(frame, rec_type, BD_PREF_H_I, 40, BD_END);
 
-	check("widgets created", frame && term && btn && rec);
+	bd_id sld = bd_slider_create(frame, BD_HORIZONTAL, 0.5f,
+	    on_slider_test, NULL, BD_PREF_H_I, 20, BD_END);
+
+	check("widgets created", frame && term && btn && rec && sld);
 
 	bd_gui_layout(800, 500);
 
@@ -158,6 +167,25 @@ main(void)
 	bd_event after = mouse(BD_EV_MOUSE_MOVE, rcx + 9000, rcy);
 	bd_gui_event(&after);
 	check("capture released on mouse up", rec_move == prev_move);
+
+	/* slider: set/get and pointer-driven value */
+	check("slider initial value 0.5", bd_slider_get(sld) == 0.5f);
+	bd_slider_set(sld, 0.25f);
+	check("slider set/get round-trips", bd_slider_get(sld) == 0.25f);
+	int sx, sy, sw, sh;
+	bd_widget_rect(sld, &sx, &sy, &sw, &sh);
+	int smy = sy + sh / 2;
+	bd_event sr = mouse(BD_EV_MOUSE_DOWN, sx + sw - 1, smy);
+	bd_event sru = mouse(BD_EV_MOUSE_UP, sx + sw - 1, smy);
+	bd_gui_event(&sr);
+	bd_gui_event(&sru);
+	check("slider drag to right edge -> ~1 + callback",
+	    bd_slider_get(sld) > 0.9f && slider_calls > 0);
+	bd_event sl = mouse(BD_EV_MOUSE_DOWN, sx, smy);
+	bd_event slu = mouse(BD_EV_MOUSE_UP, sx, smy);
+	bd_gui_event(&sl);
+	bd_gui_event(&slu);
+	check("slider drag to left edge -> ~0", bd_slider_get(sld) < 0.1f);
 
 	/* terminal write: plain text + bold + 256-color SGR */
 	bd_terminal_write(term,

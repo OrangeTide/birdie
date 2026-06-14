@@ -84,6 +84,7 @@ test : bd_vt
 	@mkdir -p $(BUILDDIR)
 	cc -Wall -W -Isrc/birdie -Isrc/libvt -Isrc/thirdparty/stb \
 	    test/test_gui.c src/birdie/widget.c src/birdie/bd_widget_vt.c \
-	    src/birdie/bd_draw.c $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
+	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
+	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
 	@echo "running headless GUI test:"
 	@$(TEST_BIN)

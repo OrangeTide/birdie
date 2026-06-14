@@ -170,6 +170,12 @@ bd_backend_get(void)
 	return be;
 }
 
+const bd_theme *
+bd_gui_theme(void)
+{
+	return &theme;
+}
+
 /* ------------------------------------------------------------------ */
 /* drawing helpers (toolkit renderer)                                 */
 /* ------------------------------------------------------------------ */

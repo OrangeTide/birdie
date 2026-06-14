@@ -1,8 +1,10 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
+#include "bd_widget_value.h"
 #include "bd_backend_ludica.h"
 #include "ludica.h"
 #include <stddef.h>
+#include <stdio.h>
 
 static bd_id status_label;
 static bd_id terminal;
@@ -21,6 +23,16 @@ on_quit(bd_id id, void *arg)
 	(void)id;
 	(void)arg;
 	lud_quit();
+}
+
+static void
+on_slider(bd_id id, void *arg, float t)
+{
+	(void)id;
+	(void)arg;
+	static char buf[32];
+	snprintf(buf, sizeof buf, "Volume: %d%%", (int)(t * 100.0f + 0.5f));
+	bd_set(status_label, BD_LABEL_S, buf, BD_END);
 }
 
 static int
@@ -106,6 +118,11 @@ init(void)
 		BD_LABEL_S, "Quit",
 		BD_PREF_W_I, 80,
 		BD_ON_CLICK_F, on_quit,
+		BD_END);
+
+	/* a horizontal slider fills the rest of the bar */
+	bd_slider_create(bar, BD_HORIZONTAL, 0.5f, on_slider, NULL,
+		BD_GROW_I, 1,
 		BD_END);
 
 	/* status bar */

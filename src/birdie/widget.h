@@ -105,4 +105,7 @@ void bd_gui_layout(int win_w, int win_h);
 void bd_gui_render(void);
 int  bd_gui_event(const bd_event *ev);
 
+/* The active chrome theme, so extension widgets can match the chrome. */
+const bd_theme *bd_gui_theme(void);
+
 #endif
