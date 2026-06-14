@@ -13,6 +13,7 @@
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
+#include "bd_widget_editor.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -668,6 +669,66 @@ main(void)
 	    strcmp(bd_get_s(ml, BD_LABEL_S), "YabXcdZ") == 0);
 
 	bd_gui_render();   /* exercises the multiline render/scissor path */
+	bd_gui_cleanup();
+
+	/* ---- rich-text editor widget ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id edf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ed = bd_editor_create(edf, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+
+	bd_editor_set_text(ed, "X:1\nK:C\nCDEF");
+	char rb[64];
+	check("editor row_count", bd_editor_row_count(ed) == 3);
+	bd_editor_row_text(ed, 1, rb, sizeof rb);
+	check("editor row_text reads a row", strcmp(rb, "K:C") == 0);
+
+	bd_editor_replace_row(ed, 1, "K:G");
+	bd_editor_row_text(ed, 1, rb, sizeof rb);
+	check("editor replace_row", strcmp(rb, "K:G") == 0);
+
+	bd_editor_insert_row(ed, 1, "T:Song");
+	check("editor insert_row grows the row count", bd_editor_row_count(ed) == 4);
+	bd_editor_row_text(ed, 1, rb, sizeof rb);
+	check("editor insert_row places the new row", strcmp(rb, "T:Song") == 0);
+
+	bd_editor_delete_row(ed, 0);
+	bd_editor_row_text(ed, 0, rb, sizeof rb);
+	check("editor delete_row", bd_editor_row_count(ed) == 3 &&
+	    strcmp(rb, "T:Song") == 0);
+
+	bd_editor_text(ed, rb, sizeof rb);
+	check("editor text reads the whole buffer",
+	    strcmp(rb, "T:Song\nK:G\nCDEF") == 0);
+
+	/* focus by click, then locked typing is rejected */
+	int edx, edy, edw, edh;
+	bd_widget_rect(ed, &edx, &edy, &edw, &edh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=edx+2, .y=edy+2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=edx+2, .y=edy+2 });
+	check("clicking the editor focuses it", bd_focused() == ed);
+
+	bd_editor_set_locked(ed, 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='Z' });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("locked editor rejects typing",
+	    strcmp(rb, "T:Song\nK:G\nCDEF") == 0);
+
+	bd_editor_set_locked(ed, 0);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='Z' });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("unlocked editor accepts typing",
+	    strcmp(rb, "ZT:Song\nK:G\nCDEF") == 0);
+
+	/* styling: a highlight run renders without disturbing the text */
+	bd_editor_highlight_row(ed, 2,
+	    (bd_rich_style){ BD_RT_BOLD | BD_RT_UNDERLINE, 0xFF8800FFu, 0x103040FFu });
+	n_drawverts = 0;
+	bd_gui_render();
+	bd_editor_text(ed, rb, sizeof rb);
+	check("styled render leaves text intact + draws",
+	    n_drawverts > 0 && strcmp(rb, "ZT:Song\nK:G\nCDEF") == 0);
 	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);

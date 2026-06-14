@@ -11,8 +11,8 @@ It has two API tiers:
 - **App API** (`widget.h`) for building UIs out of widgets.
 - **Extension API** (`widget_ext.h`) for defining new widget *types*. The VT
   terminal (`bd_widget_vt.h`), the value widgets (`bd_widget_value.h`), and the
-  explorer/icon browser (`bd_widget_explorer.h`) are built on it;
-  `bd_widget_vt.c` is the reference.
+  explorer/icon browser (`bd_widget_explorer.h`), and the rich-text editor
+  (`bd_widget_editor.h`) are built on it; `bd_widget_vt.c` is the reference.
 
 ## Usage
 
@@ -207,6 +207,41 @@ nav (focus it, then arrows / Home / End / Ctrl-A / Enter), and in-place rename
 scissor-clipped to the panel. Query/poke selection with
 `bd_explorer_selection` / `bd_explorer_select`.
 
+## Editor widget (rich text)
+
+`bd_widget_editor.h` is a row-oriented text editor with the `BD_MULTILINE`
+editing model plus a rich-text styling layer, for a small code or ABC-notation
+music editor. Text is plain UTF-8; styling is a separate list of style runs
+over byte ranges, so a syntax highlighter (emit runs on change) and a transient
+highlight (mark the playing row) use the same mechanism.
+
+```c
+#include "bd_widget_editor.h"
+
+bd_id ed = bd_editor_create(parent, BD_GROW_I, 1, BD_END);
+bd_editor_set_text(ed, "X:1\nT:Tune\nK:C\nCDEF GABc|");
+
+/* row API */
+int  rows = bd_editor_row_count(ed);
+char line[128]; bd_editor_row_text(ed, 3, line, sizeof line);
+bd_editor_replace_row(ed, 3, "GFED CBAG|");
+bd_editor_insert_row(ed, 1, "T:Subtitle");
+bd_editor_delete_row(ed, 1);
+
+bd_editor_set_locked(ed, 1);             /* read-only (styling still works) */
+
+/* styling: fg/bg + bold/italic/underline/strikeout/super/subscript */
+bd_editor_highlight_row(ed, 3,
+    (bd_rich_style){ BD_RT_BOLD, 0x202020FFu, 0xFFD54AFFu });   /* playing row */
+bd_editor_style_span(ed, 0, 3,
+    (bd_rich_style){ BD_RT_BOLD | BD_RT_UNDERLINE, 0x7FB2FFFFu, 0 });
+bd_editor_clear_styles(ed);
+```
+
+The renderer draws runs segment by segment: per-run fg/bg, underline,
+strikeout, faux-bold, and super/subscript. Italic is stored but drawn upright
+(true shear needs renderer support).
+
 ## Defining a widget type
 
 An extension fills a `bd_widget_class` and registers it for a type id, then
@@ -302,7 +337,7 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
    backend-gles/widget_test.c backend-gles/x11_window.c \
    backend-gles/bd_backend_gles.c \
    src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
-   src/bd_widget_explorer.c <libvt.a> \
+   src/bd_widget_explorer.c src/bd_widget_editor.c <libvt.a> \
    -lX11 -lEGL -lGLESv2 -lm -o gallery
 ```
 

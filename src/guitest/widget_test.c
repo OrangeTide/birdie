@@ -16,6 +16,7 @@
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
+#include "bd_widget_editor.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
@@ -166,7 +167,7 @@ on_new_window(bd_id id, void *arg)
 
 	bd_id dlg = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, title, BD_LAYOUT_I, BD_LAYOUT_COL,
-		BD_PREF_W_I, 380, BD_PREF_H_I, 300, BD_END);
+		BD_PREF_W_I, 380, BD_PREF_H_I, 440, BD_END);
 
 	bd_id body = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1,
@@ -182,8 +183,15 @@ on_new_window(bd_id id, void *arg)
 	if (getenv("GALLERY_AUTORENAME"))   /* open the rename editor for a shot */
 		bd_explorer_begin_rename(ex, 1);
 
-	bd_create(body, BD_MULTILINE, BD_PREF_H_I, 76,
-		BD_LABEL_S, "X:1\nT:Demo\nK:C\nCDEF GABc|", BD_END);
+	bd_id med = bd_editor_create(body, BD_PREF_H_I, 92, BD_END);
+	bd_editor_set_text(med,
+		"X:1\nT:Demo\nK:C\nCDEF GABc|\nc2c2 d2e2 |");
+	/* header field: bold underlined accent */
+	bd_editor_style_span(med, 0, 3,
+		(bd_rich_style){ BD_RT_BOLD | BD_RT_UNDERLINE, 0x7FB2FFFFu, 0 });
+	/* the "playing" row: dark text on amber */
+	bd_editor_highlight_row(med, 3,
+		(bd_rich_style){ BD_RT_BOLD, 0x202020FFu, 0xFFD54AFFu });
 
 	bd_id bar = bd_create(dlg, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,

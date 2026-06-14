@@ -163,6 +163,8 @@ What is built:
   extension (libvt). Flexbox row/col + fixed layout.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
+- **Editor widget** (extension) — rich-text, row-oriented text editor (style
+  runs: fg/bg/underline/strike/bold/super-sub) for code or ABC-notation music.
 - **Explorer widget** (extension) — model-driven icon grid with selection
   (single / Ctrl / Shift-range / rubber-band), drag-move, double-click
   activate, right-click context, keyboard nav, in-place rename, scissor clip.
@@ -170,8 +172,8 @@ What is built:
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 
 Not yet built: `BD_LIST`, `BD_SCROLLBAR`, `BD_NOTICE`, `BD_TAB_BAR` (still
-enum-only); the rich-text editor widget; IME/compose; clipboard; multitouch;
-pen. These are tracked in the roadmap and widget-set sections.
+enum-only); IME/compose; clipboard; multitouch; pen. These are tracked in the
+roadmap and widget-set sections.
 
 ## v1.0 widget set
 
@@ -535,13 +537,13 @@ with `bd_set`. Both will pick up the IME preedit/commit path above when it
 lands; cross-line selection in `BD_MULTILINE` is still to do, and it is the
 base the rich-text editor widget composes over.
 
-### Editor widget (rich-text, row-oriented)
+### Editor widget (rich-text, row-oriented) — implemented
 
-A higher-level text editor built as a **composition over `BD_MULTILINE`** (the
-plain multi-line field above, still to do): the multiline supplies editable
-text with caret, selection, and scrolling; the editor adds an API suited to
-programmatic editing plus a rich-text styling layer. An extension
-(`widget_ext`), not a core widget.
+`src/birdie/bd_widget_editor.{c,h}`. A higher-level text editor with the same
+multi-line editing model as `BD_MULTILINE` plus a rich-text styling layer. An
+extension (`widget_ext`), not a core widget. (It reimplements the editing
+model rather than embedding a `BD_MULTILINE`, since the multiline renders one
+color and rich text needs per-run drawing.)
 
 Driving use case (smoltrek): a window to edit a small text-based music file
 (**ABC notation**) and play it back, with the styling layer marking the row or
@@ -578,9 +580,18 @@ is what introduces font-variant baking — decide whether to ship bold/italic
 TTFs or synthesize them. A fixed-width face is desirable for code and ABC so
 columns line up (super/subscript aside).
 
-**Ordering.** (1) `BD_MULTILINE` — plain multi-line editing. (2) style-run
-support in the renderer (per-run fg/bg + styles; font-variant baking for
-bold/italic). (3) the editor widget — row API, lock, and highlight on top.
+**Status.** Implemented: the row API (`bd_editor_set_text` / `text` /
+`row_count` / `row_text` / `insert_row` / `replace_row` / `delete_row`), lock
+(`bd_editor_set_locked`), styling (`bd_editor_clear_styles` /
+`style_span` / `highlight_row` / `highlight_span` with `bd_rich_style`), the
+multi-line editor (caret nav, newline, backspace/delete, click-to-caret,
+scroll), and styled rendering segment-by-segment: per-run fg/bg, underline,
+strikeout, faux-bold (double-strike), super/subscript (baseline shift). Style
+runs are byte ranges that shift across edits; an app re-emits them after big
+changes (a syntax highlighter) or sets them on a locked buffer (ABC playback).
+Deferred: true italic shear (needs renderer/font support; the flag is stored
+but drawn upright), cross-line selection, and Tab-inserts-a-tab (Tab currently
+traverses focus).
 
 ### Clipboard
 
