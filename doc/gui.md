@@ -231,6 +231,21 @@ Children advertise a preferred size (`BD_PREF_W`, `BD_PREF_H`) and an
 optional grow weight (`BD_GROW`). This covers every dialog birdie ships
 in v1.0 without needing constraint solvers.
 
+**A container is never measured against its contents.** Layout is a
+single pass: a box's size is its explicit `BD_PREF_W`/`BD_PREF_H` (or a
+small `DEFAULT_MIN_*` fallback) plus a share of the leftover space when it
+has `BD_GROW`. It does not look at what is inside. So a content-holding
+panel with neither a pref size nor grow collapses to the minimum, and a
+sibling that does grow eats the rest, clipping the collapsed panel's
+children.
+
+Therefore: **any container holding content must set an explicit
+`BD_PREF_W`/`BD_PREF_H` or a `BD_GROW`.** Nested panels do not size
+themselves. For a fixed-content panel, set the pref to the computed
+content height, e.g. `2*pad + rows*row_h + gaps`. (Reported by the
+smoltrek consumer, where an unspecified param panel collapsed under a
+sibling editor that had grow.)
+
 ## Event model
 
 One dispatch entry point per widget: `BD_ON_<event>` attributes (e.g.
