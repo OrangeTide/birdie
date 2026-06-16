@@ -160,6 +160,29 @@ of concurrent MUDs, not hundreds. Multiplexing them on one `iox_loop` is
 simpler, keeps TLS contexts from fighting over scheduler time, and
 matches the typical user workload (1–3 active sessions).
 
+### Implementation status
+
+The network thread and the ring handoff are built, in `src/birdie/bd_net.c`
+and `src/birdie/bd_ring.c`:
+
+- The net thread runs the libiox poll loop and owns the socket: resolution
+  (`getaddrinfo`), connect, `recv`/`send`, and telnet IAC filtering all run
+  there, off the UI thread.
+- `bd_ring` is the lock-free single-producer/single-consumer ring. Two
+  instances carry framed messages: `tx` (UI → net: connect/send/close) and
+  `rx` (net → UI: decoded data / state transitions). The UI wakes the net
+  thread through a self-pipe the loop watches. `bd_net_poll()` drains `rx`
+  on the UI thread and fires the data/state callbacks there.
+- Backpressure: when `rx` fills, the net thread caps each `recv` to the
+  ring's free space and drops read interest (`iox_fd_mod`), resuming once
+  the UI has drained. No bytes are dropped.
+
+Built today: plain TCP plus the minimal telnet filter (refuse every option,
+strip IAC). Not yet on the thread, in roughly the intended order: the MTH
+telopt set behind the `telopt` wrapper, TLS, Happy Eyeballs, reconnect, and
+encoding transcode. The single network thread multiplexing several
+connections is the target; today `bd_net` handles one connection at a time.
+
 ## Encoding
 
 Each profile declares an encoding (`doc/profiles.md`). Default UTF-8.
