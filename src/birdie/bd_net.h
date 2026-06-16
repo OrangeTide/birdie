@@ -4,16 +4,18 @@
 /*
  * bd_net -- birdie's network connection layer.
  *
- * A single TCP/telnet connection to a MUD. This is increment 1: plain TCP,
- * non-blocking, polled once per frame on the UI thread (ludica drives a
- * continuous frame loop, so no separate network thread is needed yet). The
- * embedded telnet filter refuses every option and strips IAC negotiation so
- * the byte stream reaching the terminal is clean text.
+ * A single TCP/telnet connection to a MUD. The socket lives on a dedicated
+ * network thread (a libiox poll loop); resolution, connect, recv/send, and
+ * telnet IAC filtering all happen there so the UI thread never blocks on the
+ * network. Decoded bytes and state transitions cross back over a lock-free
+ * ring and are delivered through the callbacks below, on the UI thread,
+ * during bd_net_poll(). The embedded telnet filter refuses every option and
+ * strips IAC negotiation, so callers see clean text.
  *
- * Deferred (see doc/network.md): a dedicated network thread + lock-free ring,
- * TLS (mbedTLS), the MTH telopt set (CHARSET/ECHO/EOR/GMCP/MCCP/MSDP/...),
- * Happy Eyeballs, reconnect, and encoding transcode. The callback-driven API
- * here is meant to stay stable when those land behind it.
+ * Deferred (see doc/network.md): TLS (mbedTLS), the MTH telopt set
+ * (CHARSET/ECHO/EOR/GMCP/MCCP/MSDP/...), Happy Eyeballs, reconnect, and
+ * encoding transcode. The callback-driven API here is meant to stay stable
+ * when those land behind it.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

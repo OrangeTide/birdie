@@ -1,22 +1,40 @@
 /*
- * bd_net -- birdie's network connection layer (increment 1: plain TCP/telnet).
+ * bd_net -- birdie's network connection layer.
  *
- * POSIX sockets only for now; a Winsock path and the threaded libiox model
- * from doc/network.md are deferred. See bd_net.h for the contract.
+ * A dedicated network thread runs a libiox poll loop and owns the socket:
+ * resolution (getaddrinfo), connect, recv/send, and telnet IAC filtering all
+ * happen there, so the UI thread never blocks on the network. Two lock-free
+ * SPSC rings carry framed messages between the threads:
+ *
+ *   tx (UI -> net):  CONNECT / SEND / CLOSE commands
+ *   rx (net -> UI):  DATA (clean bytes) / STATE (transition) records
+ *
+ * The UI wakes the net thread by writing one byte to a self-pipe the loop
+ * watches. bd_net_poll() drains rx on the UI thread and fires the data/state
+ * callbacks there, so callers still receive everything on the UI thread.
+ *
+ * Plain TCP for now. Deferred (doc/network.md): TLS (mbedTLS), the MTH telopt
+ * set (CHARSET/ECHO/EOR/GMCP/MCCP/MSDP), Happy Eyeballs, reconnect, encoding
+ * transcode, NDJSON logging, and a Winsock path.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
 #include "bd_net.h"
+#include "bd_ring.h"
+#include "iox_loop.h"
+#include "iox_fd.h"
 
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <poll.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 /* telnet protocol bytes (RFC 854 + friends) */
 #define TN_SE   240
@@ -28,170 +46,201 @@
 #define TN_DONT 254
 #define TN_IAC  255
 
+/* cross-thread message types (one byte, framed as [type][u32 len][payload]) */
+enum {
+	MSG_CONNECT,    /* tx: payload = host '\0' port '\0' */
+	MSG_SEND,       /* tx: payload = bytes to transmit */
+	MSG_CLOSE,      /* tx: no payload */
+	MSG_DATA,       /* rx: payload = clean received bytes */
+	MSG_STATE       /* rx: payload = [u8 state][detail string, no NUL] */
+};
+
+#define RX_CAP   (1u << 20)     /* 1 MiB inbound buffer */
+#define TX_CAP   (1u << 16)     /* 64 KiB command buffer */
+#define CHUNK    4096           /* recv size and max per-frame payload */
+
 /* inbound telnet parser states */
 enum tn_state {
-	TS_DATA,        /* ordinary data */
-	TS_IAC,         /* saw IAC */
-	TS_OPT,         /* saw IAC <WILL|WONT|DO|DONT>, next byte is the option */
-	TS_SB,          /* inside subnegotiation, swallowing */
-	TS_SB_IAC       /* inside subnegotiation, saw IAC */
+	TS_DATA, TS_IAC, TS_OPT, TS_SB, TS_SB_IAC
 };
 
 struct bd_net {
-	int fd;
-	bd_net_state state;
 	bd_net_data_cb on_data;
 	bd_net_state_cb on_state;
 	void *arg;
 
-	/* inbound telnet parse */
-	enum tn_state ts;
-	unsigned char tn_cmd;   /* the WILL/WONT/DO/DONT awaiting its option */
+	_Atomic int state;      /* bd_net_state; written by net thread */
+	_Atomic int shutdown;   /* set by bd_net_free to stop the thread */
 
-	/* outbound queue: bytes [sent, len) still owed to the socket */
-	unsigned char *out;
-	int out_len;
-	int out_cap;
-	int out_sent;
+	bd_ring *rx;            /* net -> UI */
+	bd_ring *tx;            /* UI -> net */
+	int wake_r, wake_w;     /* self-pipe; UI writes wake_w, net reads wake_r */
+
+	pthread_t thread;
+	int have_thread;
 };
 
-static void
-set_state(bd_net *n, bd_net_state s, const char *msg)
-{
-	n->state = s;
-	if (n->on_state)
-		n->on_state(s, msg, n->arg);
-}
+/* Net-thread-only working state. */
+struct net_ctx {
+	bd_net *n;
+	struct iox_loop *loop;
+	int fd;                 /* socket, -1 when none */
+	int connecting;         /* awaiting non-blocking connect completion */
+	unsigned want;          /* iox events currently registered on fd */
+	int rx_blocked;         /* read disabled: rx ring was full */
+	int quit;
 
-static void
-close_fd(bd_net *n)
-{
-	if (n->fd >= 0) {
-		close(n->fd);
-		n->fd = -1;
-	}
-	n->ts = TS_DATA;
-	n->out_len = n->out_sent = 0;
-}
+	enum tn_state ts;
+	unsigned char tn_cmd;
 
-bd_net *
-bd_net_new(bd_net_data_cb on_data, bd_net_state_cb on_state, void *arg)
-{
-	bd_net *n = calloc(1, sizeof *n);
-	if (!n)
-		return NULL;
-	n->fd = -1;
-	n->state = BD_NET_IDLE;
-	n->on_data = on_data;
-	n->on_state = on_state;
-	n->arg = arg;
-	n->ts = TS_DATA;
-	return n;
-}
+	unsigned char *out;     /* bytes owed to the socket */
+	size_t out_len, out_cap, out_sent;
+};
 
-void
-bd_net_free(bd_net *n)
-{
-	if (!n)
-		return;
-	close_fd(n);
-	free(n->out);
-	free(n);
-}
+/* ---- framed-message helpers over a ring -------------------------------- */
 
-/* Append raw bytes to the outbound queue (no telnet escaping). Used for both
- * protocol replies and escaped user data. Returns 0 on success, -1 on OOM. */
 static int
-out_push(bd_net *n, const unsigned char *p, int len)
+ring_put(bd_ring *r, uint8_t type, const void *payload, uint32_t len)
 {
-	if (n->out_sent == n->out_len)
-		n->out_sent = n->out_len = 0;   /* queue drained: reset to front */
-	if (n->out_len + len > n->out_cap) {
-		int cap = n->out_cap ? n->out_cap * 2 : 256;
-		while (cap < n->out_len + len)
+	unsigned char hdr[5];
+	hdr[0] = type;
+	memcpy(hdr + 1, &len, sizeof len);
+	return bd_ring_writev(r, hdr, sizeof hdr, payload, len);
+}
+
+/* Read one whole frame if present. Returns 1 and fills out and len (truncated
+ * to cap), or 0 if no complete frame is buffered. */
+static int
+ring_get(bd_ring *r, uint8_t *type, unsigned char *buf, uint32_t cap,
+         uint32_t *len)
+{
+	unsigned char hdr[5];
+	uint32_t l, n;
+
+	if (bd_ring_read_avail(r) < sizeof hdr)
+		return 0;
+	bd_ring_peek(r, hdr, sizeof hdr);
+	memcpy(&l, hdr + 1, sizeof l);
+	if (bd_ring_read_avail(r) < sizeof hdr + (size_t)l)
+		return 0;       /* frames publish atomically, so this is rare */
+
+	bd_ring_skip(r, sizeof hdr);
+	*type = hdr[0];
+	n = l < cap ? l : cap;
+	bd_ring_read(r, buf, n);
+	if (l > n)
+		bd_ring_skip(r, l - n);
+	*len = n;
+	return 1;
+}
+
+static void
+wake(bd_net *n)
+{
+	unsigned char b = 1;
+	ssize_t rc = write(n->wake_w, &b, 1);
+	(void)rc;       /* EAGAIN just means a wake is already pending */
+}
+
+/* ---- net thread: socket + telnet ------------------------------------- */
+
+static void
+push_state(struct net_ctx *c, bd_net_state st, const char *msg)
+{
+	unsigned char frame[1 + 200];
+	uint32_t len = 1;
+	frame[0] = (unsigned char)st;
+	if (msg) {
+		size_t m = strlen(msg);
+		if (m > sizeof frame - 1)
+			m = sizeof frame - 1;
+		memcpy(frame + 1, msg, m);
+		len += (uint32_t)m;
+	}
+	atomic_store(&c->n->state, (int)st);
+	ring_put(c->n->rx, MSG_STATE, frame, len);
+}
+
+static int
+out_push(struct net_ctx *c, const unsigned char *p, size_t len)
+{
+	if (c->out_sent == c->out_len)
+		c->out_sent = c->out_len = 0;
+	if (c->out_len + len > c->out_cap) {
+		size_t cap = c->out_cap ? c->out_cap * 2 : 256;
+		unsigned char *nb;
+		while (cap < c->out_len + len)
 			cap *= 2;
-		unsigned char *nb = realloc(n->out, cap);
+		nb = realloc(c->out, cap);
 		if (!nb)
 			return -1;
-		n->out = nb;
-		n->out_cap = cap;
+		c->out = nb;
+		c->out_cap = cap;
 	}
-	memcpy(n->out + n->out_len, p, len);
-	n->out_len += len;
+	memcpy(c->out + c->out_len, p, len);
+	c->out_len += len;
 	return 0;
 }
 
-/* Queue a 3-byte IAC <cmd> <opt> reply. */
 static void
-tn_reply(bd_net *n, unsigned char cmd, unsigned char opt)
+tn_reply(struct net_ctx *c, unsigned char cmd, unsigned char opt)
 {
 	unsigned char r[3] = { TN_IAC, cmd, opt };
-	out_push(n, r, sizeof r);
+	out_push(c, r, sizeof r);
 }
 
-/* Feed raw socket bytes through the telnet filter, emitting clean application
- * data to the data callback. Policy: refuse every option (answer DO->WONT,
- * WILL->DONT), swallow subnegotiation and standalone commands like GA. */
+/* Filter raw socket bytes: strip/answer telnet negotiation, push the clean
+ * remainder to the UI as one DATA frame. Caller guarantees rx has room. */
 static void
-tn_feed(bd_net *n, const unsigned char *p, int len)
+tn_feed(struct net_ctx *c, const unsigned char *p, int len)
 {
-	unsigned char clean[4096];
-	int c = 0;
-	int i;
+	unsigned char clean[CHUNK];
+	int cn = 0, i;
 
 	for (i = 0; i < len; i++) {
 		unsigned char b = p[i];
-		switch (n->ts) {
+		switch (c->ts) {
 		case TS_DATA:
 			if (b == TN_IAC)
-				n->ts = TS_IAC;
+				c->ts = TS_IAC;
 			else
-				clean[c++] = b;
+				clean[cn++] = b;
 			break;
 		case TS_IAC:
-			if (b == TN_IAC) {              /* escaped 0xFF literal */
-				clean[c++] = TN_IAC;
-				n->ts = TS_DATA;
+			if (b == TN_IAC) {
+				clean[cn++] = TN_IAC;
+				c->ts = TS_DATA;
 			} else if (b == TN_WILL || b == TN_WONT ||
 			           b == TN_DO || b == TN_DONT) {
-				n->tn_cmd = b;
-				n->ts = TS_OPT;
+				c->tn_cmd = b;
+				c->ts = TS_OPT;
 			} else if (b == TN_SB) {
-				n->ts = TS_SB;
-			} else {                        /* GA/EOR/NOP/...: swallow */
-				n->ts = TS_DATA;
+				c->ts = TS_SB;
+			} else {
+				c->ts = TS_DATA;        /* GA/EOR/NOP/... */
 			}
 			break;
 		case TS_OPT:
-			if (n->tn_cmd == TN_DO)
-				tn_reply(n, TN_WONT, b);
-			else if (n->tn_cmd == TN_WILL)
-				tn_reply(n, TN_DONT, b);
-			/* WONT/DONT need no reply */
-			n->ts = TS_DATA;
+			if (c->tn_cmd == TN_DO)
+				tn_reply(c, TN_WONT, b);
+			else if (c->tn_cmd == TN_WILL)
+				tn_reply(c, TN_DONT, b);
+			c->ts = TS_DATA;
 			break;
 		case TS_SB:
 			if (b == TN_IAC)
-				n->ts = TS_SB_IAC;
+				c->ts = TS_SB_IAC;
 			break;
 		case TS_SB_IAC:
 			if (b == TN_SE)
-				n->ts = TS_DATA;
-			else if (b == TN_IAC)
-				n->ts = TS_SB;          /* literal 0xFF in SB data */
+				c->ts = TS_DATA;
 			else
-				n->ts = TS_SB;          /* unexpected; resync */
+				c->ts = TS_SB;
 			break;
 		}
-
-		if (c == (int)sizeof clean) {
-			if (n->on_data)
-				n->on_data((const char *)clean, c, n->arg);
-			c = 0;
-		}
 	}
-	if (c && n->on_data)
-		n->on_data((const char *)clean, c, n->arg);
+	if (cn)
+		ring_put(c->n->rx, MSG_DATA, clean, (uint32_t)cn);
 }
 
 static int
@@ -203,24 +252,72 @@ set_nonblock(int fd)
 	return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 }
 
-int
-bd_net_connect(bd_net *n, const char *host, const char *port)
+static void
+update_interest(struct net_ctx *c)
+{
+	unsigned ev = 0;
+
+	if (c->fd < 0)
+		return;
+	if (c->connecting) {
+		ev = IOX_WRITE;
+	} else {
+		if (!c->rx_blocked)
+			ev |= IOX_READ;
+		if (c->out_sent < c->out_len)
+			ev |= IOX_WRITE;
+	}
+	if (ev != c->want) {
+		iox_fd_mod(c->loop, c->fd, ev);
+		c->want = ev;
+	}
+}
+
+static void
+close_socket(struct net_ctx *c)
+{
+	if (c->fd >= 0) {
+		iox_fd_remove(c->loop, c->fd);
+		close(c->fd);
+		c->fd = -1;
+	}
+	c->connecting = 0;
+	c->want = 0;
+	c->rx_blocked = 0;
+	c->ts = TS_DATA;
+	c->out_len = c->out_sent = 0;
+}
+
+static void sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg);
+
+static void
+do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 {
 	struct addrinfo hints, *res, *ai;
+	const char *host, *port;
+	size_t hl;
 	int rc;
 
-	bd_net_close(n);
+	close_socket(c);
+
+	/* payload is host '\0' port '\0' */
+	host = (const char *)payload;
+	hl = strnlen(host, len);
+	if (hl >= len) {
+		push_state(c, BD_NET_ERROR, "bad connect target");
+		return;
+	}
+	port = host + hl + 1;
+
+	push_state(c, BD_NET_CONNECTING, NULL);
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-
-	/* Blocking resolution for now (brief); doc/network.md moves this to a
-	 * worker thread with Happy Eyeballs. */
-	rc = getaddrinfo(host, port, &hints, &res);
+	rc = getaddrinfo(host, port, &hints, &res);   /* blocking; net thread */
 	if (rc != 0) {
-		set_state(n, BD_NET_ERROR, gai_strerror(rc));
-		return -1;
+		push_state(c, BD_NET_ERROR, gai_strerror(rc));
+		return;
 	}
 
 	for (ai = res; ai; ai = ai->ai_next) {
@@ -233,144 +330,379 @@ bd_net_connect(bd_net *n, const char *host, const char *port)
 		}
 		rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
 		if (rc == 0) {
-			n->fd = fd;
+			c->fd = fd;
+			c->connecting = 0;
+			iox_fd_add(c->loop, fd, IOX_READ, sock_cb, c);
+			c->want = IOX_READ;
 			freeaddrinfo(res);
-			set_state(n, BD_NET_CONNECTED, NULL);
-			return 0;
+			push_state(c, BD_NET_CONNECTED, NULL);
+			return;
 		}
 		if (rc < 0 && errno == EINPROGRESS) {
-			n->fd = fd;
+			c->fd = fd;
+			c->connecting = 1;
+			iox_fd_add(c->loop, fd, IOX_WRITE, sock_cb, c);
+			c->want = IOX_WRITE;
 			freeaddrinfo(res);
-			set_state(n, BD_NET_CONNECTING, NULL);
-			return 0;
+			return;         /* CONNECTED/ERROR follows in sock_cb */
 		}
-		close(fd);      /* this address refused immediately; try next */
+		close(fd);
 	}
-
 	freeaddrinfo(res);
-	set_state(n, BD_NET_ERROR, "could not connect");
-	return -1;
+	push_state(c, BD_NET_ERROR, "could not connect");
 }
 
-/* Try to flush the outbound queue. Returns 0 on progress/idle, -1 on a fatal
- * write error (caller transitions to ERROR). */
-static int
-flush_out(bd_net *n)
+static void
+do_send(struct net_ctx *c, const unsigned char *p, uint32_t len)
 {
-	while (n->out_sent < n->out_len) {
-		ssize_t w = send(n->fd, n->out + n->out_sent,
-		    (size_t)(n->out_len - n->out_sent), 0);
+	uint32_t i, start;
+
+	if (c->fd < 0 || c->connecting)
+		return;         /* not connected; drop */
+
+	/* escape 0xFF -> IAC IAC so payload is not read as telnet commands */
+	for (i = 0, start = 0; i < len; i++) {
+		if (p[i] == TN_IAC) {
+			unsigned char esc[2] = { TN_IAC, TN_IAC };
+			if (i > start)
+				out_push(c, p + start, i - start);
+			out_push(c, esc, 2);
+			start = i + 1;
+		}
+	}
+	if (len > start)
+		out_push(c, p + start, len - start);
+	update_interest(c);
+}
+
+static void
+flush_out(struct net_ctx *c)
+{
+	while (c->out_sent < c->out_len) {
+		ssize_t w = send(c->fd, c->out + c->out_sent,
+		    c->out_len - c->out_sent, 0);
 		if (w > 0) {
-			n->out_sent += (int)w;
+			c->out_sent += (size_t)w;
 			continue;
 		}
 		if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			break;          /* socket buffer full; retry next poll */
+			return;
 		if (w < 0 && errno == EINTR)
 			continue;
-		return -1;
+		close_socket(c);
+		push_state(c, BD_NET_ERROR, strerror(errno));
+		return;
 	}
-	if (n->out_sent == n->out_len)
-		n->out_sent = n->out_len = 0;
-	return 0;
+	if (c->out_sent == c->out_len)
+		c->out_sent = c->out_len = 0;
 }
 
-void
-bd_net_poll(bd_net *n)
+static void
+do_read(struct net_ctx *c)
 {
-	if (!n || n->fd < 0)
-		return;
+	for (;;) {
+		unsigned char buf[CHUNK];
+		size_t room = bd_ring_write_avail(c->n->rx);
+		size_t want;
+		ssize_t r;
 
-	if (n->state == BD_NET_CONNECTING) {
-		struct pollfd pfd = { n->fd, POLLOUT, 0 };
-		if (poll(&pfd, 1, 0) <= 0)
-			return;         /* not writable yet */
-		int err = 0;
-		socklen_t elen = sizeof err;
-		if (getsockopt(n->fd, SOL_SOCKET, SO_ERROR, &err, &elen) < 0 || err) {
-			close_fd(n);
-			set_state(n, BD_NET_ERROR, err ? strerror(err) : "connect failed");
+		if (room <= sizeof(uint8_t) + sizeof(uint32_t)) {
+			c->rx_blocked = 1;      /* no room for even a 1-byte frame */
 			return;
 		}
-		set_state(n, BD_NET_CONNECTED, NULL);
-	}
+		want = room - 5;
+		if (want > sizeof buf)
+			want = sizeof buf;
 
-	if (n->state != BD_NET_CONNECTED)
-		return;
-
-	if (flush_out(n) < 0) {
-		close_fd(n);
-		set_state(n, BD_NET_ERROR, strerror(errno));
-		return;
-	}
-
-	for (;;) {
-		unsigned char buf[4096];
-		ssize_t r = recv(n->fd, buf, sizeof buf, 0);
+		r = recv(c->fd, buf, want, 0);
 		if (r > 0) {
-			tn_feed(n, buf, (int)r);
+			tn_feed(c, buf, (int)r);
 			continue;
 		}
 		if (r == 0) {
-			close_fd(n);
-			set_state(n, BD_NET_CLOSED, "connection closed by peer");
+			close_socket(c);
+			push_state(c, BD_NET_CLOSED,
+			    "connection closed by peer");
 			return;
 		}
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			break;
+			return;
 		if (errno == EINTR)
 			continue;
-		close_fd(n);
-		set_state(n, BD_NET_ERROR, strerror(errno));
+		close_socket(c);
+		push_state(c, BD_NET_ERROR, strerror(errno));
+		return;
+	}
+}
+
+static void
+sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
+{
+	struct net_ctx *c = arg;
+	(void)loop;
+	(void)fd;
+
+	if (c->connecting) {
+		int err = 0;
+		socklen_t el = sizeof err;
+		if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR, &err, &el) < 0 || err) {
+			close_socket(c);
+			push_state(c, BD_NET_ERROR,
+			    err ? strerror(err) : "connect failed");
+			return;
+		}
+		c->connecting = 0;
+		update_interest(c);
+		push_state(c, BD_NET_CONNECTED, NULL);
 		return;
 	}
 
-	/* The telnet filter may have queued option replies while reading;
-	 * push them out now rather than waiting for the next poll. */
-	if (flush_out(n) < 0) {
-		close_fd(n);
-		set_state(n, BD_NET_ERROR, strerror(errno));
+	if (events & IOX_WRITE)
+		flush_out(c);
+	if (c->fd >= 0 && (events & IOX_READ))
+		do_read(c);
+	if (c->fd >= 0)
+		update_interest(c);
+}
+
+/* Drain the wake pipe, apply queued commands, and relieve read backpressure. */
+static void
+wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
+{
+	struct net_ctx *c = arg;
+	unsigned char drain[64];
+	uint8_t type;
+	unsigned char buf[CHUNK];
+	uint32_t len;
+	(void)loop;
+	(void)events;
+
+	while (read(fd, drain, sizeof drain) > 0)
+		;
+
+	while (ring_get(c->n->tx, &type, buf, sizeof buf, &len)) {
+		switch (type) {
+		case MSG_CONNECT:
+			do_connect(c, buf, len);
+			break;
+		case MSG_SEND:
+			do_send(c, buf, len);
+			break;
+		case MSG_CLOSE:
+			if (c->fd >= 0) {
+				close_socket(c);
+				push_state(c, BD_NET_CLOSED, NULL);
+			}
+			break;
+		}
 	}
+
+	if (atomic_load(&c->n->shutdown)) {
+		c->quit = 1;
+		return;
+	}
+
+	/* The UI may have drained rx; re-enable reads if we had paused them. */
+	if (c->rx_blocked &&
+	    bd_ring_write_avail(c->n->rx) > sizeof(uint8_t) + sizeof(uint32_t)) {
+		c->rx_blocked = 0;
+		update_interest(c);
+	}
+}
+
+static void *
+net_thread_main(void *arg)
+{
+	bd_net *n = arg;
+	struct net_ctx c;
+
+	memset(&c, 0, sizeof c);
+	c.n = n;
+	c.fd = -1;
+	c.ts = TS_DATA;
+
+	c.loop = iox_loop_new();
+	if (!c.loop)
+		return NULL;
+	iox_fd_add(c.loop, n->wake_r, IOX_READ, wake_cb, &c);
+	iox_loop_start(c.loop);
+
+	while (!c.quit) {
+		if (iox_loop_poll(c.loop) < 0 && errno != EINTR)
+			break;
+	}
+
+	if (c.fd >= 0)
+		close(c.fd);
+	free(c.out);
+	iox_loop_free(c.loop);
+	return NULL;
+}
+
+/* ---- UI thread: public API ------------------------------------------- */
+
+static int
+make_pipe(int *rfd, int *wfd)
+{
+	int fds[2];
+	if (pipe(fds) < 0)
+		return -1;
+	set_nonblock(fds[0]);
+	set_nonblock(fds[1]);
+	fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+	fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+	*rfd = fds[0];
+	*wfd = fds[1];
+	return 0;
+}
+
+bd_net *
+bd_net_new(bd_net_data_cb on_data, bd_net_state_cb on_state, void *arg)
+{
+	bd_net *n = calloc(1, sizeof *n);
+	if (!n)
+		return NULL;
+	n->on_data = on_data;
+	n->on_state = on_state;
+	n->arg = arg;
+	n->wake_r = n->wake_w = -1;
+	atomic_init(&n->state, BD_NET_IDLE);
+	atomic_init(&n->shutdown, 0);
+
+	n->rx = bd_ring_new(RX_CAP);
+	n->tx = bd_ring_new(TX_CAP);
+	if (!n->rx || !n->tx || make_pipe(&n->wake_r, &n->wake_w) < 0)
+		goto fail;
+	if (pthread_create(&n->thread, NULL, net_thread_main, n) != 0)
+		goto fail;
+	n->have_thread = 1;
+	return n;
+
+fail:
+	if (n->wake_r >= 0)
+		close(n->wake_r);
+	if (n->wake_w >= 0)
+		close(n->wake_w);
+	bd_ring_free(n->rx);
+	bd_ring_free(n->tx);
+	free(n);
+	return NULL;
+}
+
+void
+bd_net_free(bd_net *n)
+{
+	if (!n)
+		return;
+	if (n->have_thread) {
+		atomic_store(&n->shutdown, 1);
+		wake(n);
+		pthread_join(n->thread, NULL);
+	}
+	if (n->wake_r >= 0)
+		close(n->wake_r);
+	if (n->wake_w >= 0)
+		close(n->wake_w);
+	bd_ring_free(n->rx);
+	bd_ring_free(n->tx);
+	free(n);
+}
+
+int
+bd_net_connect(bd_net *n, const char *host, const char *port)
+{
+	unsigned char payload[512];
+	size_t hl, pl;
+
+	if (!n || !host || !port)
+		return -1;
+	hl = strlen(host);
+	pl = strlen(port);
+	if (hl + pl + 2 > sizeof payload)
+		return -1;
+	memcpy(payload, host, hl + 1);
+	memcpy(payload + hl + 1, port, pl + 1);
+
+	if (ring_put(n->tx, MSG_CONNECT, payload, (uint32_t)(hl + pl + 2)) < 0)
+		return -1;
+	wake(n);
+	return 0;
 }
 
 int
 bd_net_send(bd_net *n, const void *data, int len)
 {
 	const unsigned char *p = data;
-	int i, start;
+	int left = len;
 
-	if (!n || n->state != BD_NET_CONNECTED || len < 0)
+	if (!n || len < 0)
+		return -1;
+	if (atomic_load(&n->state) != BD_NET_CONNECTED)
 		return -1;
 
-	/* Escape any 0xFF as IAC IAC so payload bytes are not mistaken for
-	 * telnet commands. Push runs between escapes to keep it cheap. */
-	for (i = 0, start = 0; i < len; i++) {
-		if (p[i] == TN_IAC) {
-			if (i > start)
-				out_push(n, p + start, i - start);
-			unsigned char esc[2] = { TN_IAC, TN_IAC };
-			out_push(n, esc, 2);
-			start = i + 1;
+	while (left > 0) {
+		uint32_t chunk = left > CHUNK ? CHUNK : (uint32_t)left;
+		if (ring_put(n->tx, MSG_SEND, p, chunk) < 0) {
+			wake(n);
+			return len - left;      /* tx full: partial accept */
 		}
+		p += chunk;
+		left -= (int)chunk;
 	}
-	if (len > start)
-		out_push(n, p + start, len - start);
-
-	flush_out(n);   /* opportunistic; poll() will finish any remainder */
+	wake(n);
 	return len;
 }
 
 void
 bd_net_close(bd_net *n)
 {
-	if (!n || n->fd < 0)
+	if (!n)
 		return;
-	close_fd(n);
-	set_state(n, BD_NET_CLOSED, NULL);
+	if (ring_put(n->tx, MSG_CLOSE, NULL, 0) == 0)
+		wake(n);
+}
+
+void
+bd_net_poll(bd_net *n)
+{
+	uint8_t type;
+	unsigned char buf[CHUNK];
+	uint32_t len;
+	int got_data = 0;
+
+	if (!n)
+		return;
+
+	while (ring_get(n->rx, &type, buf, sizeof buf, &len)) {
+		if (type == MSG_DATA) {
+			if (n->on_data)
+				n->on_data((const char *)buf, (int)len, n->arg);
+			got_data = 1;
+		} else if (type == MSG_STATE) {
+			bd_net_state st = (bd_net_state)buf[0];
+			char detail[201];
+			const char *msg = NULL;
+			if (len > 1) {
+				uint32_t m = len - 1;
+				if (m > sizeof detail - 1)
+					m = sizeof detail - 1;
+				memcpy(detail, buf + 1, m);
+				detail[m] = '\0';
+				msg = detail;
+			}
+			if (n->on_state)
+				n->on_state(st, msg, n->arg);
+		}
+	}
+
+	if (got_data)
+		wake(n);        /* nudge the net thread to lift backpressure */
 }
 
 bd_net_state
 bd_net_state_get(const bd_net *n)
 {
-	return n ? n->state : BD_NET_IDLE;
+	if (!n)
+		return BD_NET_IDLE;
+	return (bd_net_state)atomic_load((_Atomic int *)&n->state);
 }
