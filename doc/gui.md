@@ -610,6 +610,14 @@ BD_FONT_MONO)` picks one (a missing variant TTF falls back to regular). The
 editor uses the **fixed-width family by default** so code and ABC columns line
 up (`bd_editor_set_monospace`); chrome stays proportional.
 
+**Custom fonts.** The eight faces are the `BD_ASSET_GUI_FONT_*` defaults, but an
+app can replace the whole family in one call: fill a `bd_font_set` (each face a
+path *or* an in-memory TTF/OTF buffer) and pass it to `bd_gui_init_fonts` (or
+`bd_draw_init_fonts` at the renderer layer). In-memory faces let a binary embed
+its fonts and read no files; `bd_draw_set_font_reader` instead routes
+path-based faces through a host asset resolver (fopen fallback), matching the
+backend's `load_texture`. See README "Using your own fonts".
+
 **Status.** Implemented: the row API (`bd_editor_set_text` / `text` /
 `row_count` / `row_text` / `insert_row` / `replace_row` / `delete_row`), lock
 (`bd_editor_set_locked`), styling (`bd_editor_clear_styles` /

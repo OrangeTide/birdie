@@ -412,6 +412,57 @@ atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
 `BD_ASSET_GUI_FONT`[`_BOLD`/`_ITALIC`/`_BOLDITALIC`] and the same with a
 `_MONO` prefix on the suffix, e.g. `BD_ASSET_GUI_FONT_MONO_BOLD`).
 
+## Using your own fonts
+
+The `-DBD_ASSET_*` macros above set the *defaults*, but you do not have to
+override eight macros (and risk silently missing one) to ship a custom family.
+Fill a `bd_font_set` and pass it once. Each of the eight faces is a
+`bd_font_face` that is either a filesystem path or an in-memory TTF/OTF buffer;
+a face left zeroed falls back to `regular` at draw time.
+
+```c
+bd_font_set fonts = {
+    .regular          = { .path = "fonts/Inter-Regular.otf" },
+    .bold             = { .path = "fonts/Inter-Bold.otf" },
+    .italic           = { .path = "fonts/Inter-Italic.otf" },
+    .bold_italic      = { .path = "fonts/Inter-BoldItalic.otf" },
+    .mono             = { .path = "fonts/JetBrainsMono-Regular.ttf" },
+    /* ...mono_bold, mono_italic, mono_bold_italic... */
+};
+bd_gui_init_fonts(backend, theme, &fonts);   /* or NULL for the defaults */
+```
+
+To make the binary self-contained, point the faces at bytes compiled into it
+(e.g. via an `.incbin` blob) instead of paths — no files are read:
+
+```c
+extern const unsigned char font_regular[];   /* embedded blob */
+extern const unsigned long font_regular_len;
+bd_font_set fonts = {
+    .regular = { .data = font_regular, .len = (long)font_regular_len },
+    /* ...other faces... */
+};
+bd_gui_init_fonts(backend, theme, &fonts);
+```
+
+If you would rather keep paths but resolve them from an embedded asset store
+(matching how the backend's `load_texture` works), install a reader before
+init; it is consulted first and `fopen` is the fallback:
+
+```c
+/* return a malloc'd buffer the renderer frees, or NULL to fall back to fopen */
+unsigned char *my_reader(const char *path, long *len) { ... }
+
+bd_draw_set_font_reader(my_reader);
+bd_gui_init(backend, theme);   /* faces given by path now go through my_reader */
+```
+
+The lower-level renderer entry points (`bd_draw_init_fonts`,
+`bd_draw_set_font_reader`) are in `bd_draw.h` if you are not using the widget
+layer. `bd_draw_init(be, path, px)` remains and is unchanged: it bakes `path`
+as the regular face and the seven variants from the `BD_ASSET_GUI_FONT_*`
+macros.
+
 ## License
 
 Made by a machine. PUBLIC DOMAIN (CC0-1.0)

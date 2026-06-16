@@ -17,10 +17,47 @@
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
+/* One font face source: an in-memory TTF/OTF buffer, or a filesystem path.
+ * If data != NULL it is used directly (borrowed, must outlive bd_draw_init*),
+ * otherwise path is read. Leave both NULL to skip the face (it then falls back
+ * at draw time to the regular proportional face). */
+typedef struct {
+	const char          *path;
+	const unsigned char *data;   /* takes precedence over path */
+	long                 len;    /* byte length of data */
+} bd_font_face;
+
+/* The eight faces birdie-gui bakes: a proportional family and a fixed-width
+ * (mono) family, each Regular/Bold/Italic/BoldItalic. Field order matches the
+ * BD_FONT_BOLD|ITALIC|MONO style index below. Any face left zeroed falls back
+ * to `regular`; if `regular` itself is unset, text becomes a no-op. */
+typedef struct {
+	bd_font_face regular, bold, italic, bold_italic;
+	bd_font_face mono, mono_bold, mono_italic, mono_bold_italic;
+} bd_font_set;
+
+/* Optional host hook: read a font asset by path into a malloc'd buffer (the
+ * renderer frees it), returning NULL to fall back to fopen(). Set this before
+ * bd_draw_init* to source fonts from embedded blobs instead of the filesystem,
+ * mirroring the backend's load_texture path so a binary can be self-contained
+ * for fonts. */
+typedef unsigned char *(*bd_font_reader)(const char *path, long *len);
+void bd_draw_set_font_reader(bd_font_reader fn);
+
 /* Create the renderer on a backend. font_path is a TTF/OTF baked at font_px
- * for chrome text; pass NULL to run without text (text calls become no-ops).
- * Returns 1 on success, 0 if the shader or mesh could not be created. */
+ * for the regular chrome face; the seven bold/italic/mono variants come from
+ * the BD_ASSET_GUI_FONT_* build-time macros. Pass NULL to run without text
+ * (text calls become no-ops). Returns 1 on success, 0 if the shader or mesh
+ * could not be created. Equivalent to bd_draw_init_fonts with a face set built
+ * from font_path plus the macro defaults. */
 int  bd_draw_init(const bd_backend *be, const char *font_path, float font_px);
+
+/* Create the renderer baking an explicit face set at font_px. Faces left
+ * zeroed in `fonts` are skipped. Pass NULL for `fonts` to run without text.
+ * Each face may be an in-memory buffer or a path; this is the way to supply a
+ * full custom family (e.g. from embedded blobs) in one call. */
+int  bd_draw_init_fonts(const bd_backend *be, const bd_font_set *fonts,
+                        float font_px);
 void bd_draw_shutdown(void);
 
 /* Frame: begin a batch for a window of win_w x win_h pixels, end flushes it.

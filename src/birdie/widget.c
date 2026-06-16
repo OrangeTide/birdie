@@ -2221,16 +2221,27 @@ tabbar_activate(bd_id id, int idx)
 /* ------------------------------------------------------------------ */
 
 void
-bd_gui_init(const bd_backend *backend, const bd_theme *th)
+bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
+    const bd_font_set *fonts)
 {
 	be = backend;
 	if (th)
 		theme = *th;
 
-	if (!bd_draw_init(be, BD_ASSET_GUI_FONT, theme.font_size))
+	if (fonts) {
+		if (!bd_draw_init_fonts(be, fonts, theme.font_size))
+			fprintf(stderr, "bd: renderer init failed\n");
+	} else if (!bd_draw_init(be, BD_ASSET_GUI_FONT, theme.font_size)) {
 		fprintf(stderr, "bd: renderer init failed\n");
+	}
 	pin_out_tex = be->load_texture(BD_ASSET_PIN_OUT);
 	pin_in_tex = be->load_texture(BD_ASSET_PIN_IN);
+}
+
+void
+bd_gui_init(const bd_backend *backend, const bd_theme *th)
+{
+	bd_gui_init_fonts(backend, th, NULL);
 }
 
 void

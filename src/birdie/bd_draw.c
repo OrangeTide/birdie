@@ -142,9 +142,22 @@ quad(bd_texture tex, float x, float y, float w, float h,
 /* font baking                                                        */
 /* ------------------------------------------------------------------ */
 
+static bd_font_reader font_reader;
+
+void
+bd_draw_set_font_reader(bd_font_reader fn)
+{
+	font_reader = fn;
+}
+
 static unsigned char *
 read_file(const char *path, long *len)
 {
+	if (font_reader) {
+		unsigned char *buf = font_reader(path, len);
+		if (buf)
+			return buf;
+	}
 	FILE *f = fopen(path, "rb");
 	if (!f)
 		return NULL;
@@ -162,16 +175,30 @@ read_file(const char *path, long *len)
 	return buf;
 }
 
-/* Bake one face from `path` into faces[slot]. metrics=1 sets the shared
- * ascent/line height (use the regular face). Silent if the file is missing. */
+/* Bake one face into faces[slot]. The face is either an in-memory buffer
+ * (face->data) or a path to read; an unset face is skipped. metrics=1 sets the
+ * shared ascent/line height (use the regular face). Silent if a variant is
+ * missing; warns only when the required regular face cannot be loaded. */
 static void
-bake_font(const char *path, float px, int slot, int metrics)
+bake_font(const bd_font_face *face, float px, int slot, int metrics)
 {
-	long len;
-	unsigned char *ttf = read_file(path, &len);
+	long len = 0;
+	unsigned char *ttf;
+	int owned = 0;             /* read_file allocated ttf; free it after baking */
+
+	if (face->data) {
+		ttf = (unsigned char *)face->data;
+		len = face->len;
+	} else if (face->path) {
+		ttf = read_file(face->path, &len);
+		owned = 1;
+	} else {
+		ttf = NULL;
+	}
 	if (!ttf) {
 		if (metrics)   /* the regular face is required; variants are optional */
-			fprintf(stderr, "bd_draw: cannot read font '%s'\n", path);
+			fprintf(stderr, "bd_draw: cannot read font '%s'\n",
+			    face->path ? face->path : "(none)");
 		return;
 	}
 
@@ -211,7 +238,8 @@ bake_font(const char *path, float px, int slot, int metrics)
 	}
 	free(cov);
 	free(rgba);
-	free(ttf);
+	if (owned)
+		free(ttf);
 }
 
 /* the baked face for a style, falling back to the regular proportional face */
@@ -229,7 +257,8 @@ face_for(int style)
 /* ------------------------------------------------------------------ */
 
 int
-bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
+bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
+    float font_px)
 {
 	be = backend;
 
@@ -241,18 +270,38 @@ bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
 	white = be->make_texture(1, 1, &wpix);
 	cur_tex = white;
 
-	if (font_path) {
-		/* indices are BD_FONT_BOLD|ITALIC|MONO */
-		bake_font(font_path, font_px, 0, 1);              /* regular */
-		bake_font(BD_ASSET_GUI_FONT_BOLD, font_px, 1, 0);
-		bake_font(BD_ASSET_GUI_FONT_ITALIC, font_px, 2, 0);
-		bake_font(BD_ASSET_GUI_FONT_BOLDITALIC, font_px, 3, 0);
-		bake_font(BD_ASSET_GUI_FONT_MONO, font_px, 4, 0);
-		bake_font(BD_ASSET_GUI_FONT_MONO_BOLD, font_px, 5, 0);
-		bake_font(BD_ASSET_GUI_FONT_MONO_ITALIC, font_px, 6, 0);
-		bake_font(BD_ASSET_GUI_FONT_MONO_BOLDITALIC, font_px, 7, 0);
+	if (fonts) {
+		/* face order matches the BD_FONT_BOLD|ITALIC|MONO style index */
+		const bd_font_face *f[FONT_FACES] = {
+			&fonts->regular, &fonts->bold,
+			&fonts->italic,  &fonts->bold_italic,
+			&fonts->mono,    &fonts->mono_bold,
+			&fonts->mono_italic, &fonts->mono_bold_italic,
+		};
+		for (int i = 0; i < FONT_FACES; i++)
+			bake_font(f[i], font_px, i, i == 0); /* regular sets metrics */
 	}
 	return 1;
+}
+
+int
+bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
+{
+	if (!font_path)
+		return bd_draw_init_fonts(backend, NULL, font_px);
+
+	/* the regular face comes from font_path; variants from the build-time
+	 * macros, preserving the legacy behavior of this entry point */
+	bd_font_set fs = {0};
+	fs.regular.path          = font_path;
+	fs.bold.path             = BD_ASSET_GUI_FONT_BOLD;
+	fs.italic.path           = BD_ASSET_GUI_FONT_ITALIC;
+	fs.bold_italic.path      = BD_ASSET_GUI_FONT_BOLDITALIC;
+	fs.mono.path             = BD_ASSET_GUI_FONT_MONO;
+	fs.mono_bold.path        = BD_ASSET_GUI_FONT_MONO_BOLD;
+	fs.mono_italic.path      = BD_ASSET_GUI_FONT_MONO_ITALIC;
+	fs.mono_bold_italic.path = BD_ASSET_GUI_FONT_MONO_BOLDITALIC;
+	return bd_draw_init_fonts(backend, &fs, font_px);
 }
 
 void

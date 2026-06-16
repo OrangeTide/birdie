@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "bd_backend.h"
 #include "bd_theme.h"
+#include "bd_draw.h"   /* bd_font_set, bd_draw_set_font_reader */
 
 typedef unsigned int bd_id;
 #define BD_NONE ((bd_id)0)
@@ -100,6 +101,14 @@ bd_id       bd_next_sibling(bd_id id);
  * theme (NULL = bd_theme_default()); bd_gui_event() consumes neutral events
  * the host translates from its native ones. */
 void bd_gui_init(const bd_backend *backend, const bd_theme *theme);
+
+/* As bd_gui_init, but baking an explicit font set (each face an in-memory
+ * buffer or a path) instead of the built-in DejaVu defaults. Pass NULL for
+ * `fonts` for the defaults. Use this to ship a custom family, e.g. from blobs
+ * embedded in the binary; call bd_draw_set_font_reader() first if faces are
+ * given by path and must be resolved from embedded assets. */
+void bd_gui_init_fonts(const bd_backend *backend, const bd_theme *theme,
+                       const bd_font_set *fonts);
 void bd_gui_cleanup(void);
 void bd_gui_layout(int win_w, int win_h);
 void bd_gui_render(void);
