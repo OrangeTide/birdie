@@ -1,0 +1,6 @@
+upstream: https://github.com/Mbed-TLS/mbedtls
+ref:      mbedtls-3.6.6
+commit:   0bebf8b8c7f07abe3571ded48a11aa907a1ffb20
+vendored: include/ library/ LICENSE (tests, programs, 3rdparty dropped)
+config:   include/mbedtls/mbedtls_config.h is upstream stock; Everest and
+          p256-m accelerators stay disabled, so 3rdparty/ is not needed.
