@@ -35,6 +35,13 @@ typedef void (*bd_net_data_cb)(const char *data, int len, void *arg);
  * e.g. an error string. */
 typedef void (*bd_net_state_cb)(bd_net_state state, const char *msg, void *arg);
 
+/* Server-controlled echo changed (telnet ECHO). suppress != 0 means the client
+ * should stop echoing typed input, e.g. mask a password. */
+typedef void (*bd_net_echo_cb)(int suppress, void *arg);
+
+/* A prompt boundary was received (telnet EOR / GA). */
+typedef void (*bd_net_prompt_cb)(void *arg);
+
 typedef struct bd_net bd_net;
 
 /* Create a connection object. Callbacks may be NULL. arg is passed back to
@@ -62,6 +69,19 @@ int bd_net_send(bd_net *n, const void *data, int len);
 
 /* Close the connection (user-initiated). Safe to call when already closed. */
 void bd_net_close(bd_net *n);
+
+/* Optional callbacks for telnet-driven events, delivered on the UI thread
+ * during bd_net_poll() like the others. Set before connecting. */
+void bd_net_set_echo_cb(bd_net *n, bd_net_echo_cb cb);
+void bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb);
+
+/* Advertise the terminal type (TTYPE/MTTS), e.g. "birdie/0.0". Copied.
+ * Takes effect on the next negotiation; set before connecting. */
+void bd_net_set_termtype(bd_net *n, const char *type);
+
+/* Report the terminal window size in character cells (NAWS). Resent to the
+ * server if it changes while connected. */
+void bd_net_set_winsize(bd_net *n, int cols, int rows);
 
 /* Current state. */
 bd_net_state bd_net_state_get(const bd_net *n);

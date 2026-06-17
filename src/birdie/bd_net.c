@@ -1,27 +1,32 @@
 /*
  * bd_net -- birdie's network connection layer.
  *
- * A dedicated network thread runs a libiox poll loop and owns the socket:
- * resolution (getaddrinfo), connect, recv/send, and telnet IAC filtering all
- * happen there, so the UI thread never blocks on the network. Two lock-free
- * SPSC rings carry framed messages between the threads:
+ * A single TCP/telnet connection to a MUD. The socket lives on a dedicated
+ * network thread (a libiox poll loop); resolution, connect, recv/send, and
+ * telnet option negotiation (bd_telopt) all happen there so the UI thread
+ * never blocks on the network. Two lock-free SPSC rings carry framed messages:
  *
- *   tx (UI -> net):  CONNECT / SEND / CLOSE commands
- *   rx (net -> UI):  DATA (clean bytes) / STATE (transition) records
+ *   tx (UI -> net):  CONNECT / SEND / CLOSE / WINSIZE / TERMTYPE
+ *   rx (net -> UI):  DATA / STATE / PROMPT / ECHO
  *
- * The UI wakes the net thread by writing one byte to a self-pipe the loop
- * watches. bd_net_poll() drains rx on the UI thread and fires the data/state
- * callbacks there, so callers still receive everything on the UI thread.
+ * The UI wakes the net thread with a self-pipe byte; bd_net_poll() drains rx
+ * and fires the callbacks, all on the UI thread.
  *
- * Plain TCP for now. Deferred (doc/network.md): TLS (mbedTLS), the MTH telopt
- * set (CHARSET/ECHO/EOR/GMCP/MCCP/MSDP), Happy Eyeballs, reconnect, encoding
- * transcode, NDJSON logging, and a Winsock path.
+ * Inbound bytes go through bd_telopt, whose output (clean data, plus prompt
+ * and echo events) is framed into a net-thread staging buffer and streamed
+ * into the rx ring. Streaming, rather than one ring_put per record, keeps
+ * backpressure exact even when one recv yields several records: the ring's
+ * framed reader already waits for a record to arrive in full.
+ *
+ * Deferred (doc/network.md): TLS (mbedTLS), the MTH extension set
+ * (GMCP/MSDP/MSSP/MCCP), Happy Eyeballs, reconnect, and a Winsock path.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
 #include "bd_net.h"
 #include "bd_ring.h"
+#include "bd_telopt.h"
 #include "iox_loop.h"
 #include "iox_fd.h"
 
@@ -36,45 +41,42 @@
 #include <string.h>
 #include <stdint.h>
 
-/* telnet protocol bytes (RFC 854 + friends) */
-#define TN_SE   240
-#define TN_GA   249
-#define TN_SB   250
-#define TN_WILL 251
-#define TN_WONT 252
-#define TN_DO   253
-#define TN_DONT 254
 #define TN_IAC  255
 
-/* cross-thread message types (one byte, framed as [type][u32 len][payload]) */
+/* tx message types (UI -> net) */
 enum {
-	MSG_CONNECT,    /* tx: payload = host '\0' port '\0' */
-	MSG_SEND,       /* tx: payload = bytes to transmit */
-	MSG_CLOSE,      /* tx: no payload */
-	MSG_DATA,       /* rx: payload = clean received bytes */
-	MSG_STATE       /* rx: payload = [u8 state][detail string, no NUL] */
+	MSG_CONNECT,    /* host '\0' port '\0' */
+	MSG_SEND,       /* bytes to transmit */
+	MSG_CLOSE,
+	MSG_WINSIZE,    /* u16 cols, u16 rows (native order) */
+	MSG_TERMTYPE    /* terminal type string */
+};
+
+/* rx message types (net -> UI) */
+enum {
+	MSG_DATA,       /* clean received bytes */
+	MSG_STATE,      /* [u8 state][detail string] */
+	MSG_PROMPT,     /* no payload */
+	MSG_ECHO        /* [u8 suppress] */
 };
 
 #define RX_CAP   (1u << 20)     /* 1 MiB inbound buffer */
 #define TX_CAP   (1u << 16)     /* 64 KiB command buffer */
-#define CHUNK    4096           /* recv size and max per-frame payload */
-
-/* inbound telnet parser states */
-enum tn_state {
-	TS_DATA, TS_IAC, TS_OPT, TS_SB, TS_SB_IAC
-};
+#define CHUNK    4096
 
 struct bd_net {
 	bd_net_data_cb on_data;
 	bd_net_state_cb on_state;
+	bd_net_echo_cb on_echo;
+	bd_net_prompt_cb on_prompt;
 	void *arg;
 
-	_Atomic int state;      /* bd_net_state; written by net thread */
-	_Atomic int shutdown;   /* set by bd_net_free to stop the thread */
+	_Atomic int state;
+	_Atomic int shutdown;
 
 	bd_ring *rx;            /* net -> UI */
 	bd_ring *tx;            /* UI -> net */
-	int wake_r, wake_w;     /* self-pipe; UI writes wake_w, net reads wake_r */
+	int wake_r, wake_w;
 
 	pthread_t thread;
 	int have_thread;
@@ -84,17 +86,18 @@ struct bd_net {
 struct net_ctx {
 	bd_net *n;
 	struct iox_loop *loop;
-	int fd;                 /* socket, -1 when none */
-	int connecting;         /* awaiting non-blocking connect completion */
-	unsigned want;          /* iox events currently registered on fd */
-	int rx_blocked;         /* read disabled: rx ring was full */
+	bd_telopt *telopt;
+	int fd;
+	int connecting;
+	unsigned want;
+	int rx_blocked;         /* rx ring full: reads paused */
 	int quit;
-
-	enum tn_state ts;
-	unsigned char tn_cmd;
 
 	unsigned char *out;     /* bytes owed to the socket */
 	size_t out_len, out_cap, out_sent;
+
+	unsigned char *pend;    /* framed rx records not yet in the ring */
+	size_t pend_len, pend_cap, pend_sent;
 };
 
 /* ---- framed-message helpers over a ring -------------------------------- */
@@ -108,8 +111,6 @@ ring_put(bd_ring *r, uint8_t type, const void *payload, uint32_t len)
 	return bd_ring_writev(r, hdr, sizeof hdr, payload, len);
 }
 
-/* Read one whole frame if present. Returns 1 and fills out and len (truncated
- * to cap), or 0 if no complete frame is buffered. */
 static int
 ring_get(bd_ring *r, uint8_t *type, unsigned char *buf, uint32_t cap,
          uint32_t *len)
@@ -122,7 +123,7 @@ ring_get(bd_ring *r, uint8_t *type, unsigned char *buf, uint32_t cap,
 	bd_ring_peek(r, hdr, sizeof hdr);
 	memcpy(&l, hdr + 1, sizeof l);
 	if (bd_ring_read_avail(r) < sizeof hdr + (size_t)l)
-		return 0;       /* frames publish atomically, so this is rare */
+		return 0;
 
 	bd_ring_skip(r, sizeof hdr);
 	*type = hdr[0];
@@ -139,10 +140,59 @@ wake(bd_net *n)
 {
 	unsigned char b = 1;
 	ssize_t rc = write(n->wake_w, &b, 1);
-	(void)rc;       /* EAGAIN just means a wake is already pending */
+	(void)rc;
 }
 
-/* ---- net thread: socket + telnet ------------------------------------- */
+/* ---- net thread: staging buffer -> rx ring ---------------------------- */
+
+/* Append a framed record to the pending staging buffer. */
+static void
+pend_put(struct net_ctx *c, uint8_t type, const void *payload, uint32_t len)
+{
+	size_t need = c->pend_len + 5 + len;
+
+	if (c->pend_sent == c->pend_len)
+		c->pend_sent = c->pend_len = 0;
+	if (need > c->pend_cap) {
+		size_t cap = c->pend_cap ? c->pend_cap * 2 : 8192;
+		unsigned char *nb;
+		while (cap < need)
+			cap *= 2;
+		nb = realloc(c->pend, cap);
+		if (!nb)
+			return;         /* drop on OOM */
+		c->pend = nb;
+		c->pend_cap = cap;
+	}
+	c->pend[c->pend_len++] = type;
+	memcpy(c->pend + c->pend_len, &len, 4);
+	c->pend_len += 4;
+	if (len) {
+		memcpy(c->pend + c->pend_len, payload, len);
+		c->pend_len += len;
+	}
+}
+
+/* Stream as many staged bytes into the rx ring as fit. Partial records are
+ * fine: the consumer waits until a record is complete. */
+static void
+drain_pend(struct net_ctx *c)
+{
+	size_t avail = bd_ring_write_avail(c->n->rx);
+	size_t rem = c->pend_len - c->pend_sent;
+	size_t k = rem < avail ? rem : avail;
+
+	if (k) {
+		bd_ring_write(c->n->rx, c->pend + c->pend_sent, k);
+		c->pend_sent += k;
+	}
+	if (c->pend_sent == c->pend_len) {
+		c->pend_sent = c->pend_len = 0;
+		c->rx_blocked = 0;
+	} else {
+		c->rx_blocked = 1;
+	}
+}
 
 static void
 push_state(struct net_ctx *c, bd_net_state st, const char *msg)
@@ -158,8 +208,11 @@ push_state(struct net_ctx *c, bd_net_state st, const char *msg)
 		len += (uint32_t)m;
 	}
 	atomic_store(&c->n->state, (int)st);
-	ring_put(c->n->rx, MSG_STATE, frame, len);
+	pend_put(c, MSG_STATE, frame, len);
+	drain_pend(c);
 }
+
+/* ---- net thread: socket out buffer ------------------------------------ */
 
 static int
 out_push(struct net_ctx *c, const unsigned char *p, size_t len)
@@ -182,66 +235,38 @@ out_push(struct net_ctx *c, const unsigned char *p, size_t len)
 	return 0;
 }
 
+/* ---- bd_telopt callbacks (run on the net thread) ---------------------- */
+
 static void
-tn_reply(struct net_ctx *c, unsigned char cmd, unsigned char opt)
+telopt_data(const unsigned char *p, size_t len, void *arg)
 {
-	unsigned char r[3] = { TN_IAC, cmd, opt };
-	out_push(c, r, sizeof r);
+	struct net_ctx *c = arg;
+	pend_put(c, MSG_DATA, p, (uint32_t)len);
 }
 
-/* Filter raw socket bytes: strip/answer telnet negotiation, push the clean
- * remainder to the UI as one DATA frame. Caller guarantees rx has room. */
 static void
-tn_feed(struct net_ctx *c, const unsigned char *p, int len)
+telopt_xmit(const unsigned char *p, size_t len, void *arg)
 {
-	unsigned char clean[CHUNK];
-	int cn = 0, i;
-
-	for (i = 0; i < len; i++) {
-		unsigned char b = p[i];
-		switch (c->ts) {
-		case TS_DATA:
-			if (b == TN_IAC)
-				c->ts = TS_IAC;
-			else
-				clean[cn++] = b;
-			break;
-		case TS_IAC:
-			if (b == TN_IAC) {
-				clean[cn++] = TN_IAC;
-				c->ts = TS_DATA;
-			} else if (b == TN_WILL || b == TN_WONT ||
-			           b == TN_DO || b == TN_DONT) {
-				c->tn_cmd = b;
-				c->ts = TS_OPT;
-			} else if (b == TN_SB) {
-				c->ts = TS_SB;
-			} else {
-				c->ts = TS_DATA;        /* GA/EOR/NOP/... */
-			}
-			break;
-		case TS_OPT:
-			if (c->tn_cmd == TN_DO)
-				tn_reply(c, TN_WONT, b);
-			else if (c->tn_cmd == TN_WILL)
-				tn_reply(c, TN_DONT, b);
-			c->ts = TS_DATA;
-			break;
-		case TS_SB:
-			if (b == TN_IAC)
-				c->ts = TS_SB_IAC;
-			break;
-		case TS_SB_IAC:
-			if (b == TN_SE)
-				c->ts = TS_DATA;
-			else
-				c->ts = TS_SB;
-			break;
-		}
-	}
-	if (cn)
-		ring_put(c->n->rx, MSG_DATA, clean, (uint32_t)cn);
+	struct net_ctx *c = arg;
+	out_push(c, p, len);
 }
+
+static void
+telopt_prompt(void *arg)
+{
+	struct net_ctx *c = arg;
+	pend_put(c, MSG_PROMPT, NULL, 0);
+}
+
+static void
+telopt_echo(int suppress, void *arg)
+{
+	struct net_ctx *c = arg;
+	unsigned char b = suppress ? 1 : 0;
+	pend_put(c, MSG_ECHO, &b, 1);
+}
+
+/* ---- net thread: I/O -------------------------------------------------- */
 
 static int
 set_nonblock(int fd)
@@ -284,7 +309,6 @@ close_socket(struct net_ctx *c)
 	c->connecting = 0;
 	c->want = 0;
 	c->rx_blocked = 0;
-	c->ts = TS_DATA;
 	c->out_len = c->out_sent = 0;
 }
 
@@ -299,8 +323,9 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 	int rc;
 
 	close_socket(c);
+	bd_telopt_reset(c->telopt);
+	c->pend_len = c->pend_sent = 0;
 
-	/* payload is host '\0' port '\0' */
 	host = (const char *)payload;
 	hl = strnlen(host, len);
 	if (hl >= len) {
@@ -344,7 +369,7 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 			iox_fd_add(c->loop, fd, IOX_WRITE, sock_cb, c);
 			c->want = IOX_WRITE;
 			freeaddrinfo(res);
-			return;         /* CONNECTED/ERROR follows in sock_cb */
+			return;
 		}
 		close(fd);
 	}
@@ -358,7 +383,7 @@ do_send(struct net_ctx *c, const unsigned char *p, uint32_t len)
 	uint32_t i, start;
 
 	if (c->fd < 0 || c->connecting)
-		return;         /* not connected; drop */
+		return;
 
 	/* escape 0xFF -> IAC IAC so payload is not read as telnet commands */
 	for (i = 0, start = 0; i < len; i++) {
@@ -402,21 +427,25 @@ do_read(struct net_ctx *c)
 {
 	for (;;) {
 		unsigned char buf[CHUNK];
-		size_t room = bd_ring_write_avail(c->n->rx);
-		size_t want;
 		ssize_t r;
 
-		if (room <= sizeof(uint8_t) + sizeof(uint32_t)) {
-			c->rx_blocked = 1;      /* no room for even a 1-byte frame */
+		/* flush staged records before pulling more off the socket */
+		if (c->pend_sent < c->pend_len) {
+			drain_pend(c);
+			if (c->pend_sent < c->pend_len)
+				return;         /* rx still full */
+		}
+		if (bd_ring_write_avail(c->n->rx) == 0) {
+			c->rx_blocked = 1;
 			return;
 		}
-		want = room - 5;
-		if (want > sizeof buf)
-			want = sizeof buf;
 
-		r = recv(c->fd, buf, want, 0);
+		r = recv(c->fd, buf, sizeof buf, 0);
 		if (r > 0) {
-			tn_feed(c, buf, (int)r);
+			bd_telopt_recv(c->telopt, buf, (size_t)r);
+			drain_pend(c);
+			if (c->pend_sent < c->pend_len)
+				return;         /* rx filled mid-record */
 			continue;
 		}
 		if (r == 0) {
@@ -465,7 +494,6 @@ sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 		update_interest(c);
 }
 
-/* Drain the wake pipe, apply queued commands, and relieve read backpressure. */
 static void
 wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 {
@@ -494,6 +522,19 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 				push_state(c, BD_NET_CLOSED, NULL);
 			}
 			break;
+		case MSG_WINSIZE:
+			if (len >= 4) {
+				uint16_t cols, rows;
+				memcpy(&cols, buf, 2);
+				memcpy(&rows, buf + 2, 2);
+				bd_telopt_set_winsize(c->telopt, cols, rows);
+				update_interest(c);    /* NAWS may have queued out */
+			}
+			break;
+		case MSG_TERMTYPE:
+			buf[len < sizeof buf ? len : sizeof buf - 1] = '\0';
+			bd_telopt_set_termtype(c->telopt, (char *)buf);
+			break;
 		}
 	}
 
@@ -502,11 +543,44 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 		return;
 	}
 
-	/* The UI may have drained rx; re-enable reads if we had paused them. */
-	if (c->rx_blocked &&
-	    bd_ring_write_avail(c->n->rx) > sizeof(uint8_t) + sizeof(uint32_t)) {
-		c->rx_blocked = 0;
-		update_interest(c);
+	/* UI may have drained rx: flush staged records and resume reading */
+	if (c->rx_blocked) {
+		drain_pend(c);
+		if (!c->rx_blocked)
+			update_interest(c);
+	}
+}
+
+static void
+net_thread_main_inner(bd_net *n, struct net_ctx *c)
+{
+	bd_telopt_cb tcb;
+
+	memset(c, 0, sizeof *c);
+	c->n = n;
+	c->fd = -1;
+
+	tcb.data = telopt_data;
+	tcb.xmit = telopt_xmit;
+	tcb.prompt = telopt_prompt;
+	tcb.echo = telopt_echo;
+	tcb.arg = c;
+
+	c->loop = iox_loop_new();
+	if (!c->loop)
+		return;
+	c->telopt = bd_telopt_new(&tcb);
+	if (!c->telopt) {
+		iox_loop_free(c->loop);
+		c->loop = NULL;
+		return;
+	}
+	iox_fd_add(c->loop, n->wake_r, IOX_READ, wake_cb, c);
+	iox_loop_start(c->loop);
+
+	while (!c->quit) {
+		if (iox_loop_poll(c->loop) < 0 && errno != EINTR)
+			break;
 	}
 }
 
@@ -516,25 +590,13 @@ net_thread_main(void *arg)
 	bd_net *n = arg;
 	struct net_ctx c;
 
-	memset(&c, 0, sizeof c);
-	c.n = n;
-	c.fd = -1;
-	c.ts = TS_DATA;
-
-	c.loop = iox_loop_new();
-	if (!c.loop)
-		return NULL;
-	iox_fd_add(c.loop, n->wake_r, IOX_READ, wake_cb, &c);
-	iox_loop_start(c.loop);
-
-	while (!c.quit) {
-		if (iox_loop_poll(c.loop) < 0 && errno != EINTR)
-			break;
-	}
+	net_thread_main_inner(n, &c);
 
 	if (c.fd >= 0)
 		close(c.fd);
 	free(c.out);
+	free(c.pend);
+	bd_telopt_free(c.telopt);
 	iox_loop_free(c.loop);
 	return NULL;
 }
@@ -608,6 +670,20 @@ bd_net_free(bd_net *n)
 	free(n);
 }
 
+void
+bd_net_set_echo_cb(bd_net *n, bd_net_echo_cb cb)
+{
+	if (n)
+		n->on_echo = cb;
+}
+
+void
+bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb)
+{
+	if (n)
+		n->on_prompt = cb;
+}
+
 int
 bd_net_connect(bd_net *n, const char *host, const char *port)
 {
@@ -644,7 +720,7 @@ bd_net_send(bd_net *n, const void *data, int len)
 		uint32_t chunk = left > CHUNK ? CHUNK : (uint32_t)left;
 		if (ring_put(n->tx, MSG_SEND, p, chunk) < 0) {
 			wake(n);
-			return len - left;      /* tx full: partial accept */
+			return len - left;
 		}
 		p += chunk;
 		left -= (int)chunk;
@@ -663,6 +739,34 @@ bd_net_close(bd_net *n)
 }
 
 void
+bd_net_set_termtype(bd_net *n, const char *type)
+{
+	size_t l;
+
+	if (!n || !type)
+		return;
+	l = strlen(type);
+	if (l > 63)
+		l = 63;
+	if (ring_put(n->tx, MSG_TERMTYPE, type, (uint32_t)l) == 0)
+		wake(n);
+}
+
+void
+bd_net_set_winsize(bd_net *n, int cols, int rows)
+{
+	unsigned char p[4];
+	uint16_t c = (uint16_t)cols, r = (uint16_t)rows;
+
+	if (!n || cols <= 0 || rows <= 0)
+		return;
+	memcpy(p, &c, 2);
+	memcpy(p + 2, &r, 2);
+	if (ring_put(n->tx, MSG_WINSIZE, p, sizeof p) == 0)
+		wake(n);
+}
+
+void
 bd_net_poll(bd_net *n)
 {
 	uint8_t type;
@@ -674,11 +778,13 @@ bd_net_poll(bd_net *n)
 		return;
 
 	while (ring_get(n->rx, &type, buf, sizeof buf, &len)) {
-		if (type == MSG_DATA) {
+		switch (type) {
+		case MSG_DATA:
 			if (n->on_data)
 				n->on_data((const char *)buf, (int)len, n->arg);
 			got_data = 1;
-		} else if (type == MSG_STATE) {
+			break;
+		case MSG_STATE: {
 			bd_net_state st = (bd_net_state)buf[0];
 			char detail[201];
 			const char *msg = NULL;
@@ -692,6 +798,16 @@ bd_net_poll(bd_net *n)
 			}
 			if (n->on_state)
 				n->on_state(st, msg, n->arg);
+			break;
+		}
+		case MSG_PROMPT:
+			if (n->on_prompt)
+				n->on_prompt(n->arg);
+			break;
+		case MSG_ECHO:
+			if (n->on_echo)
+				n->on_echo(len >= 1 && buf[0], n->arg);
+			break;
 		}
 	}
 

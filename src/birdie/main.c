@@ -43,6 +43,15 @@ net_on_state(bd_net_state state, const char *msg, void *arg)
 		bd_terminal_write(terminal, "\033[31m*** disconnected\033[0m\r\n", -1);
 }
 
+/* Server took over echo (telnet ECHO): mask the command line for password
+ * entry, and restore it when the server releases echo. */
+static void
+net_on_echo(int suppress, void *arg)
+{
+	(void)arg;
+	bd_set(input_line, BD_PASSWORD_B, suppress, BD_END);
+}
+
 static void
 on_connect(bd_id id, void *arg)
 {
@@ -112,6 +121,9 @@ init(void)
 	bd_gui_init(&bd_backend_ludica, NULL);
 
 	net = bd_net_new(net_on_data, net_on_state, NULL);
+	bd_net_set_echo_cb(net, net_on_echo);
+	bd_net_set_termtype(net, "birdie/0.0");
+	bd_net_set_winsize(net, 80, 24);   /* matches the terminal grid */
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",
