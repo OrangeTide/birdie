@@ -666,6 +666,18 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=0, .y=0 });
 	bd_gui_event(&tabx);
 	check("Tab reaches the BD_TEXT field", bd_focused() == tedit);
+
+	/* password mode: masks on screen but keeps the real buffer editable */
+	bd_set(tedit, BD_PASSWORD_B, 1, BD_END);
+	check("BD_PASSWORD_B reads back", bd_get_i(tedit, BD_PASSWORD_B) == 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
+	bd_set(tedit, BD_LABEL_S, "", BD_END);
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='p' });
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='w' });
+	check("typing into a masked field still updates the real buffer",
+	    strcmp(bd_get_s(tedit, BD_LABEL_S), "pw") == 0);
+	bd_gui_render();   /* exercise the masked render path (must not crash) */
 	bd_gui_cleanup();
 
 	/* ---- BD_MULTILINE multi-line editor ---- */

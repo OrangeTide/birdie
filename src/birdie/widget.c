@@ -86,6 +86,7 @@ struct widget {
 	int text_len;
 	int cursor;
 	int sel_anchor;
+	int password;           /* text field: render masked */
 	float scroll_x;
 	float scroll_y;         /* BD_MULTILINE vertical scroll */
 
@@ -596,6 +597,7 @@ apply_b(struct widget *w, int attr, int val)
 	case BD_VISIBLE_B:  w->visible = val; break;
 	case BD_ENABLED_B:  w->enabled = val; break;
 	case BD_MENU_PIN_B: w->menu_pinned = val; break;
+	case BD_PASSWORD_B: w->password = val; break;
 	}
 }
 
@@ -968,6 +970,7 @@ bd_get_i(bd_id id, int attr)
 	case BD_VISIBLE_B:  return w->visible;
 	case BD_ENABLED_B:  return w->enabled;
 	case BD_MENU_PIN_B: return w->menu_pinned;
+	case BD_PASSWORD_B: return w->password;
 	}
 	return 0;
 }
@@ -1185,8 +1188,21 @@ render_widget(bd_id id)
 		float vis_x = (float)(w->x + w->pad);
 		float vis_w = (float)(w->w - 2 * w->pad);
 
+		/* password fields render a masked copy; editing stays on the
+		 * real buffer (mask is per byte, so ASCII maps 1:1) */
+		char masked[sizeof w->text_buf];
+		const char *disp = w->text_buf;
+		if (w->password && w->text_len > 0) {
+			int ml = w->text_len;
+			if (ml > (int)sizeof masked - 1)
+				ml = (int)sizeof masked - 1;
+			memset(masked, '*', (size_t)ml);
+			masked[ml] = '\0';
+			disp = masked;
+		}
+
 		/* keep cursor in view */
-		float cursor_px = input_text_px(w->text_buf, w->cursor);
+		float cursor_px = input_text_px(disp, w->cursor);
 		if (cursor_px - w->scroll_x > vis_w)
 			w->scroll_x = cursor_px - vis_w;
 		if (cursor_px - w->scroll_x < 0.0f)
@@ -1201,15 +1217,15 @@ render_widget(bd_id id)
 			    ? w->sel_anchor : w->cursor;
 			int s1 = w->sel_anchor < w->cursor
 			    ? w->cursor : w->sel_anchor;
-			float sx0 = input_text_px(w->text_buf, s0) - w->scroll_x;
-			float sx1 = input_text_px(w->text_buf, s1) - w->scroll_x;
+			float sx0 = input_text_px(disp, s0) - w->scroll_x;
+			float sx1 = input_text_px(disp, s1) - w->scroll_x;
 			fill_rect((int)(vis_x + sx0), w->y + 2,
 			    (int)(sx1 - sx0), w->h - 4, theme.select);
 		}
 
 		/* text */
 		if (w->text_len > 0)
-			queue_text(w->text_buf,
+			queue_text(disp,
 			    vis_x - w->scroll_x, base_y, w->fg);
 
 		/* IME preedit: composing text shown inline at the caret, underlined */
