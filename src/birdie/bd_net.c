@@ -41,6 +41,14 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <psa/crypto.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/x509_crt.h>
+#include <mbedtls/net_sockets.h>
+#include <mbedtls/error.h>
+
 #define TN_IAC  255
 
 /* tx message types (UI -> net) */
@@ -98,6 +106,22 @@ struct net_ctx {
 
 	unsigned char *pend;    /* framed rx records not yet in the ring */
 	size_t pend_len, pend_cap, pend_sent;
+
+	/* TLS (per connection) */
+	int tls;                /* this connection is TLS */
+	int handshaking;        /* TLS handshake in progress */
+	unsigned hs_want;       /* iox interest the handshake is blocked on */
+	char host[256];         /* for SNI / certificate verification */
+	mbedtls_ssl_context ssl;
+	int ssl_inited;
+
+	/* TLS (shared across connections, set up once on the thread) */
+	int tls_ready;
+	int tls_insecure;       /* BIRDIE_TLS_INSECURE: skip cert verification */
+	mbedtls_ssl_config conf;
+	mbedtls_ctr_drbg_context drbg;
+	mbedtls_entropy_context entropy;
+	mbedtls_x509_crt cacert;
 };
 
 /* ---- framed-message helpers over a ring -------------------------------- */
@@ -286,6 +310,8 @@ update_interest(struct net_ctx *c)
 		return;
 	if (c->connecting) {
 		ev = IOX_WRITE;
+	} else if (c->handshaking) {
+		ev = c->hs_want;        /* whatever the TLS handshake is waiting on */
 	} else {
 		if (!c->rx_blocked)
 			ev |= IOX_READ;
@@ -301,18 +327,113 @@ update_interest(struct net_ctx *c)
 static void
 close_socket(struct net_ctx *c)
 {
+	if (c->ssl_inited) {
+		mbedtls_ssl_free(&c->ssl);
+		c->ssl_inited = 0;
+	}
 	if (c->fd >= 0) {
 		iox_fd_remove(c->loop, c->fd);
 		close(c->fd);
 		c->fd = -1;
 	}
 	c->connecting = 0;
+	c->handshaking = 0;
 	c->want = 0;
+	c->hs_want = 0;
 	c->rx_blocked = 0;
 	c->out_len = c->out_sent = 0;
 }
 
 static void sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg);
+
+/* ---- net thread: TLS -------------------------------------------------- */
+
+/* mbedTLS BIO over the non-blocking socket. EAGAIN maps to WANT_READ/WRITE so
+ * the handshake and reads/writes resume when the poll loop fires again. */
+static int
+ssl_bio_send(void *ctx, const unsigned char *buf, size_t len)
+{
+	struct net_ctx *c = ctx;
+	ssize_t w = send(c->fd, buf, len, 0);
+	if (w >= 0)
+		return (int)w;
+	if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+		return MBEDTLS_ERR_SSL_WANT_WRITE;
+	return MBEDTLS_ERR_NET_SEND_FAILED;
+}
+
+static int
+ssl_bio_recv(void *ctx, unsigned char *buf, size_t len)
+{
+	struct net_ctx *c = ctx;
+	ssize_t r = recv(c->fd, buf, len, 0);
+	if (r > 0)
+		return (int)r;
+	if (r == 0)
+		return 0;               /* EOF: mbedtls surfaces it to ssl_read */
+	if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+		return MBEDTLS_ERR_SSL_WANT_READ;
+	return MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
+/* Drive the TLS handshake one step. On WANT_READ/WRITE it parks until the next
+ * socket event; on success the connection becomes ready; otherwise it errors. */
+static void
+do_handshake(struct net_ctx *c)
+{
+	int rc = mbedtls_ssl_handshake(&c->ssl);
+
+	if (rc == MBEDTLS_ERR_SSL_WANT_READ) {
+		c->hs_want = IOX_READ;
+		update_interest(c);
+		return;
+	}
+	if (rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
+		c->hs_want = IOX_WRITE;
+		update_interest(c);
+		return;
+	}
+	if (rc != 0) {
+		char msg[96];
+		mbedtls_strerror(rc, msg, sizeof msg);
+		close_socket(c);
+		push_state(c, BD_NET_ERROR, msg);
+		return;
+	}
+	/* handshake complete */
+	c->handshaking = 0;
+	c->hs_want = 0;
+	update_interest(c);             /* back to READ + pending writes */
+	push_state(c, BD_NET_CONNECTED, NULL);
+}
+
+/* Begin TLS on a freshly connected socket. */
+static void
+start_tls(struct net_ctx *c)
+{
+	int rc;
+
+	if (!c->tls_ready) {
+		close_socket(c);
+		push_state(c, BD_NET_ERROR, "TLS unavailable");
+		return;
+	}
+	mbedtls_ssl_init(&c->ssl);
+	c->ssl_inited = 1;
+	rc = mbedtls_ssl_setup(&c->ssl, &c->conf);
+	if (rc == 0)
+		rc = mbedtls_ssl_set_hostname(&c->ssl, c->host);
+	if (rc != 0) {
+		char msg[96];
+		mbedtls_strerror(rc, msg, sizeof msg);
+		close_socket(c);
+		push_state(c, BD_NET_ERROR, msg);
+		return;
+	}
+	mbedtls_ssl_set_bio(&c->ssl, c, ssl_bio_send, ssl_bio_recv, NULL);
+	c->handshaking = 1;
+	do_handshake(c);
+}
 
 static void
 do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
@@ -326,13 +447,20 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 	bd_telopt_reset(c->telopt);
 	c->pend_len = c->pend_sent = 0;
 
-	host = (const char *)payload;
-	hl = strnlen(host, len);
-	if (hl >= len) {
+	/* payload: [u8 tls] host '\0' port '\0' */
+	if (len < 1) {
+		push_state(c, BD_NET_ERROR, "bad connect target");
+		return;
+	}
+	c->tls = payload[0] ? 1 : 0;
+	host = (const char *)payload + 1;
+	hl = strnlen(host, len - 1);
+	if (hl >= len - 1) {
 		push_state(c, BD_NET_ERROR, "bad connect target");
 		return;
 	}
 	port = host + hl + 1;
+	snprintf(c->host, sizeof c->host, "%s", host);
 
 	push_state(c, BD_NET_CONNECTING, NULL);
 
@@ -360,7 +488,10 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 			iox_fd_add(c->loop, fd, IOX_READ, sock_cb, c);
 			c->want = IOX_READ;
 			freeaddrinfo(res);
-			push_state(c, BD_NET_CONNECTED, NULL);
+			if (c->tls)
+				start_tls(c);
+			else
+				push_state(c, BD_NET_CONNECTED, NULL);
 			return;
 		}
 		if (rc < 0 && errno == EINPROGRESS) {
@@ -400,22 +531,77 @@ do_send(struct net_ctx *c, const unsigned char *p, uint32_t len)
 	update_interest(c);
 }
 
+/* Transport read/write over plain TCP or TLS. Return >0 bytes moved, 0 on
+ * orderly peer close, -1 if the operation would block (retry on next event),
+ * or -2 on a fatal error (emsg filled). */
+static ssize_t
+transport_read(struct net_ctx *c, unsigned char *buf, size_t len,
+               char *emsg, size_t ecap)
+{
+	if (c->tls) {
+		int r = mbedtls_ssl_read(&c->ssl, buf, len);
+		if (r > 0)
+			return r;
+		if (r == MBEDTLS_ERR_SSL_WANT_READ ||
+		    r == MBEDTLS_ERR_SSL_WANT_WRITE)
+			return -1;
+		if (r == 0 || r == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+			return 0;
+		mbedtls_strerror(r, emsg, ecap);
+		return -2;
+	} else {
+		ssize_t r = recv(c->fd, buf, len, 0);
+		if (r > 0)
+			return r;
+		if (r == 0)
+			return 0;
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+			return -1;
+		snprintf(emsg, ecap, "%s", strerror(errno));
+		return -2;
+	}
+}
+
+static int
+transport_write(struct net_ctx *c, const unsigned char *buf, size_t len,
+                char *emsg, size_t ecap)
+{
+	if (c->tls) {
+		int w = mbedtls_ssl_write(&c->ssl, buf, len);
+		if (w > 0)
+			return w;
+		if (w == MBEDTLS_ERR_SSL_WANT_READ ||
+		    w == MBEDTLS_ERR_SSL_WANT_WRITE)
+			return -1;
+		mbedtls_strerror(w, emsg, ecap);
+		return -2;
+	} else {
+		ssize_t w = send(c->fd, buf, len, 0);
+		if (w > 0)
+			return (int)w;
+		if (w == 0 || errno == EAGAIN || errno == EWOULDBLOCK ||
+		    errno == EINTR)
+			return -1;
+		snprintf(emsg, ecap, "%s", strerror(errno));
+		return -2;
+	}
+}
+
 static void
 flush_out(struct net_ctx *c)
 {
 	while (c->out_sent < c->out_len) {
-		ssize_t w = send(c->fd, c->out + c->out_sent,
-		    c->out_len - c->out_sent, 0);
+		char emsg[96];
+		int w = transport_write(c, c->out + c->out_sent,
+		    c->out_len - c->out_sent, emsg, sizeof emsg);
 		if (w > 0) {
 			c->out_sent += (size_t)w;
 			continue;
 		}
-		if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			return;
-		if (w < 0 && errno == EINTR)
-			continue;
+		if (w == -1)
+			return;                 /* retry on next event */
 		close_socket(c);
-		push_state(c, BD_NET_ERROR, strerror(errno));
+		push_state(c, BD_NET_ERROR, emsg);
 		return;
 	}
 	if (c->out_sent == c->out_len)
@@ -427,6 +613,7 @@ do_read(struct net_ctx *c)
 {
 	for (;;) {
 		unsigned char buf[CHUNK];
+		char emsg[96];
 		ssize_t r;
 
 		/* flush staged records before pulling more off the socket */
@@ -440,7 +627,7 @@ do_read(struct net_ctx *c)
 			return;
 		}
 
-		r = recv(c->fd, buf, sizeof buf, 0);
+		r = transport_read(c, buf, sizeof buf, emsg, sizeof emsg);
 		if (r > 0) {
 			bd_telopt_recv(c->telopt, buf, (size_t)r);
 			drain_pend(c);
@@ -448,18 +635,16 @@ do_read(struct net_ctx *c)
 				return;         /* rx filled mid-record */
 			continue;
 		}
+		if (r == -1)
+			return;                 /* would block */
 		if (r == 0) {
 			close_socket(c);
 			push_state(c, BD_NET_CLOSED,
 			    "connection closed by peer");
 			return;
 		}
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return;
-		if (errno == EINTR)
-			continue;
-		close_socket(c);
-		push_state(c, BD_NET_ERROR, strerror(errno));
+		close_socket(c);                /* r == -2 */
+		push_state(c, BD_NET_ERROR, emsg);
 		return;
 	}
 }
@@ -481,8 +666,17 @@ sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 			return;
 		}
 		c->connecting = 0;
-		update_interest(c);
-		push_state(c, BD_NET_CONNECTED, NULL);
+		if (c->tls)
+			start_tls(c);           /* CONNECTED follows after handshake */
+		else {
+			update_interest(c);
+			push_state(c, BD_NET_CONNECTED, NULL);
+		}
+		return;
+	}
+
+	if (c->handshaking) {
+		do_handshake(c);
 		return;
 	}
 
@@ -551,6 +745,72 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 	}
 }
 
+/* Candidate CA bundle locations, tried in order. The bundled Mozilla list at
+ * share/birdie/cacert.pem is a packaging step (deferred); for now an explicit
+ * override and the host's system bundle are honored. */
+static const char *ca_paths[] = {
+	NULL,                                   /* slot 0: $BIRDIE_CACERT */
+	"/etc/ssl/certs/ca-certificates.crt",   /* Debian/Ubuntu */
+	"/etc/pki/tls/certs/ca-bundle.crt",     /* RHEL/Fedora */
+	"/etc/ssl/cert.pem",                    /* BSD/macOS */
+};
+
+/* One-time TLS setup for the thread: RNG, trust store, client config. Leaves
+ * c->tls_ready set on success; a failed connect reports if TLS is unavailable. */
+static void
+tls_global_init(struct net_ctx *c)
+{
+	const char *pers = "birdie-net";
+	size_t i;
+	int rc, loaded = 0;
+
+	c->tls_insecure = getenv("BIRDIE_TLS_INSECURE") != NULL;
+
+	if (psa_crypto_init() != PSA_SUCCESS)     /* required for TLS 1.3 */
+		return;
+
+	mbedtls_entropy_init(&c->entropy);
+	mbedtls_ctr_drbg_init(&c->drbg);
+	mbedtls_x509_crt_init(&c->cacert);
+	mbedtls_ssl_config_init(&c->conf);
+
+	rc = mbedtls_ctr_drbg_seed(&c->drbg, mbedtls_entropy_func, &c->entropy,
+	    (const unsigned char *)pers, strlen(pers));
+	if (rc != 0)
+		return;
+
+	ca_paths[0] = getenv("BIRDIE_CACERT");
+	for (i = 0; i < sizeof ca_paths / sizeof ca_paths[0]; i++) {
+		if (ca_paths[i] &&
+		    mbedtls_x509_crt_parse_file(&c->cacert, ca_paths[i]) == 0) {
+			loaded = 1;
+			break;
+		}
+	}
+
+	if (mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT,
+	    MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+		return;
+	mbedtls_ssl_conf_authmode(&c->conf, c->tls_insecure
+	    ? MBEDTLS_SSL_VERIFY_NONE : MBEDTLS_SSL_VERIFY_REQUIRED);
+	if (loaded)
+		mbedtls_ssl_conf_ca_chain(&c->conf, &c->cacert, NULL);
+	mbedtls_ssl_conf_rng(&c->conf, mbedtls_ctr_drbg_random, &c->drbg);
+
+	c->tls_ready = 1;
+}
+
+static void
+tls_global_free(struct net_ctx *c)
+{
+	if (!c->tls_ready)
+		return;
+	mbedtls_ssl_config_free(&c->conf);
+	mbedtls_x509_crt_free(&c->cacert);
+	mbedtls_ctr_drbg_free(&c->drbg);
+	mbedtls_entropy_free(&c->entropy);
+}
+
 static void
 net_thread_main_inner(bd_net *n, struct net_ctx *c)
 {
@@ -559,6 +819,7 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	memset(c, 0, sizeof *c);
 	c->n = n;
 	c->fd = -1;
+	tls_global_init(c);
 
 	tcb.data = telopt_data;
 	tcb.xmit = telopt_xmit;
@@ -592,8 +853,8 @@ net_thread_main(void *arg)
 
 	net_thread_main_inner(n, &c);
 
-	if (c.fd >= 0)
-		close(c.fd);
+	close_socket(&c);               /* frees ssl + closes fd if open */
+	tls_global_free(&c);
 	free(c.out);
 	free(c.pend);
 	bd_telopt_free(c.telopt);
@@ -685,7 +946,7 @@ bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb)
 }
 
 int
-bd_net_connect(bd_net *n, const char *host, const char *port)
+bd_net_connect(bd_net *n, const char *host, const char *port, int tls)
 {
 	unsigned char payload[512];
 	size_t hl, pl;
@@ -694,12 +955,13 @@ bd_net_connect(bd_net *n, const char *host, const char *port)
 		return -1;
 	hl = strlen(host);
 	pl = strlen(port);
-	if (hl + pl + 2 > sizeof payload)
+	if (1 + hl + pl + 2 > sizeof payload)
 		return -1;
-	memcpy(payload, host, hl + 1);
-	memcpy(payload + hl + 1, port, pl + 1);
+	payload[0] = tls ? 1 : 0;
+	memcpy(payload + 1, host, hl + 1);
+	memcpy(payload + 1 + hl + 1, port, pl + 1);
 
-	if (ring_put(n->tx, MSG_CONNECT, payload, (uint32_t)(hl + pl + 2)) < 0)
+	if (ring_put(n->tx, MSG_CONNECT, payload, (uint32_t)(1 + hl + pl + 2)) < 0)
 		return -1;
 	wake(n);
 	return 0;

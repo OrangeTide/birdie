@@ -63,12 +63,13 @@ on_connect(bd_id id, void *arg)
 		host = "localhost";
 	if (!port)
 		port = "4000";
+	int tls = getenv("BIRDIE_TLS") != NULL;
 
 	char line[160];
-	snprintf(line, sizeof line,
-	    "\033[33m*** connecting to %s:%s\033[0m\r\n", host, port);
+	snprintf(line, sizeof line, "\033[33m*** connecting to %s:%s%s\033[0m\r\n",
+	    host, port, tls ? " (TLS)" : "");
 	bd_terminal_write(terminal, line, -1);
-	bd_net_connect(net, host, port);
+	bd_net_connect(net, host, port, tls);
 }
 
 static void

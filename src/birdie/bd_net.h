@@ -52,10 +52,12 @@ bd_net *bd_net_new(bd_net_data_cb on_data, bd_net_state_cb on_state, void *arg);
 void bd_net_free(bd_net *n);
 
 /* Begin connecting to host:port (both as strings; port may be a service name).
- * Returns 0 if the attempt started (state becomes BD_NET_CONNECTING), -1 if it
- * could not even begin. Resolution failures surface later via the state
- * callback. A connection already in progress is closed first. */
-int bd_net_connect(bd_net *n, const char *host, const char *port);
+ * If tls != 0, run the telnet stream over TLS (certificate verified against
+ * the trust store; SNI/verification use host). Returns 0 if the attempt
+ * started (state becomes BD_NET_CONNECTING), -1 if it could not even begin.
+ * Resolution and handshake failures surface later via the state callback.
+ * A connection already in progress is closed first. */
+int bd_net_connect(bd_net *n, const char *host, const char *port, int tls);
 
 /* Drive the connection: complete a pending connect, flush queued output, and
  * read available input (delivered through the data callback). Call once per

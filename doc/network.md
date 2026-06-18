@@ -177,11 +177,17 @@ and `src/birdie/bd_ring.c`:
   ring's free space and drops read interest (`iox_fd_mod`), resuming once
   the UI has drained. No bytes are dropped.
 
-Built today: plain TCP plus the minimal telnet filter (refuse every option,
-strip IAC). Not yet on the thread, in roughly the intended order: the MTH
-telopt set behind the `telopt` wrapper, TLS, Happy Eyeballs, reconnect, and
-encoding transcode. The single network thread multiplexing several
-connections is the target; today `bd_net` handles one connection at a time.
+Built today: plain TCP and TLS, the core telnet options (bd_telopt:
+TTYPE/MTTS, NAWS, NEW_ENVIRON, CHARSET, SGA, ECHO, EOR/GA), and password
+masking driven by ECHO. TLS runs the telnet stream over an mbedTLS BIO with
+the handshake driven non-blocking by the same poll loop; the telnet layer is
+unaware TLS is underneath. `bd_net_connect()` takes a `tls` flag; the trust
+store is `$BIRDIE_CACERT` then the host's system CA bundle, with
+`BIRDIE_TLS_INSECURE` to skip verification for testing. Not yet: the bundled
+Mozilla `cacert.pem` (a packaging step), the MTH extension set (GMCP/MSDP/
+MSSP/MCCP) behind the wrapper, Happy Eyeballs, reconnect, and encoding
+transcode. The single network thread multiplexing several connections is the
+target; today `bd_net` handles one connection at a time.
 
 ## Encoding
 
