@@ -29,6 +29,7 @@
 #include "bd_telopt.h"
 #include "iox_loop.h"
 #include "iox_fd.h"
+#include "iox_timer.h"
 
 #include <sys/socket.h>
 #include <netdb.h>
@@ -75,6 +76,9 @@ enum {
 #define TX_CAP   (1u << 16)     /* 64 KiB command buffer */
 #define CHUNK    4096
 
+#define RECONNECT_BASE_MS  1000     /* first auto-reconnect delay */
+#define RECONNECT_MAX_MS  60000     /* exponential backoff ceiling */
+
 struct bd_net {
 	bd_net_data_cb on_data;
 	bd_net_state_cb on_state;
@@ -85,6 +89,7 @@ struct bd_net {
 
 	_Atomic int state;
 	_Atomic int shutdown;
+	_Atomic int autoreconnect;      /* 1 = auto-reconnect on unexpected drop */
 
 	bd_ring *rx;            /* net -> UI */
 	bd_ring *tx;            /* UI -> net */
@@ -120,10 +125,17 @@ struct net_ctx {
 	size_t cin_len, cin_pos;
 
 	/* TLS (per connection) */
+	/* reconnect target + backoff */
+	int have_target;        /* host/port/tls below are valid */
+	int user_closed;        /* last close was user-initiated: no reconnect */
+	char port[64];
+	int backoff_ms;         /* next auto-reconnect delay */
+	int reconnect_timer;    /* pending reconnect timer id, or -1 */
+
 	int tls;                /* this connection is TLS */
 	int handshaking;        /* TLS handshake in progress */
 	unsigned hs_want;       /* iox interest the handshake is blocked on */
-	char host[256];         /* for SNI / certificate verification */
+	char host[256];         /* target host; for SNI / cert verification */
 	mbedtls_ssl_context ssl;
 	int ssl_inited;
 
@@ -244,6 +256,8 @@ push_state(struct net_ctx *c, bd_net_state st, const char *msg)
 		len += (uint32_t)m;
 	}
 	atomic_store(&c->n->state, (int)st);
+	if (st == BD_NET_CONNECTED)
+		c->backoff_ms = RECONNECT_BASE_MS;      /* success resets backoff */
 	pend_put(c, MSG_STATE, frame, len);
 	drain_pend(c);
 }
@@ -394,6 +408,62 @@ close_socket(struct net_ctx *c)
 }
 
 static void sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg);
+static void connect_now(struct net_ctx *c);
+static void reconnect_cb(struct iox_loop *loop, void *arg);
+
+static void
+cancel_reconnect(struct net_ctx *c)
+{
+	if (c->reconnect_timer >= 0) {
+		iox_timer_remove(c->loop, c->reconnect_timer);
+		c->reconnect_timer = -1;
+	}
+}
+
+static int
+should_reconnect(struct net_ctx *c)
+{
+	return !c->user_closed && c->have_target && c->reconnect_timer < 0 &&
+	    !atomic_load(&c->n->shutdown) && atomic_load(&c->n->autoreconnect);
+}
+
+/* Tear down after an unexpected disconnect or failed (re)connect, report it,
+ * and arm an exponential-backoff reconnect unless it was user-initiated or
+ * auto-reconnect is off. */
+static void
+disconnect(struct net_ctx *c, bd_net_state st, const char *base)
+{
+	char msg[256];
+	int recon, delay;
+
+	close_socket(c);
+	recon = should_reconnect(c);
+	delay = c->backoff_ms;
+	if (!base)
+		base = "disconnected";
+	if (recon)
+		snprintf(msg, sizeof msg, "%s; reconnecting in %ds",
+		    base, (delay + 999) / 1000);
+	else
+		snprintf(msg, sizeof msg, "%s", base);
+	push_state(c, st, msg);
+
+	if (recon) {
+		c->reconnect_timer = iox_timer_add(c->loop, delay,
+		    reconnect_cb, c);
+		c->backoff_ms = c->backoff_ms > RECONNECT_MAX_MS / 2
+		    ? RECONNECT_MAX_MS : c->backoff_ms * 2;
+	}
+}
+
+static void
+reconnect_cb(struct iox_loop *loop, void *arg)
+{
+	struct net_ctx *c = arg;
+	(void)loop;
+	c->reconnect_timer = -1;
+	connect_now(c);
+}
 
 /* ---- net thread: TLS -------------------------------------------------- */
 
@@ -445,8 +515,7 @@ do_handshake(struct net_ctx *c)
 	if (rc != 0) {
 		char msg[96];
 		mbedtls_strerror(rc, msg, sizeof msg);
-		close_socket(c);
-		push_state(c, BD_NET_ERROR, msg);
+		disconnect(c, BD_NET_ERROR, msg);
 		return;
 	}
 	/* handshake complete */
@@ -463,8 +532,7 @@ start_tls(struct net_ctx *c)
 	int rc;
 
 	if (!c->tls_ready) {
-		close_socket(c);
-		push_state(c, BD_NET_ERROR, "TLS unavailable");
+		disconnect(c, BD_NET_ERROR, "TLS unavailable");
 		return;
 	}
 	mbedtls_ssl_init(&c->ssl);
@@ -475,8 +543,7 @@ start_tls(struct net_ctx *c)
 	if (rc != 0) {
 		char msg[96];
 		mbedtls_strerror(rc, msg, sizeof msg);
-		close_socket(c);
-		push_state(c, BD_NET_ERROR, msg);
+		disconnect(c, BD_NET_ERROR, msg);
 		return;
 	}
 	mbedtls_ssl_set_bio(&c->ssl, c, ssl_bio_send, ssl_bio_recv, NULL);
@@ -484,45 +551,25 @@ start_tls(struct net_ctx *c)
 	do_handshake(c);
 }
 
+/* Dial the stored target. Used for the initial connect and each reconnect. */
 static void
-do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
+connect_now(struct net_ctx *c)
 {
 	struct addrinfo hints, *res, *ai;
-	const char *host, *port;
-	size_t hl;
 	int rc;
 
 	close_socket(c);
 	bd_telopt_reset(c->telopt);
 	c->pend_len = c->pend_sent = 0;
 
-	/* payload: [u8 tls] host '\0' port '\0' */
-	if (len < 1) {
-		push_state(c, BD_NET_ERROR, "bad connect target");
-		return;
-	}
-	c->tls = payload[0] ? 1 : 0;
-	host = (const char *)payload + 1;
-	hl = strnlen(host, len - 1);
-	if (hl >= len - 1) {
-		push_state(c, BD_NET_ERROR, "bad connect target");
-		return;
-	}
-	port = host + hl + 1;
-	{
-		size_t hn = hl < sizeof c->host ? hl : sizeof c->host - 1;
-		memcpy(c->host, host, hn);
-		c->host[hn] = '\0';
-	}
-
 	push_state(c, BD_NET_CONNECTING, NULL);
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-	rc = getaddrinfo(host, port, &hints, &res);   /* blocking; net thread */
+	rc = getaddrinfo(c->host, c->port, &hints, &res); /* blocking; net thread */
 	if (rc != 0) {
-		push_state(c, BD_NET_ERROR, gai_strerror(rc));
+		disconnect(c, BD_NET_ERROR, gai_strerror(rc));
 		return;
 	}
 
@@ -558,7 +605,41 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 		close(fd);
 	}
 	freeaddrinfo(res);
-	push_state(c, BD_NET_ERROR, "could not connect");
+	disconnect(c, BD_NET_ERROR, "could not connect");
+}
+
+/* Handle a user CONNECT command: record the target, then dial. */
+static void
+do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
+{
+	const char *host, *port;
+	size_t hl, pl;
+
+	/* payload: [u8 tls] host '\0' port '\0' */
+	if (len < 1) {
+		push_state(c, BD_NET_ERROR, "bad connect target");
+		return;
+	}
+	host = (const char *)payload + 1;
+	hl = strnlen(host, len - 1);
+	if (hl >= len - 1) {
+		push_state(c, BD_NET_ERROR, "bad connect target");
+		return;
+	}
+	port = host + hl + 1;
+	pl = strnlen(port, len - 1 - hl - 1);
+
+	c->tls = payload[0] ? 1 : 0;
+	memcpy(c->host, host, hl < sizeof c->host ? hl : sizeof c->host - 1);
+	c->host[hl < sizeof c->host ? hl : sizeof c->host - 1] = '\0';
+	memcpy(c->port, port, pl < sizeof c->port ? pl : sizeof c->port - 1);
+	c->port[pl < sizeof c->port ? pl : sizeof c->port - 1] = '\0';
+	c->have_target = 1;
+	c->user_closed = 0;
+
+	cancel_reconnect(c);
+	c->backoff_ms = RECONNECT_BASE_MS;
+	connect_now(c);
 }
 
 static void
@@ -653,8 +734,7 @@ flush_out(struct net_ctx *c)
 		}
 		if (w == -1)
 			return;                 /* retry on next event */
-		close_socket(c);
-		push_state(c, BD_NET_ERROR, emsg);
+		disconnect(c, BD_NET_ERROR, emsg);
 		return;
 	}
 	if (c->out_sent == c->out_len)
@@ -705,14 +785,12 @@ do_read(struct net_ctx *c)
 				if (r == -1)
 					return;
 				if (r == 0) {
-					close_socket(c);
-					push_state(c, BD_NET_CLOSED,
+					disconnect(c, BD_NET_CLOSED,
 					    "connection closed by peer");
 					return;
 				}
 				if (r == -2) {
-					close_socket(c);
-					push_state(c, BD_NET_ERROR, emsg);
+					disconnect(c, BD_NET_ERROR, emsg);
 					return;
 				}
 				c->cin_len = (size_t)r;
@@ -742,14 +820,13 @@ do_read(struct net_ctx *c)
 				continue;       /* back to plain reads */
 			}
 			if (zr != MZ_OK && zr != MZ_BUF_ERROR) {
-				close_socket(c);
-				push_state(c, BD_NET_ERROR,
+				disconnect(c, BD_NET_ERROR,
 				    "decompression error");
 				return;
 			}
 			if (produced == 0 && c->zs.avail_in != 0) {
-				close_socket(c);       /* stalled: corrupt stream */
-				push_state(c, BD_NET_ERROR,
+				/* stalled: corrupt stream */
+				disconnect(c, BD_NET_ERROR,
 				    "decompression stalled");
 				return;
 			}
@@ -766,14 +843,12 @@ do_read(struct net_ctx *c)
 			if (r == -1)
 				return;
 			if (r == 0) {
-				close_socket(c);
-				push_state(c, BD_NET_CLOSED,
+				disconnect(c, BD_NET_CLOSED,
 				    "connection closed by peer");
 				return;
 			}
 			if (r == -2) {
-				close_socket(c);
-				push_state(c, BD_NET_ERROR, emsg);
+				disconnect(c, BD_NET_ERROR, emsg);
 				return;
 			}
 			consumed = bd_telopt_recv(c->telopt, buf, (size_t)r);
@@ -782,8 +857,7 @@ do_read(struct net_ctx *c)
 			if (c->want_inflate) {
 				size_t rem = (size_t)r - consumed;
 				if (start_inflate(c) != 0) {
-					close_socket(c);
-					push_state(c, BD_NET_ERROR,
+					disconnect(c, BD_NET_ERROR,
 					    "inflate init failed");
 					return;
 				}
@@ -810,8 +884,7 @@ sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 		int err = 0;
 		socklen_t el = sizeof err;
 		if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR, &err, &el) < 0 || err) {
-			close_socket(c);
-			push_state(c, BD_NET_ERROR,
+			disconnect(c, BD_NET_ERROR,
 			    err ? strerror(err) : "connect failed");
 			return;
 		}
@@ -861,7 +934,10 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 			do_send(c, buf, len);
 			break;
 		case MSG_CLOSE:
-			if (c->fd >= 0) {
+			c->user_closed = 1;
+			cancel_reconnect(c);    /* stop any pending retry */
+			if (c->fd >= 0 ||
+			    atomic_load(&c->n->state) != BD_NET_CLOSED) {
 				close_socket(c);
 				push_state(c, BD_NET_CLOSED, NULL);
 			}
@@ -883,6 +959,7 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 	}
 
 	if (atomic_load(&c->n->shutdown)) {
+		cancel_reconnect(c);
 		c->quit = 1;
 		return;
 	}
@@ -975,6 +1052,8 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	memset(c, 0, sizeof *c);
 	c->n = n;
 	c->fd = -1;
+	c->reconnect_timer = -1;
+	c->backoff_ms = RECONNECT_BASE_MS;
 	tls_global_init(c);
 
 	tcb.data = telopt_data;
@@ -1049,6 +1128,7 @@ bd_net_new(bd_net_data_cb on_data, bd_net_state_cb on_state, void *arg)
 	n->wake_r = n->wake_w = -1;
 	atomic_init(&n->state, BD_NET_IDLE);
 	atomic_init(&n->shutdown, 0);
+	atomic_init(&n->autoreconnect, 1);
 
 	n->rx = bd_ring_new(RX_CAP);
 	n->tx = bd_ring_new(TX_CAP);
@@ -1108,6 +1188,13 @@ bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb)
 {
 	if (n)
 		n->on_package = cb;
+}
+
+void
+bd_net_set_autoreconnect(bd_net *n, int enable)
+{
+	if (n)
+		atomic_store(&n->autoreconnect, enable ? 1 : 0);
 }
 
 int

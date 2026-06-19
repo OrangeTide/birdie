@@ -75,8 +75,15 @@ void bd_net_poll(bd_net *n);
  * in bd_net_poll(). */
 int bd_net_send(bd_net *n, const void *data, int len);
 
-/* Close the connection (user-initiated). Safe to call when already closed. */
+/* Close the connection (user-initiated). Safe to call when already closed.
+ * Cancels any pending auto-reconnect. */
 void bd_net_close(bd_net *n);
+
+/* Enable/disable automatic reconnect on unexpected disconnect (default on).
+ * On an unexpected drop or failed connect, bd_net redials with exponential
+ * backoff (1s doubling up to 60s); a successful connect resets the backoff,
+ * and a user-initiated close or connect cancels it. */
+void bd_net_set_autoreconnect(bd_net *n, int enable);
 
 /* Optional callbacks for telnet-driven events, delivered on the UI thread
  * during bd_net_poll() like the others. Set before connecting. */

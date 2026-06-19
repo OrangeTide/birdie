@@ -180,8 +180,9 @@ and `src/birdie/bd_ring.c`:
 Built today: plain TCP and TLS, the core telnet options (bd_telopt:
 TTYPE/MTTS, NAWS, NEW_ENVIRON, CHARSET, SGA, ECHO, EOR/GA), GMCP and MSDP
 (out-of-band packages routed by name; MSDP converted to JSON), MCCP2
-(server->client zlib decompression via vendored miniz), and password masking
-driven by ECHO. TLS runs the telnet stream over an mbedTLS BIO with
+(server->client zlib decompression via vendored miniz), auto-reconnect with
+exponential backoff, and password masking driven by ECHO. TLS runs the telnet
+stream over an mbedTLS BIO with
 the handshake driven non-blocking by the same poll loop; the telnet layer is
 unaware TLS is underneath. `bd_net_connect()` takes a `tls` flag; the trust
 store is `$BIRDIE_CACERT` then the host's system CA bundle, with
@@ -191,10 +192,16 @@ consumer); on GMCP enable the client sends `Core.Hello` + `Core.Supports.Set`.
 Done natively rather than via MTH, which is kept only as a standalone test
 oracle. MCCP2 inflates the server stream below the telnet layer: telopt sees
 the decompressed bytes and is unaware compression is underneath, the same way
-the telnet layer is unaware of TLS. Not yet: the bundled Mozilla `cacert.pem`
-(a packaging step), MSSP, MCCP3 (client->server compression), Happy Eyeballs,
-reconnect, and encoding transcode. The single network thread multiplexing several connections is the
-target; today `bd_net` handles one connection at a time.
+the telnet layer is unaware of TLS. Auto-reconnect redials the stored target
+on an unexpected drop or failed connect with exponential backoff (1s doubling
+to 60s, via a libiox timer); a successful connect resets the backoff, and a
+user close or connect cancels it (`bd_net_set_autoreconnect()` opts out, the
+eventual home of the profile's `autoreconnect` setting). Not yet: scrollback
+replay on reconnect (needs logging), the bundled Mozilla `cacert.pem` (a
+packaging step), MSSP, MCCP3 (client->server compression), Happy Eyeballs,
+keepalive, and encoding transcode. The single network thread multiplexing
+several connections is the target; today `bd_net` handles one connection at a
+time.
 
 ## Encoding
 
