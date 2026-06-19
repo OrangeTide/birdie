@@ -1,3 +1,48 @@
+- GUI widgets still needed (the v1.0 set is intentionally small; these are
+  the gaps the upcoming session/profile/trigger UI will hit). Existing form
+  controls today: BUTTON, TEXT, MULTILINE, LIST, SCROLLBAR, TAB_BAR, NOTICE,
+  MENU, and the value widgets (slider/knob/sliding-toggle/wheel/jog/xy-pad).
+
+  high priority (blocks dialogs already on the roadmap):
+  - drop-down / combo box (select one of N). Needed for: encoding picker,
+    trigger `type`, profile fields. The single most-requested missing control.
+  - checkbox (labeled boolean for forms). The export dialog spec
+    (doc/profiles.md) shows the column filter as per-column checkboxes. The
+    sliding-toggle value widget is the boolean primitive but reads as a
+    switch, not a form checkbox; decide whether to restyle it or add a
+    distinct BD_CHECKBOX.
+  - multi-column table / data grid (sortable rows). The MUD list (name/host/
+    port/tags) and the trigger `#list` are tabular; BD_LIST is single-column
+    only. Likely the biggest item here.
+  - radio group (mutually-exclusive options). For the import-collision
+    dialog (skip / rename / overwrite) and settings option sets. (A NOTICE
+    with buttons covers one-shot prompts; a radio group is for persistent
+    forms.)
+
+  medium priority (settings + trigger editor):
+  - numeric spinner / stepper. Exact small integers: port, timeouts, trigger
+    priority (0-9), tick seconds. (A slider is imprecise for these.)
+  - tree view. The dot-nestable trigger class tree (doc/triggers.md) and the
+    explorer list/details view (already deferred in doc/gui.md) both want it.
+  - group box / labeled fieldset, and a generic scroll-view container for
+    forms taller than their panel (LIST/MULTILINE scroll internally; there is
+    no general scrollable container).
+  - file chooser dialog (import CSV, on_connect script path) -- already
+    listed as deferred in doc/gui.md.
+  - color chooser (#highlight color, theme) -- already deferred in doc/gui.md.
+
+  lower priority (polish):
+  - progress bar / busy spinner (connecting, gist fetch).
+  - tooltip / hint on hover.
+  - general context menu (the explorer has its own; generalize it).
+  - split pane / draggable splitter -- already deferred in doc/gui.md
+    ("split views inside the terminal pane, dockable panels").
+
+  when building these, keep doc/gui.md's two rules in mind: each is an
+  extension widget (widget_ext.h) unless it earns a place in the core set,
+  and any container holding content needs an explicit PREF_W/PREF_H or GROW
+  (layout never measures contents).
+
 - remove unnecessary things from ludica:
   - src/thirdparty/ludica/assets/textures
   - src/thirdparty/ludica/src/imgui
