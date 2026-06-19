@@ -41,6 +41,8 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <miniz.h>
+
 #include <psa/crypto.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
@@ -108,6 +110,14 @@ struct net_ctx {
 
 	unsigned char *pend;    /* framed rx records not yet in the ring */
 	size_t pend_len, pend_cap, pend_sent;
+
+	/* MCCP2 inbound decompression */
+	int want_inflate;       /* telopt signalled the compressed stream begins */
+	int inflating;          /* recv bytes are a zlib stream */
+	int zs_inited;
+	mz_stream zs;
+	unsigned char cin[CHUNK];  /* compressed bytes read but not yet inflated */
+	size_t cin_len, cin_pos;
 
 	/* TLS (per connection) */
 	int tls;                /* this connection is TLS */
@@ -316,6 +326,13 @@ telopt_package(int proto, const char *name, const char *json, void *arg)
 		free(buf);
 }
 
+static void
+telopt_compress(void *arg)
+{
+	struct net_ctx *c = arg;
+	c->want_inflate = 1;            /* do_read switches to inflate next */
+}
+
 /* ---- net thread: I/O -------------------------------------------------- */
 
 static int
@@ -357,6 +374,10 @@ close_socket(struct net_ctx *c)
 		mbedtls_ssl_free(&c->ssl);
 		c->ssl_inited = 0;
 	}
+	if (c->zs_inited) {
+		mz_inflateEnd(&c->zs);
+		c->zs_inited = 0;
+	}
 	if (c->fd >= 0) {
 		iox_fd_remove(c->loop, c->fd);
 		close(c->fd);
@@ -368,6 +389,8 @@ close_socket(struct net_ctx *c)
 	c->hs_want = 0;
 	c->rx_blocked = 0;
 	c->out_len = c->out_sent = 0;
+	c->want_inflate = c->inflating = 0;
+	c->cin_len = c->cin_pos = 0;
 }
 
 static void sock_cb(struct iox_loop *loop, int fd, unsigned events, void *arg);
@@ -486,7 +509,11 @@ do_connect(struct net_ctx *c, const unsigned char *payload, uint32_t len)
 		return;
 	}
 	port = host + hl + 1;
-	snprintf(c->host, sizeof c->host, "%s", host);
+	{
+		size_t hn = hl < sizeof c->host ? hl : sizeof c->host - 1;
+		memcpy(c->host, host, hn);
+		c->host[hn] = '\0';
+	}
 
 	push_state(c, BD_NET_CONNECTING, NULL);
 
@@ -634,44 +661,141 @@ flush_out(struct net_ctx *c)
 		c->out_sent = c->out_len = 0;
 }
 
+/* Begin MCCP2: bytes following the start signal are a zlib stream. */
+static int
+start_inflate(struct net_ctx *c)
+{
+	memset(&c->zs, 0, sizeof c->zs);
+	if (mz_inflateInit(&c->zs) != MZ_OK)
+		return -1;
+	c->zs_inited = 1;
+	c->inflating = 1;
+	c->want_inflate = 0;
+	return 0;
+}
+
+/* Pull bytes from the connection (via TLS or plain), inflating them first if
+ * MCCP2 is active, and feed the result through telopt into the rx ring. Loops
+ * until the socket would block or backpressure pauses us. */
 static void
 do_read(struct net_ctx *c)
 {
 	for (;;) {
-		unsigned char buf[CHUNK];
 		char emsg[96];
-		ssize_t r;
 
-		/* flush staged records before pulling more off the socket */
+		/* flush staged records before producing more */
 		if (c->pend_sent < c->pend_len) {
 			drain_pend(c);
 			if (c->pend_sent < c->pend_len)
-				return;         /* rx still full */
+				return;
 		}
 		if (bd_ring_write_avail(c->n->rx) == 0) {
 			c->rx_blocked = 1;
 			return;
 		}
 
-		r = transport_read(c, buf, sizeof buf, emsg, sizeof emsg);
-		if (r > 0) {
-			bd_telopt_recv(c->telopt, buf, (size_t)r);
-			drain_pend(c);
-			if (c->pend_sent < c->pend_len)
-				return;         /* rx filled mid-record */
+		if (c->inflating) {
+			unsigned char scratch[CHUNK];
+			size_t produced;
+			int zr;
+
+			if (c->cin_pos >= c->cin_len) {
+				ssize_t r = transport_read(c, c->cin,
+				    sizeof c->cin, emsg, sizeof emsg);
+				if (r == -1)
+					return;
+				if (r == 0) {
+					close_socket(c);
+					push_state(c, BD_NET_CLOSED,
+					    "connection closed by peer");
+					return;
+				}
+				if (r == -2) {
+					close_socket(c);
+					push_state(c, BD_NET_ERROR, emsg);
+					return;
+				}
+				c->cin_len = (size_t)r;
+				c->cin_pos = 0;
+			}
+
+			c->zs.next_in = c->cin + c->cin_pos;
+			c->zs.avail_in = (unsigned)(c->cin_len - c->cin_pos);
+			c->zs.next_out = scratch;
+			c->zs.avail_out = sizeof scratch;
+			zr = mz_inflate(&c->zs, MZ_NO_FLUSH);
+			produced = sizeof scratch - c->zs.avail_out;
+			c->cin_pos = c->cin_len - c->zs.avail_in;
+
+			if (produced) {
+				bd_telopt_recv(c->telopt, scratch, produced);
+				c->want_inflate = 0;   /* no nested MCCP start */
+				drain_pend(c);
+				if (c->pend_sent < c->pend_len)
+					return;
+			}
+			if (zr == MZ_STREAM_END) {
+				mz_inflateEnd(&c->zs);
+				c->zs_inited = 0;
+				c->inflating = 0;
+				c->cin_len = c->cin_pos = 0;
+				continue;       /* back to plain reads */
+			}
+			if (zr != MZ_OK && zr != MZ_BUF_ERROR) {
+				close_socket(c);
+				push_state(c, BD_NET_ERROR,
+				    "decompression error");
+				return;
+			}
+			if (produced == 0 && c->zs.avail_in != 0) {
+				close_socket(c);       /* stalled: corrupt stream */
+				push_state(c, BD_NET_ERROR,
+				    "decompression stalled");
+				return;
+			}
 			continue;
 		}
-		if (r == -1)
-			return;                 /* would block */
-		if (r == 0) {
-			close_socket(c);
-			push_state(c, BD_NET_CLOSED,
-			    "connection closed by peer");
-			return;
+
+		/* plain (uncompressed) read */
+		{
+			unsigned char buf[CHUNK];
+			ssize_t r = transport_read(c, buf, sizeof buf,
+			    emsg, sizeof emsg);
+			size_t consumed;
+
+			if (r == -1)
+				return;
+			if (r == 0) {
+				close_socket(c);
+				push_state(c, BD_NET_CLOSED,
+				    "connection closed by peer");
+				return;
+			}
+			if (r == -2) {
+				close_socket(c);
+				push_state(c, BD_NET_ERROR, emsg);
+				return;
+			}
+			consumed = bd_telopt_recv(c->telopt, buf, (size_t)r);
+			drain_pend(c);
+
+			if (c->want_inflate) {
+				size_t rem = (size_t)r - consumed;
+				if (start_inflate(c) != 0) {
+					close_socket(c);
+					push_state(c, BD_NET_ERROR,
+					    "inflate init failed");
+					return;
+				}
+				if (rem > sizeof c->cin)
+					rem = sizeof c->cin;
+				memcpy(c->cin, buf + consumed, rem);
+				c->cin_len = rem;
+				c->cin_pos = 0;
+			}
+			if (c->pend_sent < c->pend_len)
+				return;
 		}
-		close_socket(c);                /* r == -2 */
-		push_state(c, BD_NET_ERROR, emsg);
-		return;
 	}
 }
 
@@ -763,11 +887,17 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 		return;
 	}
 
-	/* UI may have drained rx: flush staged records and resume reading */
+	/* UI may have drained rx: flush staged records and resume. With MCCP2
+	 * there can be buffered compressed input to inflate even when the socket
+	 * is not readable, so drive do_read directly rather than waiting on a
+	 * socket event. */
 	if (c->rx_blocked) {
 		drain_pend(c);
-		if (!c->rx_blocked)
+		if (!c->rx_blocked && c->fd >= 0 &&
+		    !c->connecting && !c->handshaking) {
+			do_read(c);
 			update_interest(c);
+		}
 	}
 }
 
@@ -852,6 +982,7 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	tcb.prompt = telopt_prompt;
 	tcb.echo = telopt_echo;
 	tcb.package = telopt_package;
+	tcb.compress = telopt_compress;
 	tcb.arg = c;
 
 	c->loop = iox_loop_new();

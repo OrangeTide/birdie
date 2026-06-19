@@ -22,10 +22,10 @@
  *   EOR / GA       prompt-boundary marking
  *   GMCP           out-of-band JSON packages, routed by name
  *   MSDP           out-of-band key/value data, converted to JSON and routed
+ *   MCCP2          server->client zlib stream compression (start signal)
  * Every other option is refused (DO->WONT, WILL->DONT).
  *
- * Deferred (doc/network.md): MSSP and MCCP (zlib compression), which the
- * design earmarks for vendored MTH rather than this native core.
+ * Deferred (doc/network.md): MSSP and MCCP3 (client->server compression).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -52,6 +52,11 @@ typedef struct bd_telopt_cb {
 	 * Both strings are NUL-terminated and valid only for the call. NULL ok. */
 	void (*package)(int proto, const char *name, const char *json,
 	                void *arg);
+	/* MCCP2 begins: every byte the caller feeds after the consumed prefix
+	 * (see bd_telopt_recv's return value) is part of a zlib stream and must
+	 * be inflated before being fed back in. May be NULL (compression then
+	 * stays refused). */
+	void (*compress)(void *arg);
 	void *arg;
 } bd_telopt_cb;
 
@@ -65,8 +70,12 @@ void bd_telopt_free(bd_telopt *t);
 /* Forget all negotiation state for a fresh connection. */
 void bd_telopt_reset(bd_telopt *t);
 
-/* Feed raw inbound bytes from the socket. */
-void bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len);
+/* Feed inbound bytes. Returns the number consumed: normally all of them, but
+ * if an MCCP2 compression-start is reached it returns early, having consumed
+ * through that subnegotiation, so the caller can inflate the remaining bytes
+ * and feed the decompressed result back in. The compress callback fires at
+ * that point. */
+size_t bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len);
 
 /* Terminal type advertised via TTYPE (e.g. "birdie/0.0"); copied. */
 void bd_telopt_set_termtype(bd_telopt *t, const char *type);

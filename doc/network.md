@@ -179,8 +179,9 @@ and `src/birdie/bd_ring.c`:
 
 Built today: plain TCP and TLS, the core telnet options (bd_telopt:
 TTYPE/MTTS, NAWS, NEW_ENVIRON, CHARSET, SGA, ECHO, EOR/GA), GMCP and MSDP
-(out-of-band packages routed by name; MSDP converted to JSON), and password
-masking driven by ECHO. TLS runs the telnet stream over an mbedTLS BIO with
+(out-of-band packages routed by name; MSDP converted to JSON), MCCP2
+(server->client zlib decompression via vendored miniz), and password masking
+driven by ECHO. TLS runs the telnet stream over an mbedTLS BIO with
 the handshake driven non-blocking by the same poll loop; the telnet layer is
 unaware TLS is underneath. `bd_net_connect()` takes a `tls` flag; the trust
 store is `$BIRDIE_CACERT` then the host's system CA bundle, with
@@ -188,8 +189,11 @@ store is `$BIRDIE_CACERT` then the host's system CA bundle, with
 to a `bd_net` package callback (the trigger/scripting layer is the eventual
 consumer); on GMCP enable the client sends `Core.Hello` + `Core.Supports.Set`.
 Done natively rather than via MTH, which is kept only as a standalone test
-oracle. Not yet: the bundled Mozilla `cacert.pem` (a packaging step), MSSP and
-MCCP (zlib compression), Happy Eyeballs, reconnect, and encoding transcode. The single network thread multiplexing several connections is the
+oracle. MCCP2 inflates the server stream below the telnet layer: telopt sees
+the decompressed bytes and is unaware compression is underneath, the same way
+the telnet layer is unaware of TLS. Not yet: the bundled Mozilla `cacert.pem`
+(a packaging step), MSSP, MCCP3 (client->server compression), Happy Eyeballs,
+reconnect, and encoding transcode. The single network thread multiplexing several connections is the
 target; today `bd_net` handles one connection at a time.
 
 ## Encoding

@@ -36,6 +36,7 @@
 #define OPT_NEW_ENVIRON 39
 #define OPT_CHARSET     42
 #define OPT_MSDP        69
+#define OPT_MCCP2       86
 #define OPT_GMCP       201
 
 /* TTYPE / NEW-ENVIRON / CHARSET subnegotiation sub-commands */
@@ -71,6 +72,7 @@ struct bd_telopt {
 	unsigned char *sb;              /* growable subnegotiation payload */
 	size_t sb_len, sb_cap;
 	int sb_overflow;                /* payload exceeded SB_CAP_MAX: drop it */
+	int compress_now;               /* MCCP2 began: stop and let caller inflate */
 
 	unsigned char us[256];          /* options we have agreed to perform */
 	unsigned char them[256];        /* options the server has agreed to */
@@ -108,7 +110,8 @@ remote_wanted(unsigned char opt)
 {
 	return opt == OPT_CHARSET || opt == OPT_EOR ||
 	       opt == OPT_ECHO || opt == OPT_SGA ||
-	       opt == OPT_GMCP || opt == OPT_MSDP;
+	       opt == OPT_GMCP || opt == OPT_MSDP ||
+	       opt == OPT_MCCP2;
 }
 
 /* Build and send an escaped subnegotiation: IAC SB <opt> <payload> IAC SE,
@@ -479,6 +482,13 @@ handle_subneg(struct bd_telopt *t)
 		if (plen >= 1)
 			handle_msdp(t, t->sb, plen);
 		break;
+	case OPT_MCCP2:
+		/* empty subnegotiation: the compressed stream starts now */
+		if (t->cb.compress) {
+			t->cb.compress(t->cb.arg);
+			t->compress_now = 1;
+		}
+		break;
 	default:
 		break;
 	}
@@ -588,6 +598,7 @@ bd_telopt_reset(bd_telopt *t)
 	t->sb_len = 0;
 	t->sb_got_opt = 0;
 	t->sb_overflow = 0;
+	t->compress_now = 0;
 	t->ttype_idx = 0;
 	memset(t->us, 0, sizeof t->us);
 	memset(t->them, 0, sizeof t->them);
@@ -614,7 +625,7 @@ bd_telopt_set_winsize(bd_telopt *t, int cols, int rows)
 		send_naws(t);
 }
 
-void
+size_t
 bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len)
 {
 	unsigned char clean[4096];
@@ -696,8 +707,18 @@ bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len)
 				t->cb.data(clean, cn, t->cb.arg);
 			cn = 0;
 		}
+
+		/* MCCP2 just started: hand the rest of the buffer back to the
+		 * caller (it is compressed) after flushing decoded text. */
+		if (t->compress_now) {
+			t->compress_now = 0;
+			if (cn && t->cb.data)
+				t->cb.data(clean, cn, t->cb.arg);
+			return i + 1;
+		}
 	}
 
 	if (cn && t->cb.data)
 		t->cb.data(clean, cn, t->cb.arg);
+	return len;
 }
