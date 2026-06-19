@@ -20,6 +20,7 @@ SUBDIRS = \
 	$(LUDICA)/src/ludica \
 	$(LUDICA)/tools \
 	src/thirdparty/mbedtls \
+	src/thirdparty/miniz \
 	src/libvt \
 	src/birdie
 
