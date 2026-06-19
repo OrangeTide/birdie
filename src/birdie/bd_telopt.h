@@ -20,13 +20,21 @@
  *   SGA            suppress go-ahead (accepted both ways)
  *   ECHO           server-controlled echo (drives password masking)
  *   EOR / GA       prompt-boundary marking
+ *   GMCP           out-of-band JSON packages, routed by name
+ *   MSDP           out-of-band key/value data, converted to JSON and routed
  * Every other option is refused (DO->WONT, WILL->DONT).
  *
- * Deferred (doc/network.md): GMCP / MSDP / MSSP / MCCP, which the design
- * earmarks for vendored MTH rather than this native core.
+ * Deferred (doc/network.md): MSSP and MCCP (zlib compression), which the
+ * design earmarks for vendored MTH rather than this native core.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
+
+/* Out-of-band protocol a package arrived on. */
+enum {
+	BD_TELOPT_GMCP,
+	BD_TELOPT_MSDP
+};
 
 typedef struct bd_telopt_cb {
 	/* Clean application bytes (escape sequences and text), telnet removed. */
@@ -38,6 +46,12 @@ typedef struct bd_telopt_cb {
 	/* Server echo control changed. suppress_local != 0 means the client
 	 * should stop echoing typed input (password entry). May be NULL. */
 	void (*echo)(int suppress_local, void *arg);
+	/* An out-of-band package arrived. proto is BD_TELOPT_GMCP or
+	 * BD_TELOPT_MSDP; name is the package/variable name; json is its
+	 * payload as JSON (GMCP payloads pass through; MSDP is converted).
+	 * Both strings are NUL-terminated and valid only for the call. NULL ok. */
+	void (*package)(int proto, const char *name, const char *json,
+	                void *arg);
 	void *arg;
 } bd_telopt_cb;
 

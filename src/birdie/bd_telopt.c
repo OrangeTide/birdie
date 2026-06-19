@@ -35,6 +35,8 @@
 #define OPT_NAWS        31
 #define OPT_NEW_ENVIRON 39
 #define OPT_CHARSET     42
+#define OPT_MSDP        69
+#define OPT_GMCP       201
 
 /* TTYPE / NEW-ENVIRON / CHARSET subnegotiation sub-commands */
 #define SB_IS        0
@@ -46,7 +48,16 @@
 #define CS_ACCEPTED  2
 #define CS_REJECTED  3
 
-#define SB_MAX  512     /* largest subnegotiation payload we retain */
+/* MSDP control bytes */
+#define MSDP_VAR          1
+#define MSDP_VAL          2
+#define MSDP_TABLE_OPEN   3
+#define MSDP_TABLE_CLOSE  4
+#define MSDP_ARRAY_OPEN   5
+#define MSDP_ARRAY_CLOSE  6
+
+#define SB_CAP_MAX  (1u << 20)  /* refuse to buffer a subnegotiation past 1 MiB */
+#define MSDP_DEPTH_MAX  32      /* nesting guard for malformed MSDP */
 
 enum state { S_DATA, S_IAC, S_OPT, S_SB, S_SB_IAC };
 
@@ -56,8 +67,10 @@ struct bd_telopt {
 	enum state st;
 	unsigned char verb;             /* WILL/WONT/DO/DONT awaiting its option */
 	unsigned char sb_opt;           /* option under subnegotiation */
-	unsigned char sb[SB_MAX];
-	size_t sb_len;
+	int sb_got_opt;                 /* option byte captured this SB */
+	unsigned char *sb;              /* growable subnegotiation payload */
+	size_t sb_len, sb_cap;
+	int sb_overflow;                /* payload exceeded SB_CAP_MAX: drop it */
 
 	unsigned char us[256];          /* options we have agreed to perform */
 	unsigned char them[256];        /* options the server has agreed to */
@@ -94,16 +107,18 @@ static int
 remote_wanted(unsigned char opt)
 {
 	return opt == OPT_CHARSET || opt == OPT_EOR ||
-	       opt == OPT_ECHO || opt == OPT_SGA;
+	       opt == OPT_ECHO || opt == OPT_SGA ||
+	       opt == OPT_GMCP || opt == OPT_MSDP;
 }
 
 /* Build and send an escaped subnegotiation: IAC SB <opt> <payload> IAC SE,
- * doubling any 0xFF in the payload. */
+ * doubling any 0xFF in the payload. Payload here is always small (we only
+ * originate fixed replies and GMCP hellos). */
 static void
 send_sb(struct bd_telopt *t, unsigned char opt,
         const unsigned char *payload, size_t len)
 {
-	unsigned char buf[SB_MAX + 16];
+	unsigned char buf[600];
 	size_t n = 0, i;
 
 	buf[n++] = TC_IAC;
@@ -210,12 +225,227 @@ charset_pick(const unsigned char *list, size_t len, char *name, size_t cap)
 	return 0;
 }
 
-/* Dispatch a completed subnegotiation. sb_opt is the option; sb[0..plen-1]
- * is the payload (the bytes after the option, IAC-unescaped). */
+/* Append one byte to the growable subnegotiation buffer, capped at
+ * SB_CAP_MAX. On overflow the whole subnegotiation is dropped. */
+static void
+sb_append(struct bd_telopt *t, unsigned char b)
+{
+	if (t->sb_overflow)
+		return;
+	if (t->sb_len + 1 > t->sb_cap) {
+		size_t nc = t->sb_cap ? t->sb_cap * 2 : 256;
+		unsigned char *np;
+		if (nc > SB_CAP_MAX)
+			nc = SB_CAP_MAX;
+		if (t->sb_len + 1 > nc) {
+			t->sb_overflow = 1;
+			return;
+		}
+		np = realloc(t->sb, nc);
+		if (!np) {
+			t->sb_overflow = 1;
+			return;
+		}
+		t->sb = np;
+		t->sb_cap = nc;
+	}
+	t->sb[t->sb_len++] = b;
+}
+
+/* ---- GMCP / MSDP -> JSON ---------------------------------------------- */
+
+/* a small growable text buffer for building JSON */
+struct jbuf { char *p; size_t len, cap; int oom; };
+
+static void
+jb_putc(struct jbuf *j, char c)
+{
+	if (j->oom)
+		return;
+	if (j->len + 1 > j->cap) {
+		size_t nc = j->cap ? j->cap * 2 : 128;
+		char *np = realloc(j->p, nc);
+		if (!np) {
+			j->oom = 1;
+			return;
+		}
+		j->p = np;
+		j->cap = nc;
+	}
+	j->p[j->len++] = c;
+}
+
+static void
+jb_str(struct jbuf *j, const char *z)
+{
+	while (*z)
+		jb_putc(j, *z++);
+}
+
+/* append bytes as a JSON string literal (quoted, escaped) */
+static void
+jb_jstr(struct jbuf *j, const unsigned char *b, size_t n)
+{
+	size_t i;
+	jb_putc(j, '"');
+	for (i = 0; i < n; i++) {
+		unsigned char c = b[i];
+		switch (c) {
+		case '"':  jb_str(j, "\\\""); break;
+		case '\\': jb_str(j, "\\\\"); break;
+		case '\n': jb_str(j, "\\n"); break;
+		case '\r': jb_str(j, "\\r"); break;
+		case '\t': jb_str(j, "\\t"); break;
+		default:
+			if (c < 0x20) {
+				char u[7];
+				snprintf(u, sizeof u, "\\u%04x", c);
+				jb_str(j, u);
+			} else {
+				jb_putc(j, (char)c);
+			}
+		}
+	}
+	jb_putc(j, '"');
+}
+
+static int
+msdp_ctl(unsigned char b)
+{
+	return b >= MSDP_VAR && b <= MSDP_ARRAY_CLOSE;
+}
+
+/* Convert one MSDP value at *i to JSON, appended to j. Scalars become strings;
+ * TABLE -> object, ARRAY -> array. depth guards malformed nesting. */
+static void
+msdp_value(const unsigned char *p, size_t len, size_t *i, struct jbuf *j,
+           int depth)
+{
+	if (*i < len && p[*i] == MSDP_TABLE_OPEN) {
+		int first = 1;
+		(*i)++;
+		jb_putc(j, '{');
+		while (*i < len && p[*i] != MSDP_TABLE_CLOSE) {
+			size_t s;
+			if (p[*i] != MSDP_VAR)
+				break;
+			(*i)++;
+			s = *i;
+			while (*i < len && !msdp_ctl(p[*i]))
+				(*i)++;
+			if (!first)
+				jb_putc(j, ',');
+			first = 0;
+			jb_jstr(j, p + s, *i - s);
+			jb_putc(j, ':');
+			if (*i < len && p[*i] == MSDP_VAL && depth < MSDP_DEPTH_MAX) {
+				(*i)++;
+				msdp_value(p, len, i, j, depth + 1);
+			} else {
+				jb_str(j, "null");
+			}
+		}
+		if (*i < len && p[*i] == MSDP_TABLE_CLOSE)
+			(*i)++;
+		jb_putc(j, '}');
+	} else if (*i < len && p[*i] == MSDP_ARRAY_OPEN) {
+		int first = 1;
+		(*i)++;
+		jb_putc(j, '[');
+		while (*i < len && p[*i] != MSDP_ARRAY_CLOSE) {
+			if (p[*i] != MSDP_VAL)
+				break;
+			(*i)++;
+			if (!first)
+				jb_putc(j, ',');
+			first = 0;
+			if (depth < MSDP_DEPTH_MAX)
+				msdp_value(p, len, i, j, depth + 1);
+			else
+				jb_str(j, "null");
+		}
+		if (*i < len && p[*i] == MSDP_ARRAY_CLOSE)
+			(*i)++;
+		jb_putc(j, ']');
+	} else {
+		size_t s = *i;
+		while (*i < len && !msdp_ctl(p[*i]))
+			(*i)++;
+		jb_jstr(j, p + s, *i - s);
+	}
+}
+
+/* Route each top-level MSDP variable as a JSON-valued package. */
+static void
+handle_msdp(struct bd_telopt *t, const unsigned char *p, size_t len)
+{
+	size_t i = 0;
+
+	while (i < len) {
+		char name[128];
+		size_t s, nl;
+		struct jbuf j = { 0 };
+
+		if (p[i] != MSDP_VAR) {
+			i++;
+			continue;
+		}
+		i++;
+		s = i;
+		while (i < len && !msdp_ctl(p[i]))
+			i++;
+		nl = i - s;
+		if (nl >= sizeof name)
+			nl = sizeof name - 1;
+		memcpy(name, p + s, nl);
+		name[nl] = '\0';
+
+		if (i < len && p[i] == MSDP_VAL) {
+			i++;
+			msdp_value(p, len, &i, &j, 0);
+		} else {
+			jb_str(&j, "null");
+		}
+		jb_putc(&j, '\0');
+		if (!j.oom && t->cb.package)
+			t->cb.package(BD_TELOPT_MSDP, name, j.p, t->cb.arg);
+		free(j.p);
+	}
+}
+
+/* GMCP payload is "Package.Name <json>"; split and route as-is. */
+static void
+handle_gmcp(struct bd_telopt *t, const unsigned char *p, size_t len)
+{
+	char name[128];
+	size_t i = 0, nl, js;
+	char *json;
+
+	while (i < len && p[i] != ' ')
+		i++;
+	nl = i;
+	if (nl >= sizeof name)
+		nl = sizeof name - 1;
+	memcpy(name, p, nl);
+	name[nl] = '\0';
+
+	js = (i < len) ? i + 1 : len;       /* skip the single separating space */
+	json = malloc(len - js + 1);
+	if (!json)
+		return;
+	memcpy(json, p + js, len - js);
+	json[len - js] = '\0';
+	if (t->cb.package)
+		t->cb.package(BD_TELOPT_GMCP, name, json, t->cb.arg);
+	free(json);
+}
+
+/* Dispatch a completed subnegotiation. sb_opt is the option; sb[0..sb_len-1]
+ * is the payload (option byte already consumed, IAC-unescaped). */
 static void
 handle_subneg(struct bd_telopt *t)
 {
-	size_t plen = t->sb_len ? t->sb_len - 1 : 0;
+	size_t plen = t->sb_len;
 
 	switch (t->sb_opt) {
 	case OPT_TTYPE:
@@ -241,9 +471,32 @@ handle_subneg(struct bd_telopt *t)
 			}
 		}
 		break;
+	case OPT_GMCP:
+		if (plen >= 1)
+			handle_gmcp(t, t->sb, plen);
+		break;
+	case OPT_MSDP:
+		if (plen >= 1)
+			handle_msdp(t, t->sb, plen);
+		break;
 	default:
 		break;
 	}
+}
+
+/* Send a GMCP message ("Package.Name <json>"). */
+static void
+send_gmcp(struct bd_telopt *t, const char *msg)
+{
+	send_sb(t, OPT_GMCP, (const unsigned char *)msg, strlen(msg));
+}
+
+/* On GMCP enable, introduce ourselves and declare interest. */
+static void
+gmcp_hello(struct bd_telopt *t)
+{
+	send_gmcp(t, "Core.Hello {\"client\":\"birdie\",\"version\":\"0.0\"}");
+	send_gmcp(t, "Core.Supports.Set [\"Char 1\",\"Char.Vitals 1\",\"Room 1\"]");
 }
 
 /* server says WILL <opt>: it offers to perform opt */
@@ -256,6 +509,8 @@ on_will(struct bd_telopt *t, unsigned char opt)
 			send3(t, TC_DO, opt);
 			if (opt == OPT_ECHO && t->cb.echo)
 				t->cb.echo(1, t->cb.arg);
+			if (opt == OPT_GMCP)
+				gmcp_hello(t);
 		}
 	} else {
 		send3(t, TC_DONT, opt);
@@ -318,6 +573,9 @@ bd_telopt_new(const bd_telopt_cb *cb)
 void
 bd_telopt_free(bd_telopt *t)
 {
+	if (!t)
+		return;
+	free(t->sb);
 	free(t);
 }
 
@@ -328,6 +586,8 @@ bd_telopt_reset(bd_telopt *t)
 		return;
 	t->st = S_DATA;
 	t->sb_len = 0;
+	t->sb_got_opt = 0;
+	t->sb_overflow = 0;
 	t->ttype_idx = 0;
 	memset(t->us, 0, sizeof t->us);
 	memset(t->them, 0, sizeof t->them);
@@ -380,6 +640,8 @@ bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len)
 				t->st = S_OPT;
 			} else if (b == TC_SB) {
 				t->sb_len = 0;
+				t->sb_got_opt = 0;
+				t->sb_overflow = 0;
 				t->st = S_SB;
 			} else {
 				if ((b == TC_EOR || b == TC_GA) && t->cb.prompt) {
@@ -407,24 +669,21 @@ bd_telopt_recv(bd_telopt *t, const unsigned char *p, size_t len)
 		case S_SB:
 			if (b == TC_IAC) {
 				t->st = S_SB_IAC;
-			} else if (t->sb_len == 0) {
+			} else if (!t->sb_got_opt) {
 				t->sb_opt = b;          /* first SB byte is the option */
-				t->sb_len = 1;          /* mark: option captured */
-			} else if (t->sb_len - 1 < SB_MAX) {
-				t->sb[t->sb_len - 1] = b;
-				t->sb_len++;
+				t->sb_got_opt = 1;
+			} else {
+				sb_append(t, b);
 			}
 			break;
 
 		case S_SB_IAC:
 			if (b == TC_SE) {
-				handle_subneg(t);
+				if (!t->sb_overflow)
+					handle_subneg(t);
 				t->st = S_DATA;
 			} else if (b == TC_IAC) {
-				if (t->sb_len && t->sb_len - 1 < SB_MAX) {
-					t->sb[t->sb_len - 1] = TC_IAC;
-					t->sb_len++;
-				}
+				sb_append(t, TC_IAC);   /* literal 0xFF in SB data */
 				t->st = S_SB;
 			} else {
 				t->st = S_SB;           /* unexpected; resync */

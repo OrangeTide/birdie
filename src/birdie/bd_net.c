@@ -65,7 +65,8 @@ enum {
 	MSG_DATA,       /* clean received bytes */
 	MSG_STATE,      /* [u8 state][detail string] */
 	MSG_PROMPT,     /* no payload */
-	MSG_ECHO        /* [u8 suppress] */
+	MSG_ECHO,       /* [u8 suppress] */
+	MSG_PKG         /* [u8 proto][name '\0'][json] -- GMCP/MSDP package */
 };
 
 #define RX_CAP   (1u << 20)     /* 1 MiB inbound buffer */
@@ -77,6 +78,7 @@ struct bd_net {
 	bd_net_state_cb on_state;
 	bd_net_echo_cb on_echo;
 	bd_net_prompt_cb on_prompt;
+	bd_net_package_cb on_package;
 	void *arg;
 
 	_Atomic int state;
@@ -288,6 +290,30 @@ telopt_echo(int suppress, void *arg)
 	struct net_ctx *c = arg;
 	unsigned char b = suppress ? 1 : 0;
 	pend_put(c, MSG_ECHO, &b, 1);
+}
+
+/* Frame a package as [u8 proto][name '\0'][json] into a stack buffer (or a
+ * heap one if large) and stage it for the UI. */
+static void
+telopt_package(int proto, const char *name, const char *json, void *arg)
+{
+	struct net_ctx *c = arg;
+	size_t nl = strlen(name), jl = strlen(json);
+	size_t total = 1 + nl + 1 + jl;
+	unsigned char stackbuf[1024];
+	unsigned char *buf = stackbuf;
+
+	if (total > sizeof stackbuf) {
+		buf = malloc(total);
+		if (!buf)
+			return;
+	}
+	buf[0] = (unsigned char)proto;
+	memcpy(buf + 1, name, nl + 1);          /* includes NUL */
+	memcpy(buf + 1 + nl + 1, json, jl);
+	pend_put(c, MSG_PKG, buf, (uint32_t)total);
+	if (buf != stackbuf)
+		free(buf);
 }
 
 /* ---- net thread: I/O -------------------------------------------------- */
@@ -825,6 +851,7 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	tcb.xmit = telopt_xmit;
 	tcb.prompt = telopt_prompt;
 	tcb.echo = telopt_echo;
+	tcb.package = telopt_package;
 	tcb.arg = c;
 
 	c->loop = iox_loop_new();
@@ -945,6 +972,13 @@ bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb)
 		n->on_prompt = cb;
 }
 
+void
+bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb)
+{
+	if (n)
+		n->on_package = cb;
+}
+
 int
 bd_net_connect(bd_net *n, const char *host, const char *port, int tls)
 {
@@ -1031,46 +1065,72 @@ bd_net_set_winsize(bd_net *n, int cols, int rows)
 void
 bd_net_poll(bd_net *n)
 {
-	uint8_t type;
-	unsigned char buf[CHUNK];
-	uint32_t len;
 	int got_data = 0;
 
 	if (!n)
 		return;
 
-	while (ring_get(n->rx, &type, buf, sizeof buf, &len)) {
+	for (;;) {
+		unsigned char hdr[5];
+		unsigned char stackbuf[4096];
+		unsigned char *p = stackbuf;
+		uint8_t type;
+		uint32_t len;
+
+		if (bd_ring_read_avail(n->rx) < sizeof hdr)
+			break;
+		bd_ring_peek(n->rx, hdr, sizeof hdr);
+		memcpy(&len, hdr + 1, sizeof len);
+		if (bd_ring_read_avail(n->rx) < sizeof hdr + (size_t)len)
+			break;          /* record not fully arrived yet */
+
+		/* size the buffer to the whole record, plus a trailing NUL so
+		 * string payloads (state detail, package json) are terminated */
+		if ((size_t)len + 1 > sizeof stackbuf) {
+			p = malloc((size_t)len + 1);
+			if (!p) {
+				bd_ring_skip(n->rx, sizeof hdr + len);
+				continue;
+			}
+		}
+		type = hdr[0];
+		bd_ring_skip(n->rx, sizeof hdr);
+		bd_ring_read(n->rx, p, len);
+		p[len] = '\0';
+
 		switch (type) {
 		case MSG_DATA:
 			if (n->on_data)
-				n->on_data((const char *)buf, (int)len, n->arg);
+				n->on_data((const char *)p, (int)len, n->arg);
 			got_data = 1;
 			break;
-		case MSG_STATE: {
-			bd_net_state st = (bd_net_state)buf[0];
-			char detail[201];
-			const char *msg = NULL;
-			if (len > 1) {
-				uint32_t m = len - 1;
-				if (m > sizeof detail - 1)
-					m = sizeof detail - 1;
-				memcpy(detail, buf + 1, m);
-				detail[m] = '\0';
-				msg = detail;
+		case MSG_STATE:
+			if (n->on_state) {
+				const char *msg = len > 1 ? (const char *)(p + 1)
+				                          : NULL;
+				n->on_state((bd_net_state)p[0], msg, n->arg);
 			}
-			if (n->on_state)
-				n->on_state(st, msg, n->arg);
 			break;
-		}
 		case MSG_PROMPT:
 			if (n->on_prompt)
 				n->on_prompt(n->arg);
 			break;
 		case MSG_ECHO:
 			if (n->on_echo)
-				n->on_echo(len >= 1 && buf[0], n->arg);
+				n->on_echo(len >= 1 && p[0], n->arg);
+			break;
+		case MSG_PKG:
+			if (n->on_package && len >= 2) {
+				const char *name = (const char *)(p + 1);
+				size_t nl = strlen(name);
+				const char *json = (const char *)(p + 1 + nl + 1);
+				n->on_package(p[0], name, json, n->arg);
+			}
 			break;
 		}
+
+		if (p != stackbuf)
+			free(p);
 	}
 
 	if (got_data)

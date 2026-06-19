@@ -2,6 +2,7 @@
 #include "bd_widget_vt.h"
 #include "bd_backend_ludica.h"
 #include "bd_net.h"
+#include "bd_telopt.h"
 #include "ludica.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -50,6 +51,17 @@ net_on_echo(int suppress, void *arg)
 {
 	(void)arg;
 	bd_set(input_line, BD_PASSWORD_B, suppress, BD_END);
+}
+
+/* GMCP/MSDP packages. The trigger/scripting layer is the real consumer (not
+ * wired yet); for now log them so they are observable. */
+static void
+net_on_package(int proto, const char *name, const char *json, void *arg)
+{
+	(void)arg;
+	fprintf(stdout, "[%s] %s %s\n",
+	    proto == BD_TELOPT_GMCP ? "GMCP" : "MSDP", name, json);
+	fflush(stdout);
 }
 
 static void
@@ -123,6 +135,7 @@ init(void)
 
 	net = bd_net_new(net_on_data, net_on_state, NULL);
 	bd_net_set_echo_cb(net, net_on_echo);
+	bd_net_set_package_cb(net, net_on_package);
 	bd_net_set_termtype(net, "birdie/0.0");
 	bd_net_set_winsize(net, 80, 24);   /* matches the terminal grid */
 

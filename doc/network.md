@@ -178,15 +178,18 @@ and `src/birdie/bd_ring.c`:
   the UI has drained. No bytes are dropped.
 
 Built today: plain TCP and TLS, the core telnet options (bd_telopt:
-TTYPE/MTTS, NAWS, NEW_ENVIRON, CHARSET, SGA, ECHO, EOR/GA), and password
+TTYPE/MTTS, NAWS, NEW_ENVIRON, CHARSET, SGA, ECHO, EOR/GA), GMCP and MSDP
+(out-of-band packages routed by name; MSDP converted to JSON), and password
 masking driven by ECHO. TLS runs the telnet stream over an mbedTLS BIO with
 the handshake driven non-blocking by the same poll loop; the telnet layer is
 unaware TLS is underneath. `bd_net_connect()` takes a `tls` flag; the trust
 store is `$BIRDIE_CACERT` then the host's system CA bundle, with
-`BIRDIE_TLS_INSECURE` to skip verification for testing. Not yet: the bundled
-Mozilla `cacert.pem` (a packaging step), the MTH extension set (GMCP/MSDP/
-MSSP/MCCP) behind the wrapper, Happy Eyeballs, reconnect, and encoding
-transcode. The single network thread multiplexing several connections is the
+`BIRDIE_TLS_INSECURE` to skip verification for testing. GMCP/MSDP are routed
+to a `bd_net` package callback (the trigger/scripting layer is the eventual
+consumer); on GMCP enable the client sends `Core.Hello` + `Core.Supports.Set`.
+Done natively rather than via MTH, which is kept only as a standalone test
+oracle. Not yet: the bundled Mozilla `cacert.pem` (a packaging step), MSSP and
+MCCP (zlib compression), Happy Eyeballs, reconnect, and encoding transcode. The single network thread multiplexing several connections is the
 target; today `bd_net` handles one connection at a time.
 
 ## Encoding

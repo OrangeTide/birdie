@@ -42,6 +42,12 @@ typedef void (*bd_net_echo_cb)(int suppress, void *arg);
 /* A prompt boundary was received (telnet EOR / GA). */
 typedef void (*bd_net_prompt_cb)(void *arg);
 
+/* An out-of-band package arrived. proto is BD_TELOPT_GMCP / BD_TELOPT_MSDP
+ * (see bd_telopt.h); name is the package/variable name; json is its payload
+ * as JSON. Strings are valid only for the call. */
+typedef void (*bd_net_package_cb)(int proto, const char *name,
+                                  const char *json, void *arg);
+
 typedef struct bd_net bd_net;
 
 /* Create a connection object. Callbacks may be NULL. arg is passed back to
@@ -76,6 +82,7 @@ void bd_net_close(bd_net *n);
  * during bd_net_poll() like the others. Set before connecting. */
 void bd_net_set_echo_cb(bd_net *n, bd_net_echo_cb cb);
 void bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb);
+void bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb);
 
 /* Advertise the terminal type (TTYPE/MTTS), e.g. "birdie/0.0". Copied.
  * Takes effect on the next negotiation; set before connecting. */
