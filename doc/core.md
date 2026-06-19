@@ -77,6 +77,22 @@ but cannot synthesize: `connect`, `disconnect`, `state_changed`,
 `log_rotated`. These fire on the UI thread after `bd_session_drain`
 processes the network ring.
 
+### Implementation status
+
+`src/birdie/bd_session.{c,h}` implements the transport-stage slice of this
+seam today: a session owns one `bd_net`, connects using a borrowed
+`bd_profile` (host/port/tls/autoreconnect), and turns the transport's
+output into `bd_session_event`s on the UI thread during `bd_session_drain`.
+The event kinds wired so far are `STATE`, `DATA` (decoded bytes, since the
+core `vt_buf` is not split out yet), `ECHO`, `PROMPT`, and `PACKAGE`
+(GMCP/MSDP). `main.c` drives one session from a profile.
+
+Not yet, and noted here so the contract is honest: the owned `vt_buf` +
+line retirement, the trigger engine, `bd_vm`, and log sinks. Until the core
+`vt` module exists, the front-end feeds decoded `DATA` bytes into its own
+terminal widget rather than rendering from a session-owned `vt_buf`; that
+becomes `line_retired` + `vt_buf` when `src/vt/` lands.
+
 The deliberately absent APIs are as important as the present ones:
 
 - No "give me the next line" call — lines live in `vt_buf` and in the

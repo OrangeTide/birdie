@@ -1,7 +1,8 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
 #include "bd_backend_ludica.h"
-#include "bd_net.h"
+#include "bd_session.h"
+#include "bd_profile.h"
 #include "bd_telopt.h"
 #include "ludica.h"
 #include <stddef.h>
@@ -12,56 +13,59 @@
 static bd_id status_label;
 static bd_id terminal;
 static bd_id input_line;
-static bd_net *net;
+static bd_profiles *profiles;
+static const bd_profile *active;        /* the profile we connect with */
+static bd_session *session;
 
+/* Single front-end sink for everything a session produces (UI thread). */
 static void
-net_on_data(const char *data, int len, void *arg)
+on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 {
+	(void)s;
 	(void)arg;
-	bd_terminal_write(terminal, data, len);
-}
-
-static void
-net_on_state(bd_net_state state, const char *msg, void *arg)
-{
-	(void)arg;
-	static const char *names[] = {
-		"Disconnected", "Connecting...", "Connected",
-		"Disconnected", "Error"
-	};
-	/* BD_LABEL_S borrows the string (it is not copied), so this must
-	 * outlive the call; a static buffer suffices on the UI thread. */
-	static char line[160];
-	const char *name = names[state];
-	int n = snprintf(line, sizeof line, "Status: %s", name);
-	if (msg && (state == BD_NET_ERROR || state == BD_NET_CLOSED))
-		snprintf(line + n, sizeof line - (size_t)n, " (%s)", msg);
-	bd_set(status_label, BD_LABEL_S, line, BD_END);
-
-	if (state == BD_NET_CONNECTED)
-		bd_terminal_write(terminal, "\033[32m*** connected\033[0m\r\n", -1);
-	else if (state == BD_NET_CLOSED || state == BD_NET_ERROR)
-		bd_terminal_write(terminal, "\033[31m*** disconnected\033[0m\r\n", -1);
-}
-
-/* Server took over echo (telnet ECHO): mask the command line for password
- * entry, and restore it when the server releases echo. */
-static void
-net_on_echo(int suppress, void *arg)
-{
-	(void)arg;
-	bd_set(input_line, BD_PASSWORD_B, suppress, BD_END);
-}
-
-/* GMCP/MSDP packages. The trigger/scripting layer is the real consumer (not
- * wired yet); for now log them so they are observable. */
-static void
-net_on_package(int proto, const char *name, const char *json, void *arg)
-{
-	(void)arg;
-	fprintf(stdout, "[%s] %s %s\n",
-	    proto == BD_TELOPT_GMCP ? "GMCP" : "MSDP", name, json);
-	fflush(stdout);
+	switch (ev->kind) {
+	case BD_SESSION_DATA:
+		bd_terminal_write(terminal, ev->data, ev->len);
+		break;
+	case BD_SESSION_STATE: {
+		static const char *names[] = {
+			"Disconnected", "Connecting...", "Connected",
+			"Disconnected", "Error"
+		};
+		/* BD_LABEL_S borrows the string (not copied), so it must
+		 * outlive the call; a static buffer suffices on the UI thread. */
+		static char line[160];
+		int n = snprintf(line, sizeof line, "Status: %s",
+		    names[ev->state]);
+		if (ev->detail && (ev->state == BD_NET_ERROR ||
+		    ev->state == BD_NET_CLOSED))
+			snprintf(line + n, sizeof line - (size_t)n, " (%s)",
+			    ev->detail);
+		bd_set(status_label, BD_LABEL_S, line, BD_END);
+		if (ev->state == BD_NET_CONNECTED)
+			bd_terminal_write(terminal,
+			    "\033[32m*** connected\033[0m\r\n", -1);
+		else if (ev->state == BD_NET_CLOSED || ev->state == BD_NET_ERROR)
+			bd_terminal_write(terminal,
+			    "\033[31m*** disconnected\033[0m\r\n", -1);
+		break;
+	}
+	case BD_SESSION_ECHO:
+		/* server took over echo: mask the command line for a password */
+		bd_set(input_line, BD_PASSWORD_B, ev->echo_suppress, BD_END);
+		break;
+	case BD_SESSION_PACKAGE:
+		/* the trigger/scripting layer is the real consumer (not wired
+		 * yet); log so packages are observable */
+		fprintf(stdout, "[%s] %s %s\n",
+		    ev->proto == BD_TELOPT_GMCP ? "GMCP" : "MSDP",
+		    ev->name, ev->json);
+		fflush(stdout);
+		break;
+	case BD_SESSION_PROMPT:
+	default:
+		break;
+	}
 }
 
 static void
@@ -69,19 +73,18 @@ on_connect(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	const char *host = getenv("BIRDIE_HOST");
-	const char *port = getenv("BIRDIE_PORT");
-	if (!host)
-		host = "localhost";
-	if (!port)
-		port = "4000";
-	int tls = getenv("BIRDIE_TLS") != NULL;
-
+	const char *host = bd_profile_get(active, "host");
+	const char *port = bd_profile_get(active, "port");
+	int tls = active && bd_profile_get(active, "tls") &&
+	    strcmp(bd_profile_get(active, "tls"), "no") != 0;
 	char line[160];
+
 	snprintf(line, sizeof line, "\033[33m*** connecting to %s:%s%s\033[0m\r\n",
-	    host, port, tls ? " (TLS)" : "");
+	    host ? host : "?", port ? port : "?", tls ? " (TLS)" : "");
 	bd_terminal_write(terminal, line, -1);
-	bd_net_connect(net, host, port, tls);
+	if (bd_session_connect(session) < 0)
+		bd_terminal_write(terminal,
+		    "\033[31m*** profile has no host/port\033[0m\r\n", -1);
 }
 
 static void
@@ -89,7 +92,7 @@ on_disconnect(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	bd_net_close(net);
+	bd_session_disconnect(session);
 }
 
 /* The input line fires its click handler on Enter, before clearing, so the
@@ -99,11 +102,37 @@ on_submit(bd_id id, void *arg)
 {
 	(void)arg;
 	const char *cmd = bd_get_s(id, BD_LABEL_S);
-	if (bd_net_state_get(net) != BD_NET_CONNECTED)
+	if (bd_session_state(session) != BD_NET_CONNECTED)
 		return;
-	if (cmd && cmd[0])
-		bd_net_send(net, cmd, (int)strlen(cmd));
-	bd_net_send(net, "\r\n", 2);
+	bd_session_send_line(session, cmd ? cmd : "");
+}
+
+/* Pick the profile to connect with: a named one from a loaded list
+ * (BIRDIE_PROFILE in a CSV at BIRDIE_PROFILES), else one synthesized from
+ * BIRDIE_HOST/PORT/TLS (defaults localhost:4000). */
+static const bd_profile *
+choose_profile(void)
+{
+	const char *path = getenv("BIRDIE_PROFILES");
+	const char *want = getenv("BIRDIE_PROFILE");
+	bd_profile *p;
+
+	if (path)
+		bd_profiles_load(profiles, path);
+	if (want) {
+		p = bd_profiles_find(profiles, want);
+		if (p)
+			return p;
+	}
+	p = bd_profiles_add(profiles, "default");
+	if (p) {
+		const char *host = getenv("BIRDIE_HOST");
+		const char *port = getenv("BIRDIE_PORT");
+		bd_profile_set(p, "host", host ? host : "localhost");
+		bd_profile_set(p, "port", port ? port : "4000");
+		bd_profile_set(p, "tls", getenv("BIRDIE_TLS") ? "yes" : "no");
+	}
+	return p;
 }
 
 static void
@@ -133,11 +162,11 @@ init(void)
 {
 	bd_gui_init(&bd_backend_ludica, NULL);
 
-	net = bd_net_new(net_on_data, net_on_state, NULL);
-	bd_net_set_echo_cb(net, net_on_echo);
-	bd_net_set_package_cb(net, net_on_package);
-	bd_net_set_termtype(net, "birdie/0.0");
-	bd_net_set_winsize(net, 80, 24);   /* matches the terminal grid */
+	profiles = bd_profiles_new();
+	active = choose_profile();
+	session = bd_session_new(active);
+	bd_session_on_event(session, on_session_event, NULL);
+	bd_session_set_winsize(session, 80, 24);   /* matches the terminal grid */
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",
@@ -227,7 +256,7 @@ static void
 frame(float dt)
 {
 	(void)dt;
-	bd_net_poll(net);
+	bd_session_drain(session);
 	bd_gui_layout(lud_width(), lud_height());
 	bd_gui_render();
 }
@@ -235,8 +264,10 @@ frame(float dt)
 static void
 cleanup(void)
 {
-	bd_net_free(net);
-	net = NULL;
+	bd_session_free(session);       /* before the profile store it borrows */
+	session = NULL;
+	bd_profiles_free(profiles);
+	profiles = NULL;
 	bd_gui_cleanup();
 }
 
