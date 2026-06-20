@@ -11,9 +11,10 @@
     sliding-toggle value widget is the boolean primitive but reads as a
     switch, not a form checkbox; decide whether to restyle it or add a
     distinct BD_CHECKBOX.
-  - multi-column table / data grid (sortable rows). The MUD list (name/host/
-    port/tags) and the trigger `#list` are tabular; BD_LIST is single-column
-    only. Likely the biggest item here.
+  - [DONE] multi-column table / data grid (sortable rows) -- BD_TABLE
+    (bd_widget_table.{c,h}). Model-driven, scroll, single/Ctrl/Shift select,
+    keyboard nav, click-header sort (text/numeric). Still to add: column
+    resizing, in-cell editing, per-row icons/styling.
   - radio group (mutually-exclusive options). For the import-collision
     dialog (skip / rename / overwrite) and settings option sets. (A NOTICE
     with buttons covers one-shot prompts; a radio group is for persistent
