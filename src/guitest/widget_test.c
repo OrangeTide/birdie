@@ -19,6 +19,7 @@
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_canvas.h"
+#include "bd_widget_table.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
@@ -174,6 +175,29 @@ srv_activate(bd_id w, uint64_t key, void *user)
 	report(b);
 }
 
+/* ---- a small table model (click a header to sort) ---- */
+static const char *tbl_rows_data[][3] = {
+	{ "Aardwolf",  "aardmud.org",              "23"   },
+	{ "BatMUD",    "batmud.bat.org",           "23"   },
+	{ "Discworld", "discworld.starturtle.net", "4242" },
+	{ "Achaea",    "achaea.com",               "23"   },
+	{ "Genesis",   "mud.genesismud.org",       "3011" },
+	{ "Threshold", "thresholdrpg.com",         "23"   },
+	{ "Lensmoor",  "lensmoor.org",             "23"   },
+	{ "Medievia",  "medievia.com",             "4000" },
+};
+static int gtbl_rows(void *c){ (void)c; return (int)(sizeof tbl_rows_data / sizeof *tbl_rows_data); }
+static const char *gtbl_cell(void *c, int r, int col)
+{ (void)c; return (col >= 0 && col < 3) ? tbl_rows_data[r][col] : ""; }
+static void
+gtbl_activate(bd_id w, int row, void *c)
+{
+	(void)w; (void)c;
+	static char b[64];
+	snprintf(b, sizeof b, "connect %s", tbl_rows_data[row][0]);
+	report(b);
+}
+
 /* Open a second native window: a small dialog with its own widgets, proving
  * windows render and take input independently. */
 static int dialog_n;
@@ -312,6 +336,19 @@ build_ui(void)
 		"\033[1mbirdie-gui widget gallery\033[0m\r\n"
 		"GLES backend. Interact with the widgets; events log here.\r\n", -1);
 	bd_create(left, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_PAD_I, 4, BD_END);
+
+	/* MUD list: a sortable multi-column table (click a header to sort) */
+	bd_create(left, BD_LABEL, BD_LABEL_S, "MUD list (BD_TABLE -- click a header to sort):",
+		BD_PREF_H_I, 16, BD_END);
+	static const bd_table_column gcols[] = {
+		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
+		{ "Host", 170, BD_TABLE_LEFT,  0 },
+		{ "Port", 56,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
+	};
+	bd_table_create(left, gcols, 3,
+		&(bd_table_model){ gtbl_rows, gtbl_cell, NULL },
+		&(bd_table_cb){ .activate = gtbl_activate },
+		BD_PREF_H_I, 132, BD_END);
 
 	bd_id right = bd_create(body, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 420,

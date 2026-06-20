@@ -15,9 +15,24 @@
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_canvas.h"
+#include "bd_widget_table.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
+
+/* ---- table model: deliberately unsorted, with string!=numeric port order ---- */
+static const char *tbl_data[3][2] = {
+	{ "Discworld", "4242" },
+	{ "Aardwolf",  "23"   },
+	{ "Achaea",    "100"  },
+};
+static int tbl_rows(void *c) { (void)c; return 3; }
+static const char *tbl_cell(void *c, int r, int col)
+{ (void)c; return (r >= 0 && r < 3 && col >= 0 && col < 2) ? tbl_data[r][col] : ""; }
+static int tbl_sel_changed;
+static void tbl_on_sel(bd_id w, void *c) { (void)w; (void)c; tbl_sel_changed++; }
+static int tbl_activated_row = -1;
+static void tbl_on_activate(bd_id w, int row, void *c) { (void)w; (void)c; tbl_activated_row = row; }
 
 static int checks, fails;
 static void
@@ -1089,6 +1104,76 @@ main(void)
 	bd_canvas_clear(cv);
 	check("canvas clear empties strokes", bd_canvas_stroke_count(cv) == 0);
 	bd_gui_cleanup();
+
+	/* ---- multi-column table ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id tfr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_table_column tcols[] = {
+		{ "Name", 0,  BD_TABLE_LEFT,  0 },
+		{ "Port", 70, BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
+	};
+	bd_table_model tmodel = { tbl_rows, tbl_cell, NULL };
+	bd_table_cb tcb = { tbl_on_activate, NULL, tbl_on_sel, NULL };
+	bd_id tbl = bd_table_create(tfr, tcols, 2, &tmodel, &tcb, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+
+	int trh = (int)bd_draw_line_height() + 6;    /* must match ROW_EXTRA */
+	int tbx, tby, tbw, tbh;
+	bd_widget_rect(tbl, &tbx, &tby, &tbw, &tbh);
+	/* y of a visual row's center; header occupies one row height */
+#define rowy(v) (tby + trh + (v) * trh + trh / 2)
+
+	n_scissor = 0;
+	bd_gui_render();
+	check("table clips its body with scissor", n_scissor > 0);
+
+	/* click row 1 (model index 1, no sort yet) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(1) });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(1) });
+	check("clicking a row selects it (model index, unsorted)", bd_table_current(tbl) == 1);
+	check("selection_changed fired", tbl_sel_changed > 0);
+	int selrows[4];
+	check("one row selected", bd_table_selection(tbl, selrows, 4) == 1);
+
+	/* keyboard: Down moves the cursor */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	check("Down moves the cursor to the next row", bd_table_current(tbl) == 2);
+
+	/* Shift+Up extends the selection */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP, .mods=BD_MOD_SHIFT });
+	check("Shift+Up extends to a 2-row selection", bd_table_selection(tbl, selrows, 4) == 2);
+
+	/* sort by Name ascending: header click on column 0. Data order is
+	   Discworld(0), Aardwolf(1), Achaea(2) -> ascending visual: 1,2,0 */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tbx+20, .y=tby+trh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tbx+20, .y=tby+trh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(0) });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(0) });
+	check("sort by Name asc puts Aardwolf (model 1) first", bd_table_current(tbl) == 1);
+
+	/* numeric sort by Port asc: ports 4242(0),23(1),100(2) -> visual 1,2,0.
+	   A string sort would order "100","23","4242" -> model 2 first. */
+	int portx = tbx + tbw - 30;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=portx, .y=tby+trh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=portx, .y=tby+trh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(0) });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tbx+20, .y=rowy(0) });
+	check("numeric sort by Port asc puts port 23 (model 1) first", bd_table_current(tbl) == 1);
+
+	/* Enter activates the cursor row */
+	tbl_activated_row = -1;
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter activates the cursor row", tbl_activated_row == 1);
+
+	/* API selection + render with a scrollbar path doesn't crash */
+	bd_table_select(tbl, 0, 0);
+	check("bd_table_select replaces selection", bd_table_current(tbl) == 1 &&
+	    bd_table_selection(tbl, selrows, 4) == 1 && selrows[0] == 0);
+	bd_gui_render();
+	bd_gui_cleanup();
+#undef rowy
+	}
 
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
