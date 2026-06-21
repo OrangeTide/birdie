@@ -1,5 +1,6 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
+#include "bd_widget_table.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -13,9 +14,34 @@
 static bd_id status_label;
 static bd_id terminal;
 static bd_id input_line;
+static bd_id mudlist;                   /* BD_TABLE over the profile store */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
 static bd_session *session;
+
+/* ---- MUD-list table model (reads the profile store) ---- */
+
+static int
+mudlist_rows(void *ctx)
+{
+	(void)ctx;
+	return bd_profiles_count(profiles);
+}
+
+static const char *
+mudlist_cell(void *ctx, int row, int col)
+{
+	bd_profile *p = bd_profiles_at(profiles, row);
+	(void)ctx;
+	if (!p)
+		return "";
+	switch (col) {
+	case 0: return bd_profile_get(p, "name");
+	case 1: return bd_profile_get(p, "host");
+	case 2: return bd_profile_get(p, "port");
+	}
+	return "";
+}
 
 /* Single front-end sink for everything a session produces (UI thread). */
 static void
@@ -68,23 +94,75 @@ on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 	}
 }
 
+/* Point the session at `p`, recreating it if the profile changed. The session
+ * borrows the profile, so switching MUDs means a fresh session (and net
+ * thread); reconnecting to the same one reuses it. */
+static void
+rebind_session(const bd_profile *p)
+{
+	if (p == active && session)
+		return;
+	if (session)
+		bd_session_free(session);
+	active = p;
+	session = bd_session_new(active);
+	bd_session_on_event(session, on_session_event, NULL);
+	bd_session_set_winsize(session, 80, 24);
+}
+
+static void
+connect_profile(const bd_profile *p)
+{
+	const char *host, *port;
+	int tls;
+	char line[200];
+
+	if (!p) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** no MUD selected\033[0m\r\n", -1);
+		return;
+	}
+	rebind_session(p);
+
+	host = bd_profile_get(p, "host");
+	port = bd_profile_get(p, "port");
+	tls = bd_profile_get(p, "tls") &&
+	    strcmp(bd_profile_get(p, "tls"), "no") != 0;
+	snprintf(line, sizeof line,
+	    "\033[33m*** connecting to %s (%s:%s%s)\033[0m\r\n",
+	    bd_profile_get(p, "name") ? bd_profile_get(p, "name") : "?",
+	    host ? host : "?", port ? port : "?", tls ? " TLS" : "");
+	bd_terminal_write(terminal, line, -1);
+	if (bd_session_connect(session) < 0)
+		bd_terminal_write(terminal,
+		    "\033[31m*** profile has no host/port\033[0m\r\n", -1);
+}
+
+/* The selected MUD-list row, or the active profile if nothing is selected. */
+static const bd_profile *
+selected_profile(void)
+{
+	int row = bd_table_current(mudlist);
+	if (row >= 0)
+		return bd_profiles_at(profiles, row);
+	return active;
+}
+
 static void
 on_connect(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	const char *host = bd_profile_get(active, "host");
-	const char *port = bd_profile_get(active, "port");
-	int tls = active && bd_profile_get(active, "tls") &&
-	    strcmp(bd_profile_get(active, "tls"), "no") != 0;
-	char line[160];
+	connect_profile(selected_profile());
+}
 
-	snprintf(line, sizeof line, "\033[33m*** connecting to %s:%s%s\033[0m\r\n",
-	    host ? host : "?", port ? port : "?", tls ? " (TLS)" : "");
-	bd_terminal_write(terminal, line, -1);
-	if (bd_session_connect(session) < 0)
-		bd_terminal_write(terminal,
-		    "\033[31m*** profile has no host/port\033[0m\r\n", -1);
+/* Double-click / Enter on a MUD-list row connects to it. */
+static void
+mudlist_activate(bd_id w, int row, void *ctx)
+{
+	(void)w;
+	(void)ctx;
+	connect_profile(bd_profiles_at(profiles, row));
 }
 
 static void
@@ -107,32 +185,56 @@ on_submit(bd_id id, void *arg)
 	bd_session_send_line(session, cmd ? cmd : "");
 }
 
-/* Pick the profile to connect with: a named one from a loaded list
- * (BIRDIE_PROFILE in a CSV at BIRDIE_PROFILES), else one synthesized from
- * BIRDIE_HOST/PORT/TLS (defaults localhost:4000). */
+/* Add a profile (name/host/port/tls) to the store if absent. */
+static void
+seed_profile(const char *name, const char *host, const char *port,
+             const char *tls)
+{
+	bd_profile *p = bd_profiles_add(profiles, name);
+	if (!p)
+		return;
+	bd_profile_set(p, "host", host);
+	bd_profile_set(p, "port", port);
+	bd_profile_set(p, "tls", tls);
+}
+
+/* Populate the profile store and return the profile to start on:
+ *  - a CSV at BIRDIE_PROFILES is loaded if present;
+ *  - otherwise a few well-known MUDs are seeded as examples;
+ *  - a "localhost" entry (from BIRDIE_HOST/PORT/TLS) is always added for
+ *    the loopback smoke tests.
+ * The initial profile is BIRDIE_PROFILE if named, else the first row. */
 static const bd_profile *
-choose_profile(void)
+load_profiles(void)
 {
 	const char *path = getenv("BIRDIE_PROFILES");
 	const char *want = getenv("BIRDIE_PROFILE");
+	const char *host = getenv("BIRDIE_HOST");
+	const char *port = getenv("BIRDIE_PORT");
 	bd_profile *p;
 
-	if (path)
-		bd_profiles_load(profiles, path);
+	if (path && bd_profiles_load(profiles, path) == 0) {
+		/* loaded a real list */
+	} else {
+		seed_profile("Aardwolf", "aardmud.org", "23", "no");
+		seed_profile("Discworld", "discworld.starturtle.net", "4242", "no");
+		seed_profile("Achaea", "achaea.com", "23", "no");
+		seed_profile("BatMUD", "batmud.bat.org", "23", "no");
+	}
+	seed_profile("localhost", host ? host : "localhost",
+	    port ? port : "4000", getenv("BIRDIE_TLS") ? "yes" : "no");
+
+	/* If the loopback env knobs are set (smoke tests / a custom target),
+	 * start on the localhost entry; otherwise start on the first row. */
+	if (!want && (host || port || getenv("BIRDIE_TLS") ||
+	    getenv("BIRDIE_AUTOCONNECT")))
+		want = "localhost";
 	if (want) {
 		p = bd_profiles_find(profiles, want);
 		if (p)
 			return p;
 	}
-	p = bd_profiles_add(profiles, "default");
-	if (p) {
-		const char *host = getenv("BIRDIE_HOST");
-		const char *port = getenv("BIRDIE_PORT");
-		bd_profile_set(p, "host", host ? host : "localhost");
-		bd_profile_set(p, "port", port ? port : "4000");
-		bd_profile_set(p, "tls", getenv("BIRDIE_TLS") ? "yes" : "no");
-	}
-	return p;
+	return bd_profiles_at(profiles, 0);
 }
 
 static void
@@ -163,7 +265,7 @@ init(void)
 	bd_gui_init(&bd_backend_ludica, NULL);
 
 	profiles = bd_profiles_new();
-	active = choose_profile();
+	active = load_profiles();
 	session = bd_session_new(active);
 	bd_session_on_event(session, on_session_event, NULL);
 	bd_session_set_winsize(session, 80, 24);   /* matches the terminal grid */
@@ -199,43 +301,45 @@ init(void)
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect",
 		BD_ON_CLICK_F, on_disconnect, BD_END);
 
-	/* terminal output */
-	terminal = bd_terminal_create(frame,
-		BD_GROW_I, 1,
-		BD_END);
+	/* body: MUD-list sidebar on the left, the session on the right */
+	bd_id body = bd_create(frame, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1,
+		BD_PAD_I, 4, BD_GAP_I, 6, BD_END);
 
+	/* left: the MUD list (BD_TABLE) + connect/disconnect */
+	bd_id side = bd_create(body, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 300, BD_GAP_I, 4, BD_END);
+	bd_create(side, BD_LABEL,
+		BD_LABEL_S, "MUD list (double-click to connect):",
+		BD_PREF_H_I, 18, BD_END);
+
+	static const bd_table_column mcols[] = {
+		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
+		{ "Host", 120, BD_TABLE_LEFT,  0 },
+		{ "Port", 46,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
+	};
+	mudlist = bd_table_create(side, mcols, 3,
+		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
+		&(bd_table_cb){ .activate = mudlist_activate },
+		BD_GROW_I, 1, BD_END);
+
+	bd_id sbtn = bd_create(side, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 28, BD_GAP_I, 4, BD_END);
+	bd_create(sbtn, BD_BUTTON, BD_LABEL_S, "Connect", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_connect, BD_END);
+	bd_create(sbtn, BD_BUTTON, BD_LABEL_S, "Disconnect", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_disconnect, BD_END);
+
+	/* right: terminal output + command input */
+	bd_id right = bd_create(body, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_GAP_I, 4, BD_END);
+	terminal = bd_terminal_create(right, BD_GROW_I, 1, BD_END);
 	bd_terminal_write(terminal,
 		"\033[1mbirdie v0.0\033[0m\r\n"
-		"Terminal output area ready.\r\n",
+		"Select a MUD and connect.\r\n",
 		-1);
-
-	/* command input */
-	input_line = bd_create(frame, BD_INPUT_LINE,
-		BD_PREF_H_I, 24,
-		BD_PAD_I, 4,
-		BD_ON_CLICK_F, on_submit,
-		BD_END);
-	(void)input_line;
-
-	/* button bar */
-	bd_id bar = bd_create(frame, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW,
-		BD_PREF_H_I, 28,
-		BD_PAD_I, 4,
-		BD_GAP_I, 4,
-		BD_END);
-
-	bd_create(bar, BD_BUTTON,
-		BD_LABEL_S, "Connect",
-		BD_PREF_W_I, 80,
-		BD_ON_CLICK_F, on_connect,
-		BD_END);
-
-	bd_create(bar, BD_BUTTON,
-		BD_LABEL_S, "Quit",
-		BD_PREF_W_I, 80,
-		BD_ON_CLICK_F, on_quit,
-		BD_END);
+	input_line = bd_create(right, BD_INPUT_LINE,
+		BD_PREF_H_I, 24, BD_PAD_I, 4, BD_ON_CLICK_F, on_submit, BD_END);
 
 	/* status bar */
 	status_label = bd_create(frame, BD_LABEL,
@@ -276,8 +380,8 @@ main(int argc, char **argv)
 {
 	return lud_run(&(lud_desc_t){
 		.app_name  = "birdie",
-		.width     = 800,
-		.height    = 500,
+		.width     = 920,
+		.height    = 560,
 		.resizable = 1,
 		.gles_version = 3,   /* toolkit shaders are #version 300 es */
 		.argc      = argc,
