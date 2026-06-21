@@ -39,6 +39,11 @@
   - split pane / draggable splitter -- already deferred in doc/gui.md
     ("split views inside the terminal pane, dockable panels").
 
+  available now: a generic modal dialog (bd_modal_open/close in widget.h)
+  hosts any widget subtree centered over a dimmed backdrop with full input
+  routing. The file/color choosers and an import-collision dialog build on
+  it -- they need their content widgets, not new modal plumbing.
+
   when building these, keep doc/gui.md's two rules in mind: each is an
   extension widget (widget_ext.h) unless it earns a place in the core set,
   and any container holding content needs an explicit PREF_W/PREF_H or GROW
