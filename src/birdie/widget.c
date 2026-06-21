@@ -132,6 +132,8 @@ static double list_last_time;
 static bd_id        active_notice = BD_NONE;
 static bd_notice_cb notice_cb;
 static void        *notice_arg;
+/* Generic modal dialog overlay (one at a time), a detached widget subtree. */
+static bd_id        active_modal = BD_NONE;
 /* IME: in-progress preedit shown at the focused field's caret, and the last
  * reported enabled state */
 static char  preedit_buf[256];
@@ -2323,6 +2325,21 @@ bd_gui_layout(int win_w, int win_h)
 		layout_frame(root, win_w, win_h);
 	}
 
+	/* an open modal dialog is laid out centered at its preferred size, so
+	 * the shared pass below also lays out any extension widgets it hosts */
+	if (active_modal != BD_NONE && pool[active_modal].alive) {
+		struct widget *d = &pool[active_modal];
+		int dw = d->pref_w > 0 ? d->pref_w : win_w / 2;
+		int dh = d->pref_h > 0 ? d->pref_h : win_h / 2;
+		if (dw > win_w) dw = win_w;
+		if (dh > win_h) dh = win_h;
+		d->x = (win_w - dw) / 2;
+		d->y = (win_h - dh) / 2;
+		d->w = dw;
+		d->h = dh;
+		layout_children(active_modal);
+	}
+
 	/* shared pass: popups and extension-widget layout over the whole pool */
 	bd_id i;
 	for (i = 1; i < (bd_id)pool_next; i++) {
@@ -2429,6 +2446,18 @@ render_notice(int w, int h)
 	bd_draw_end();
 }
 
+/* Render the open modal dialog centered over a dimmed backdrop. */
+static void
+render_modal(int w, int h)
+{
+	if (active_modal == BD_NONE || !pool[active_modal].alive)
+		return;
+	bd_draw_begin(w, h);
+	bd_draw_rect(0, 0, w, h, 0x00000099u);         /* dim backdrop */
+	render_widget(active_modal);                   /* the dialog subtree */
+	bd_draw_end();
+}
+
 /* On-screen caret rectangle of a focused text field (for IME positioning). */
 static int
 caret_rect(bd_id id, int *cx, int *cy, int *cw, int *ch)
@@ -2512,13 +2541,17 @@ bd_gui_render(void)
 			be->window_begin(id);
 			render_frame(f, be->window_width(id),
 			    be->window_height(id));
-			if (i == 0)   /* modal notice overlays the primary window */
+			if (i == 0) { /* overlays layer above the primary window */
+				render_modal(be->window_width(id),
+				    be->window_height(id));
 				render_notice(be->window_width(id),
 				    be->window_height(id));
+			}
 			be->window_swap(id);
 		}
 	} else {
 		render_frame(root, be->width(), be->height());
+		render_modal(be->width(), be->height());
 		render_notice(be->width(), be->height());
 	}
 
@@ -2747,6 +2780,30 @@ bd_notice_open(const char *message, const char *buttons,
 	return n;
 }
 
+void
+bd_modal_open(bd_id dialog)
+{
+	if (dialog != BD_NONE && pool[dialog].alive)
+		active_modal = dialog;
+}
+
+void
+bd_modal_close(bd_id dialog)
+{
+	if (active_modal != dialog)
+		return;
+	active_modal = BD_NONE;
+	/* drop keyboard focus: it may be inside the now-hidden dialog, and its
+	 * widgets must stop receiving key events once the main UI is live again */
+	focus_id = BD_NONE;
+}
+
+bd_id
+bd_modal_active(void)
+{
+	return active_modal;
+}
+
 /* Route a touch to a per-finger captured widget, synthesizing mouse events so
  * existing extension widgets (knobs, sliders, ...) work unchanged. Several
  * fingers can drive several widgets at once. */
@@ -2873,8 +2930,19 @@ bd_gui_event(const bd_event *ev)
 		}
 	}
 
+	/* An open modal dialog is the dispatch root: all input routes to its
+	 * subtree (so its widgets behave as in a frame), Escape dismisses it,
+	 * and anything outside is swallowed so the dimmed UI behind is inert. */
+	if (active_modal != BD_NONE && pool[active_modal].alive) {
+		if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ESCAPE) {
+			bd_modal_close(active_modal);
+			return 1;
+		}
+	}
+
 	/* the top-level frame this event is destined for (its own window) */
-	bd_id frame = frame_for_window(ev->window);
+	bd_id frame = (active_modal != BD_NONE && pool[active_modal].alive)
+	    ? active_modal : frame_for_window(ev->window);
 	if (frame == BD_NONE || !pool[frame].alive)
 		return 0;
 

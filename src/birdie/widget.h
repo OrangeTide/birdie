@@ -157,6 +157,18 @@ bd_id bd_notice_open(const char *message, const char *buttons,
                      bd_notice_cb cb, void *arg);
 void  bd_notice_close(bd_id notice);
 
+/* Generic modal dialog. Build a top-level container (parent BD_NONE) with a
+ * BD_PREF_W / BD_PREF_H and fill it with any widgets (panels, tables, buttons,
+ * inputs); bd_modal_open() then shows it centered over a dimmed backdrop and
+ * routes all input to it through the normal dispatch, so its widgets behave
+ * exactly as in a frame. Escape or bd_modal_close() dismisses it (the dialog
+ * subtree is not destroyed, so it can be reopened). One modal at a time; it
+ * layers above the main UI and below a bd_notice alert. The dialog is detached
+ * from the main frame, so the app keeps and reuses the bd_id. */
+void  bd_modal_open(bd_id dialog);
+void  bd_modal_close(bd_id dialog);
+bd_id bd_modal_active(void);   /* the open dialog, or BD_NONE */
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a

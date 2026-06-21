@@ -1175,6 +1175,63 @@ main(void)
 #undef rowy
 	}
 
+	/* ---- generic modal dialog ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id mfr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id mbtn = bd_create(mfr, BD_BUTTON, BD_LABEL_S, "behind",
+	    BD_ON_CLICK_F, on_click, BD_PREF_H_I, 24, BD_END);
+	/* a detached dialog: a panel with a button, sized 200x100 */
+	bd_id dlg = bd_create(BD_NONE, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 100, BD_PAD_I, 8, BD_END);
+	bd_id dbtn = bd_create(dlg, BD_BUTTON, BD_LABEL_S, "ok",
+	    BD_ON_CLICK_F, on_click, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(800, 600);
+
+	check("no modal active initially", bd_modal_active() == BD_NONE);
+	bd_modal_open(dlg);
+	check("bd_modal_open sets the active modal", bd_modal_active() == dlg);
+
+	/* the dialog is centered at its preferred size after layout */
+	bd_gui_layout(800, 600);
+	int dx, dy, dw, dh;
+	bd_widget_rect(dlg, &dx, &dy, &dw, &dh);
+	check("modal is centered at its preferred size",
+	    dw == 200 && dh == 100 && dx == (800 - 200) / 2 && dy == (600 - 100) / 2);
+
+	n_scissor = 0;   /* unused here; just exercise render */
+	bd_gui_render();
+	check("rendering with a modal open does not crash", 1);
+
+	/* a click on the button BEHIND the modal must not reach it */
+	int bx, by, bw, bh;
+	bd_widget_rect(mbtn, &bx, &by, &bw, &bh);
+	int before = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	check("input to the UI behind the modal is blocked", clicked == before);
+
+	/* a click on the dialog's own button works */
+	bd_widget_rect(dbtn, &bx, &by, &bw, &bh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	check("the modal's own widgets receive input", clicked == before + 1);
+
+	/* Escape closes the modal and is swallowed (returns 1) */
+	int esc = bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape closes the modal and is consumed",
+	    bd_modal_active() == BD_NONE && esc == 1);
+
+	/* after close, the UI behind is live again */
+	bd_widget_rect(mbtn, &bx, &by, &bw, &bh);
+	before = clicked;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
+	check("closing the modal re-enables the UI behind", clicked == before + 1);
+
+	bd_gui_cleanup();
+	}
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }
