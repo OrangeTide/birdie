@@ -11,10 +11,12 @@
 #include <stdio.h>
 #include <string.h>
 
-static bd_id status_label;
+static bd_id status_label;              /* connection status, in the sidebar */
+static bd_id mud_label;                 /* current MUD name, in the sidebar */
 static bd_id terminal;
 static bd_id input_line;
-static bd_id mudlist;                   /* BD_TABLE over the profile store */
+static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
+static bd_id connect_dialog;            /* the modal MUD picker */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
 static bd_session *session;
@@ -110,6 +112,17 @@ rebind_session(const bd_profile *p)
 	bd_session_set_winsize(session, 80, 24);
 }
 
+/* Sidebar label showing the current MUD (borrowed string, so keep it in a
+ * static buffer for the label to point at). */
+static void
+set_mud_label(const bd_profile *p)
+{
+	static char buf[80];
+	const char *name = p ? bd_profile_get(p, "name") : NULL;
+	snprintf(buf, sizeof buf, "MUD: %s", name ? name : "(none)");
+	bd_set(mud_label, BD_LABEL_S, buf, BD_END);
+}
+
 static void
 connect_profile(const bd_profile *p)
 {
@@ -123,6 +136,7 @@ connect_profile(const bd_profile *p)
 		return;
 	}
 	rebind_session(p);
+	set_mud_label(p);
 
 	host = bd_profile_get(p, "host");
 	port = bd_profile_get(p, "port");
@@ -148,21 +162,43 @@ selected_profile(void)
 	return active;
 }
 
+/* "Session > Connect..." opens the modal MUD picker. */
 static void
-on_connect(bd_id id, void *arg)
+on_open_connect(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	connect_profile(selected_profile());
+	bd_modal_open(connect_dialog);
 }
 
-/* Double-click / Enter on a MUD-list row connects to it. */
+/* Connect button inside the dialog: connect the selected MUD, then close. */
+static void
+on_dialog_connect(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	const bd_profile *p = selected_profile();
+	bd_modal_close(connect_dialog);
+	connect_profile(p);
+}
+
+static void
+on_dialog_cancel(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_modal_close(connect_dialog);
+}
+
+/* Double-click / Enter on a dialog row connects to it and closes the dialog. */
 static void
 mudlist_activate(bd_id w, int row, void *ctx)
 {
+	const bd_profile *p = bd_profiles_at(profiles, row);
 	(void)w;
 	(void)ctx;
-	connect_profile(bd_profiles_at(profiles, row));
+	bd_modal_close(connect_dialog);
+	connect_profile(p);
 }
 
 static void
@@ -296,39 +332,33 @@ init(void)
 	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Paste", BD_END);
 
 	bd_id m_sess = bd_create(menu, BD_MENU, BD_LABEL_S, "Session", BD_END);
-	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Connect",
-		BD_ON_CLICK_F, on_connect, BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Connect...",
+		BD_ON_CLICK_F, on_open_connect, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect",
 		BD_ON_CLICK_F, on_disconnect, BD_END);
 
-	/* body: MUD-list sidebar on the left, the session on the right */
+	/* body: a session-context sidebar on the left, the session on the right */
 	bd_id body = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1,
 		BD_PAD_I, 4, BD_GAP_I, 6, BD_END);
 
-	/* left: the MUD list (BD_TABLE) + connect/disconnect */
+	/* left sidebar: state about the current session (and, later, vitals
+	 * scraped from GMCP/MSDP -- the placeholders mark where that lands) */
 	bd_id side = bd_create(body, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 300, BD_GAP_I, 4, BD_END);
-	bd_create(side, BD_LABEL,
-		BD_LABEL_S, "MUD list (double-click to connect):",
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 190,
+		BD_BG_C, 0x313335FFu, BD_PAD_I, 8, BD_GAP_I, 6, BD_END);
+	bd_create(side, BD_LABEL, BD_LABEL_S, "Session",
+		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
+	mud_label = bd_create(side, BD_LABEL, BD_LABEL_S, "MUD: (none)",
 		BD_PREF_H_I, 18, BD_END);
-
-	static const bd_table_column mcols[] = {
-		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
-		{ "Host", 120, BD_TABLE_LEFT,  0 },
-		{ "Port", 46,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
-	};
-	mudlist = bd_table_create(side, mcols, 3,
-		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
-		&(bd_table_cb){ .activate = mudlist_activate },
-		BD_GROW_I, 1, BD_END);
-
-	bd_id sbtn = bd_create(side, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 28, BD_GAP_I, 4, BD_END);
-	bd_create(sbtn, BD_BUTTON, BD_LABEL_S, "Connect", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_connect, BD_END);
-	bd_create(sbtn, BD_BUTTON, BD_LABEL_S, "Disconnect", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_disconnect, BD_END);
+	status_label = bd_create(side, BD_LABEL, BD_LABEL_S, "Status: Disconnected",
+		BD_PREF_H_I, 18, BD_END);
+	bd_create(side, BD_LABEL, BD_LABEL_S, "Vitals",
+		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
+	/* placeholders: a future GMCP Char.Vitals handler fills these in */
+	bd_create(side, BD_LABEL, BD_LABEL_S, "HP: --", BD_PREF_H_I, 16, BD_END);
+	bd_create(side, BD_LABEL, BD_LABEL_S, "MP: --", BD_PREF_H_I, 16, BD_END);
+	bd_create(side, BD_LABEL, BD_LABEL_S, "", BD_GROW_I, 1, BD_END); /* filler */
 
 	/* right: terminal output + command input */
 	bd_id right = bd_create(body, BD_PANEL,
@@ -336,24 +366,37 @@ init(void)
 	terminal = bd_terminal_create(right, BD_GROW_I, 1, BD_END);
 	bd_terminal_write(terminal,
 		"\033[1mbirdie v0.0\033[0m\r\n"
-		"Select a MUD and connect.\r\n",
+		"Session > Connect... to choose a MUD.\r\n",
 		-1);
 	input_line = bd_create(right, BD_INPUT_LINE,
 		BD_PREF_H_I, 24, BD_PAD_I, 4, BD_ON_CLICK_F, on_submit, BD_END);
 
-	/* status bar */
-	status_label = bd_create(frame, BD_LABEL,
-		BD_LABEL_S, "Status: Disconnected",
-		BD_PREF_H_I, 20,
-		BD_FG_C, 0xAAAAAAFFu,
-		BD_BG_C, 0x3C3F41FFu,
-		BD_PAD_I, 4,
-		BD_END);
+	/* the modal connect dialog: a detached panel hosting the MUD-list table */
+	connect_dialog = bd_create(BD_NONE, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 460, BD_PREF_H_I, 340,
+		BD_BG_C, 0x313335FFu, BD_PAD_I, 10, BD_GAP_I, 8, BD_END);
+	bd_create(connect_dialog, BD_LABEL,
+		BD_LABEL_S, "Connect to a MUD (double-click a row):",
+		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
+	static const bd_table_column mcols[] = {
+		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
+		{ "Host", 170, BD_TABLE_LEFT,  0 },
+		{ "Port", 50,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
+	};
+	mudlist = bd_table_create(connect_dialog, mcols, 3,
+		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
+		&(bd_table_cb){ .activate = mudlist_activate },
+		BD_GROW_I, 1, BD_END);
+	bd_id dbtn = bd_create(connect_dialog, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);
+	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Connect", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_dialog_connect, BD_END);
+	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Cancel", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_dialog_cancel, BD_END);
 
-	/* Optionally connect on startup (handy for testing/automation; a
-	 * profile-driven autoconnect lives in the roadmap). */
+	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
-		on_connect(BD_NONE, NULL);
+		connect_profile(active);
 }
 
 static void
