@@ -103,8 +103,9 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * seam stays scalar. mud.send and class.* reach the host; the on.* hook tables
  * let scripts react to events alongside the #action/#alias triggers, dispatched
  * from C via __bd_dispatch. Each handler runs in pcall so one bad hook does not
- * abort the rest. Deferred (doc/triggers.md): mud.gmcp, log.note, the var
- * table, on.timer/on.mxp.
+ * abort the rest. GMCP/MSDP payloads are JSON-decoded (json.decode) to a Lua
+ * table before the on.gmcp handler is called. Deferred (doc/triggers.md):
+ * mud.gmcp (send), log.note, the var table, on.timer/on.mxp.
  */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
@@ -113,13 +114,67 @@ static const char bootstrap_lua[] =
 	"function class.enable(n) __bd_class(n, true) end\n"
 	"function class.disable(n) __bd_class(n, false) end\n"
 	"function class.toggle(n) __bd_class(n, nil) end\n"
+	/* a compact recursive-descent JSON decoder. byte-code comparisons keep
+	 * the source free of quote/backslash escaping; json.decode returns the
+	 * value or nil on malformed input. Used to hand GMCP/MSDP payloads to
+	 * scripts as Lua tables. */
+	"local function jdec(s)\n"
+	" local p=1\n"
+	" local function sk() while p<=#s do local b=s:byte(p)\n"
+	"   if b==32 or b==9 or b==10 or b==13 then p=p+1 else break end end end\n"
+	" local pv\n"
+	" local function pstr()\n"
+	"  p=p+1; local t={}\n"
+	"  while p<=#s do local b=s:byte(p)\n"
+	"   if b==34 then p=p+1; return table.concat(t) end\n"
+	"   if b==92 then p=p+1; local e=s:byte(p)\n"
+	"    if e==110 then t[#t+1]=string.char(10)\n"
+	"    elseif e==116 then t[#t+1]=string.char(9)\n"
+	"    elseif e==114 then t[#t+1]=string.char(13)\n"
+	"    elseif e==98 then t[#t+1]=string.char(8)\n"
+	"    elseif e==102 then t[#t+1]=string.char(12)\n"
+	"    elseif e==117 then local h=tonumber(s:sub(p+1,p+4),16) or 63; p=p+4\n"
+	"     if h<128 then t[#t+1]=string.char(h)\n"
+	"     elseif h<2048 then t[#t+1]=string.char(192+h//64,128+h%64)\n"
+	"     else t[#t+1]=string.char(224+h//4096,128+(h//64)%64,128+h%64) end\n"
+	"    else t[#t+1]=string.char(e) end\n"
+	"    p=p+1\n"
+	"   else t[#t+1]=string.char(b); p=p+1 end end\n"
+	"  error('eos')\n"
+	" end\n"
+	" pv=function()\n"
+	"  sk(); local b=s:byte(p)\n"
+	"  if b==123 then p=p+1; local o={}; sk(); if s:byte(p)==125 then p=p+1; return o end\n"
+	"   while true do sk(); local k=pstr(); sk()\n"
+	"    if s:byte(p)~=58 then error('colon') end; p=p+1; o[k]=pv(); sk()\n"
+	"    local d=s:byte(p)\n"
+	"    if d==44 then p=p+1 elseif d==125 then p=p+1; return o else error('obj') end end\n"
+	"  elseif b==91 then p=p+1; local a={}; sk(); if s:byte(p)==93 then p=p+1; return a end\n"
+	"   while true do a[#a+1]=pv(); sk(); local d=s:byte(p)\n"
+	"    if d==44 then p=p+1 elseif d==93 then p=p+1; return a else error('arr') end end\n"
+	"  elseif b==34 then return pstr()\n"
+	"  elseif b==116 then p=p+4; return true\n"
+	"  elseif b==102 then p=p+5; return false\n"
+	"  elseif b==110 then p=p+4; return nil\n"
+	"  else local st=p\n"
+	"   while p<=#s do local c=s:byte(p)\n"
+	"    if (c>=48 and c<=57) or c==45 or c==43 or c==46 or c==101 or c==69 then p=p+1 else break end end\n"
+	"   return tonumber(s:sub(st,p-1)) end\n"
+	" end\n"
+	" return pv()\n"
+	"end\n"
+	"json = json or {}\n"
+	"function json.decode(s) local ok,v=pcall(jdec,s); if ok then return v end return nil end\n"
 	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={} }\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
 	"  elseif kind=='prompt' then for _,f in ipairs(on.prompt) do pcall(f,a) end\n"
 	"  elseif kind=='connect' then for _,f in ipairs(on.connect) do pcall(f) end\n"
 	"  elseif kind=='disconnect' then for _,f in ipairs(on.disconnect) do pcall(f) end\n"
-	"  elseif kind=='gmcp' then local h=on.gmcp[a]; if h then pcall(h,b) end end\n"
+	/* hand GMCP/MSDP handlers the decoded table (nil if the payload was not
+	 * valid JSON) */
+	"  elseif kind=='gmcp' then local h=on.gmcp[a]\n"
+	"   if h then pcall(h, json.decode(b)) end end\n"
 	"end\n";
 
 static void
