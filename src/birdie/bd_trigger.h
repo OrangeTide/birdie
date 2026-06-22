@@ -1,0 +1,82 @@
+#ifndef BD_TRIGGER_H
+#define BD_TRIGGER_H
+
+/*
+ * bd_trigger -- the trigger / alias engine (doc/triggers.md).
+ *
+ * Holds a table of triggers, each in a (dot-nestable) class that toggles as a
+ * unit, and dispatches incoming lines, prompts, and GMCP packages plus
+ * outgoing user input against them in priority order. A matched trigger runs
+ * its body: MUD command text (with %0..%9 capture substitution) is emitted
+ * through the send callback; a body beginning with '@' is a Lua expression run
+ * on the bd_vm. This is the C engine the TinTin++-style verbs (#action,
+ * #alias, ...) compile down to; nothing here is inaccessible from Lua.
+ *
+ * This increment covers action/alias/prompt/gmcp triggers, classes, priority,
+ * and #stop. Deferred (doc/triggers.md): multi-state chains, the timer /
+ * event / expression / mxp types, and the line-rewriting verbs #gag /
+ * #highlight / #substitute.
+ *
+ * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
+ */
+
+#include "bd_vm.h"
+
+typedef enum bd_trigger_type {
+	BD_TRIG_ACTION,   /* matches an incoming MUD line (#action) */
+	BD_TRIG_ALIAS,    /* matches outgoing user input (#alias) */
+	BD_TRIG_PROMPT,   /* matches a prompt line (EOR/GA-marked) */
+	BD_TRIG_GMCP      /* matches a GMCP package by name */
+} bd_trigger_type;
+
+#define BD_TRIG_PRIO_DEFAULT 5
+
+typedef struct bd_triggers bd_triggers;
+
+/* The engine emits MUD commands through this; it does not own the socket. */
+typedef void (*bd_trigger_send_fn)(const char *cmd, void *ctx);
+
+/* Create an engine. `vm` runs '@' Lua bodies (may be a null/recording VM);
+ * `send` emits command bodies. Either may be NULL. */
+bd_triggers *bd_triggers_new(bd_vm *vm, bd_trigger_send_fn send, void *ctx);
+void bd_triggers_free(bd_triggers *t);
+
+/*
+ * Add a trigger. `pattern` is a TinTin++-style pattern for action/alias/prompt
+ * (literal text with %1..%9 captures, optional ^ start / $ end anchors) or a
+ * GMCP package name for BD_TRIG_GMCP. `body` is command text or, if it begins
+ * with '@', a Lua expression; %0 (whole match) and %1..%9 (captures) are
+ * substituted first. `class` NULL/"" means "default". `priority` < 0 uses the
+ * default. `stop` != 0 halts matching for that input after this fires.
+ * Returns a trigger id (>= 0), or -1 on error.
+ */
+int bd_trigger_add(bd_triggers *t, bd_trigger_type type, const char *pattern,
+                   const char *body, const char *class, int priority, int stop);
+
+/* Remove a trigger by id. */
+void bd_trigger_remove(bd_triggers *t, int id);
+
+/* Number of triggers currently in the table. */
+int bd_trigger_count(const bd_triggers *t);
+
+/* ---- classes (dot-nested: disabling "combat" disables "combat.melee") ---- */
+
+void bd_class_enable(bd_triggers *t, const char *name);
+void bd_class_disable(bd_triggers *t, const char *name);
+/* 1 if `name`'s class (and all its ancestors) are enabled. */
+int  bd_class_enabled(bd_triggers *t, const char *name);
+
+/* ---- dispatch (all return 1 if at least one trigger fired) ---- */
+
+int bd_triggers_line(bd_triggers *t, const char *line);    /* BD_TRIG_ACTION */
+int bd_triggers_prompt(bd_triggers *t, const char *text);  /* BD_TRIG_PROMPT */
+int bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json);
+
+/*
+ * Run outgoing user input through the aliases. Returns 1 if an alias fired
+ * (the caller should NOT send the original input -- the alias body emitted
+ * whatever should go instead), 0 if no alias matched (send the input as-is).
+ */
+int bd_triggers_input(bd_triggers *t, const char *cmd);
+
+#endif /* BD_TRIGGER_H */
