@@ -152,11 +152,13 @@ trigger engine.
 Built (`src/birdie/bd_vm.{c,h}`, `bd_trigger.{c,h}`, `bd_verb.{c,h}`, wired
 through `bd_session`):
 
-- **`bd_vm`** — the abstraction above, with a `bd_vm_backend` vtable and two
-  backends: `bd_vm_null` (scripting disabled) and `bd_vm_recording` (tests).
-  Values cross the seam as scalars (nil/bool/number/string); structured
-  GMCP/MSDP data crosses as a JSON string. The Lua 5.4 + LPeg backend is not
-  vendored yet, so `@` bodies and `#script` are inert (no-ops) for now.
+- **`bd_vm`** — the abstraction above, with a `bd_vm_backend` vtable and three
+  backends: `bd_vm_lua` (Lua 5.4 + LPeg, the v1.0 backend; `bd_vm_lua.c` over
+  the vendored `src/thirdparty/lua` + `src/thirdparty/lpeg`), `bd_vm_null`
+  (scripting disabled), and `bd_vm_recording` (tests). Values cross the seam as
+  scalars (nil/bool/number/string); structured GMCP/MSDP data crosses as a JSON
+  string. `bd_session` runs on the Lua backend, so `@` bodies and `#script`
+  execute; it installs `mud.send(text)` so scripts can reach the MUD.
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
   toggle as a unit, priority ordering (highest first) with `#stop`, and four
   dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
@@ -170,10 +172,11 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the Lua 5.4 + LPeg backend; multi-state chains; the timer /
-event / expression / mxp types; the line-rewriting verbs (`#substitute` /
-`#gag` / `#highlight`); `#tick` / `#unaction` / `#list`; and the recursion cap
-and sandboxing posture noted below.
+Not yet built: the rest of the script-facing host API (`mud.gmcp`, the
+`on.*` hook tables, `class.*`, `log.note`, the `var` table); multi-state
+chains; the timer / event / expression / mxp types; the line-rewriting verbs
+(`#substitute` / `#gag` / `#highlight`); `#tick` / `#unaction` / `#list`;
+`#script`; and the recursion cap and sandboxing posture noted below.
 
 ## Open questions
 
