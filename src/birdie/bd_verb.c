@@ -5,6 +5,7 @@
  */
 
 #include "bd_verb.h"
+#include "bd_vm.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -168,6 +169,18 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_trigger(t, BD_TRIG_ALIAS, args, feedback, fbcap);
 	if (!strcmp(verb, "class"))
 		return verb_class(t, args, feedback, fbcap);
+	if (!strcmp(verb, "script")) {
+		char src[ARG_MAX];
+		bd_vm *vm = bd_triggers_vm(t);
+		if (!read_brace(&args, src, sizeof src)) {
+			fb(feedback, fbcap, "usage: #script {lua}");
+		} else if (!vm || bd_vm_eval(vm, src) != 0) {
+			fb(feedback, fbcap, vm ? bd_vm_error(vm) : "no scripting");
+		} else {
+			fb(feedback, fbcap, "ok");
+		}
+		return 1;
+	}
 
 	fb(feedback, fbcap, "unknown command");
 	return 1;        /* a leading '#' was a verb attempt, so consume it */

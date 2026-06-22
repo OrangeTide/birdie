@@ -303,6 +303,12 @@ bd_trigger_count(const bd_triggers *t)
 	return t ? t->n : 0;
 }
 
+bd_vm *
+bd_triggers_vm(bd_triggers *t)
+{
+	return t ? t->vm : NULL;
+}
+
 /* dispatch order: priority desc, then insertion order (stable) */
 static int
 cmp_trig(const void *a, const void *b)

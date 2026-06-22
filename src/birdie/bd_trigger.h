@@ -59,6 +59,10 @@ void bd_trigger_remove(bd_triggers *t, int id);
 /* Number of triggers currently in the table. */
 int bd_trigger_count(const bd_triggers *t);
 
+/* The scripting VM the engine runs '@' bodies on (for #script and the
+ * event-hook dispatch). May be NULL. */
+bd_vm *bd_triggers_vm(bd_triggers *t);
+
 /* ---- classes (dot-nested: disabling "combat" disables "combat.melee") ---- */
 
 void bd_class_enable(bd_triggers *t, const char *name);

@@ -72,18 +72,70 @@ host_send(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
 	return 0;
 }
 
-/* The script-facing API, built in Lua over the flat host functions. Nested
- * namespaces (mud.*, log.*, on.*) are a thin Lua layer so the C seam stays
- * scalar; this is where the host API grows as more hooks are added. */
+/* Host function: __bd_class(name, enable) -> toggle a trigger class.
+ * enable true=enable, false=disable, nil=toggle. */
+static int
+host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	bd_session *s = ud;
+	const char *n;
+	(void)vm;
+	(void)ret;
+	if (argc < 1 || argv[0].type != BD_VM_STR)
+		return 0;
+	n = argv[0].u.s;
+	if (argc >= 2 && argv[1].type == BD_VM_BOOL) {
+		if (argv[1].u.b)
+			bd_class_enable(s->trig, n);
+		else
+			bd_class_disable(s->trig, n);
+	} else {                                /* nil -> toggle */
+		if (bd_class_enabled(s->trig, n))
+			bd_class_disable(s->trig, n);
+		else
+			bd_class_enable(s->trig, n);
+	}
+	return 0;
+}
+
+/*
+ * The script-facing API, built in Lua over the flat host functions, so the C
+ * seam stays scalar. mud.send and class.* reach the host; the on.* hook tables
+ * let scripts react to events alongside the #action/#alias triggers, dispatched
+ * from C via __bd_dispatch. Each handler runs in pcall so one bad hook does not
+ * abort the rest. Deferred (doc/triggers.md): mud.gmcp, log.note, the var
+ * table, on.timer/on.mxp.
+ */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
-	"function mud.send(s) __bd_send(tostring(s)) end\n";
+	"function mud.send(s) __bd_send(tostring(s)) end\n"
+	"class = class or {}\n"
+	"function class.enable(n) __bd_class(n, true) end\n"
+	"function class.disable(n) __bd_class(n, false) end\n"
+	"function class.toggle(n) __bd_class(n, nil) end\n"
+	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={} }\n"
+	"function __bd_dispatch(kind, a, b)\n"
+	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
+	"  elseif kind=='prompt' then for _,f in ipairs(on.prompt) do pcall(f,a) end\n"
+	"  elseif kind=='connect' then for _,f in ipairs(on.connect) do pcall(f) end\n"
+	"  elseif kind=='disconnect' then for _,f in ipairs(on.disconnect) do pcall(f) end\n"
+	"  elseif kind=='gmcp' then local h=on.gmcp[a]; if h then pcall(h,b) end end\n"
+	"end\n";
 
 static void
 install_script_api(bd_session *s)
 {
 	bd_vm_register(s->vm, "__bd_send", host_send, s);
+	bd_vm_register(s->vm, "__bd_class", host_class, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
+}
+
+/* Fire the Lua on.* hooks for an event (no-op if scripting is disabled or the
+ * dispatcher is absent). Always passes three string args; unused ones empty. */
+static void
+dispatch_hook(bd_session *s, const char *kind, const char *a, const char *b)
+{
+	bd_vm_call(s->vm, "__bd_dispatch", "sss", kind, a ? a : "", b ? b : "");
 }
 
 /* Copy `src` to `dst` (cap incl. NUL) dropping ANSI/VT escape sequences, so
@@ -119,7 +171,8 @@ dispatch_line(bd_session *s, const char *raw, size_t len)
 {
 	char plain[4096];
 	strip_ansi(raw, len, plain, sizeof plain);
-	bd_triggers_line(s->trig, plain);
+	bd_triggers_line(s->trig, plain);       /* #action triggers */
+	dispatch_hook(s, "line", plain, NULL);  /* on.line hooks */
 }
 
 /* Append received bytes to the line buffer and dispatch each completed line
@@ -174,6 +227,11 @@ net_state(bd_net_state state, const char *msg, void *arg)
 	ev.state = state;
 	ev.detail = msg;
 	emit(s, &ev);
+
+	if (state == BD_NET_CONNECTED)
+		dispatch_hook(s, "connect", NULL, NULL);
+	else if (state == BD_NET_CLOSED || state == BD_NET_ERROR)
+		dispatch_hook(s, "disconnect", NULL, NULL);
 }
 
 static void
@@ -201,6 +259,7 @@ net_prompt(void *arg)
 		char plain[4096];
 		strip_ansi(s->linebuf, s->line_len, plain, sizeof plain);
 		bd_triggers_prompt(s->trig, plain);
+		dispatch_hook(s, "prompt", plain, NULL);
 		s->line_len = 0;
 	}
 }
@@ -216,8 +275,9 @@ net_package(int proto, const char *name, const char *json, void *arg)
 	ev.json = json;
 	emit(s, &ev);
 
-	/* route GMCP/MSDP packages to gmcp-type triggers (matched by name) */
+	/* route GMCP/MSDP packages to gmcp-type triggers and on.gmcp hooks */
 	bd_triggers_gmcp(s->trig, name, json);
+	dispatch_hook(s, "gmcp", name, json);
 }
 
 /* ---- API ---- */

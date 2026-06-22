@@ -12,10 +12,10 @@
  * bd_trigger API, parsing brace-grouped arguments and dispatching to the
  * engine. Anything the verbs do is reachable through bd_trigger directly.
  *
- * Implemented this increment: #action, #alias, #class. The line-rewriting
- * verbs (#substitute / #gag / #highlight), the timer verb (#tick), the
- * remove/list verbs (#unaction / #list), and a configurable command char are
- * deferred (doc/triggers.md).
+ * Implemented: #action, #alias, #class, #script. The line-rewriting verbs
+ * (#substitute / #gag / #highlight), the timer verb (#tick), the remove/list
+ * verbs (#unaction / #list), and a configurable command char are deferred
+ * (doc/triggers.md).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
