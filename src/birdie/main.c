@@ -14,6 +14,8 @@
 
 static bd_id status_label;              /* connection status, in the sidebar */
 static bd_id mud_label;                 /* current MUD name, in the sidebar */
+static bd_id hp_label;                  /* sidebar vitals, driven by GMCP */
+static bd_id mp_label;
 static bd_id terminal;
 static bd_id input_line;
 static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
@@ -97,6 +99,52 @@ on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 	}
 }
 
+/* Host function the front-end adds to the session VM: __bd_ui(key, value)
+ * pushes a named display value into the sidebar. The Lua side (a default
+ * on.gmcp handler) extracts vitals from a decoded GMCP table and calls this,
+ * so the core stays unaware of widgets and a profile script can override the
+ * handler. Labels borrow their string, so keep it in a static buffer. */
+static int
+host_ui(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	static char hp[48], mp[48];
+	const char *key, *val;
+	(void)vm;
+	(void)ret;
+	(void)ud;
+	if (argc < 2 || argv[0].type != BD_VM_STR || argv[1].type != BD_VM_STR)
+		return 0;
+	key = argv[0].u.s;
+	val = argv[1].u.s;
+	if (!strcmp(key, "hp")) {
+		snprintf(hp, sizeof hp, "HP: %s", val);
+		bd_set(hp_label, BD_LABEL_S, hp, BD_END);
+	} else if (!strcmp(key, "mp")) {
+		snprintf(mp, sizeof mp, "MP: %s", val);
+		bd_set(mp_label, BD_LABEL_S, mp, BD_END);
+	}
+	return 0;
+}
+
+/* Default sidebar-vitals wiring, (re)installed on each session's VM: register
+ * __bd_ui, route GMCP Char.Vitals -> the sidebar, and blank the vitals on
+ * disconnect. A profile script can replace the on.gmcp handler later. */
+static const char vitals_lua[] =
+	"on.gmcp['Char.Vitals'] = function(v)\n"
+	"  if type(v) ~= 'table' then return end\n"
+	"  if v.hp then __bd_ui('hp', tostring(v.hp)) end\n"
+	"  if v.mp then __bd_ui('mp', tostring(v.mp)) end\n"
+	"end\n"
+	"table.insert(on.disconnect, function() __bd_ui('hp','--'); __bd_ui('mp','--') end)\n";
+
+static void
+install_ui_hooks(bd_session *s)
+{
+	bd_vm *vm = bd_session_vm(s);
+	bd_vm_register(vm, "__bd_ui", host_ui, NULL);
+	bd_vm_eval(vm, vitals_lua);     /* no-op if scripting is disabled */
+}
+
 /* Point the session at `p`, recreating it if the profile changed. The session
  * borrows the profile, so switching MUDs means a fresh session (and net
  * thread); reconnecting to the same one reuses it. */
@@ -111,6 +159,7 @@ rebind_session(const bd_profile *p)
 	session = bd_session_new(active);
 	bd_session_on_event(session, on_session_event, NULL);
 	bd_session_set_winsize(session, 80, 24);
+	install_ui_hooks(session);
 }
 
 /* Sidebar label showing the current MUD (borrowed string, so keep it in a
@@ -326,6 +375,8 @@ init(void)
 	session = bd_session_new(active);
 	bd_session_on_event(session, on_session_event, NULL);
 	bd_session_set_winsize(session, 80, 24);   /* matches the terminal grid */
+	install_ui_hooks(session);   /* GMCP Char.Vitals -> sidebar (host_ui only
+	                              * fires at runtime, after the labels exist) */
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",
@@ -376,9 +427,9 @@ init(void)
 		BD_PREF_H_I, 18, BD_END);
 	bd_create(side, BD_LABEL, BD_LABEL_S, "Vitals",
 		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
-	/* placeholders: a future GMCP Char.Vitals handler fills these in */
-	bd_create(side, BD_LABEL, BD_LABEL_S, "HP: --", BD_PREF_H_I, 16, BD_END);
-	bd_create(side, BD_LABEL, BD_LABEL_S, "MP: --", BD_PREF_H_I, 16, BD_END);
+	/* the GMCP Char.Vitals handler (install_ui_hooks) fills these in */
+	hp_label = bd_create(side, BD_LABEL, BD_LABEL_S, "HP: --", BD_PREF_H_I, 16, BD_END);
+	mp_label = bd_create(side, BD_LABEL, BD_LABEL_S, "MP: --", BD_PREF_H_I, 16, BD_END);
 	bd_create(side, BD_LABEL, BD_LABEL_S, "", BD_GROW_I, 1, BD_END); /* filler */
 
 	/* right: terminal output + command input */
