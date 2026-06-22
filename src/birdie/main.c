@@ -5,6 +5,7 @@
 #include "bd_session.h"
 #include "bd_profile.h"
 #include "bd_telopt.h"
+#include "bd_verb.h"
 #include "ludica.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -210,15 +211,35 @@ on_disconnect(bd_id id, void *arg)
 }
 
 /* The input line fires its click handler on Enter, before clearing, so the
- * submitted command is still readable here. */
+ * submitted command is still readable here. A leading '#' is a trigger verb
+ * (#action / #alias / #class); otherwise the line is sent (via the aliases). */
 static void
 on_submit(bd_id id, void *arg)
 {
 	(void)arg;
 	const char *cmd = bd_get_s(id, BD_LABEL_S);
-	if (bd_session_state(session) != BD_NET_CONNECTED)
+	const char *literal = NULL;
+	char fb[160];
+
+	if (!cmd || !cmd[0])
 		return;
-	bd_session_send_line(session, cmd ? cmd : "");
+
+	if (bd_verb_exec(bd_session_triggers(session), cmd, &literal,
+	    fb, sizeof fb)) {
+		char line[200];
+		snprintf(line, sizeof line, "\033[36m# %s\033[0m\r\n", fb);
+		bd_terminal_write(terminal, line, -1);
+		return;
+	}
+	if (literal)            /* "##cmd" -> send literal "#cmd" */
+		cmd = literal;
+
+	if (bd_session_state(session) != BD_NET_CONNECTED) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** not connected\033[0m\r\n", -1);
+		return;
+	}
+	bd_session_send_line(session, cmd);
 }
 
 /* Add a profile (name/host/port/tls) to the store if absent. */
