@@ -1,0 +1,4 @@
+upstream: https://www.lua.org/ftp/lua-5.4.8.tar.gz
+version:  5.4.8
+vendored: src/*.c src/*.h minus lua.c (interpreter main) and luac.c
+          (compiler main); LICENSE. Built in plain ISO C as a static lib.

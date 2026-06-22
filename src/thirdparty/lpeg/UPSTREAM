@@ -1,0 +1,4 @@
+upstream: https://www.inf.puc-rio.br/~roberto/lpeg/lpeg-1.1.0.tar.gz
+version:  1.1.0
+vendored: *.c *.h; LICENSE. Built against the vendored Lua headers and
+          registered at VM startup via luaopen_lpeg.

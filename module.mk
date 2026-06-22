@@ -21,6 +21,8 @@ SUBDIRS = \
 	$(LUDICA)/tools \
 	src/thirdparty/mbedtls \
 	src/thirdparty/miniz \
+	src/thirdparty/lua \
+	src/thirdparty/lpeg \
 	src/libvt \
 	src/birdie
 
