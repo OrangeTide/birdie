@@ -56,6 +56,36 @@ trigger_send(const char *cmd, void *ctx)
 	bd_net_send(s->net, "\r\n", 2);
 }
 
+/* Host function exposed to scripts: __bd_send(text) -> send a command line.
+ * The mud.send(text) Lua wrapper (installed in the bootstrap below) calls it,
+ * so '@' trigger bodies and #script can talk to the MUD. */
+static int
+host_send(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	bd_session *s = ud;
+	(void)vm;
+	(void)ret;
+	if (argc >= 1 && argv[0].type == BD_VM_STR && argv[0].u.s) {
+		bd_net_send(s->net, argv[0].u.s, (int)strlen(argv[0].u.s));
+		bd_net_send(s->net, "\r\n", 2);
+	}
+	return 0;
+}
+
+/* The script-facing API, built in Lua over the flat host functions. Nested
+ * namespaces (mud.*, log.*, on.*) are a thin Lua layer so the C seam stays
+ * scalar; this is where the host API grows as more hooks are added. */
+static const char bootstrap_lua[] =
+	"mud = mud or {}\n"
+	"function mud.send(s) __bd_send(tostring(s)) end\n";
+
+static void
+install_script_api(bd_session *s)
+{
+	bd_vm_register(s->vm, "__bd_send", host_send, s);
+	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
+}
+
 /* Copy `src` to `dst` (cap incl. NUL) dropping ANSI/VT escape sequences, so
  * triggers match on plain text. Handles CSI (ESC [ ... final) and a lone ESC +
  * next byte; other control bytes except tab are dropped. */
@@ -202,7 +232,7 @@ bd_session_new(const bd_profile *profile)
 	s->cols = 80;
 	s->rows = 24;
 	s->net = bd_net_new(net_data, net_state, s);
-	s->vm = bd_vm_new(NULL);                 /* null backend until Lua lands */
+	s->vm = bd_vm_new(&bd_vm_lua);           /* Lua 5.4 + LPeg */
 	s->trig = bd_triggers_new(s->vm, trigger_send, s);
 	if (!s->net || !s->vm || !s->trig) {
 		bd_triggers_free(s->trig);
@@ -211,6 +241,7 @@ bd_session_new(const bd_profile *profile)
 		free(s);
 		return NULL;
 	}
+	install_script_api(s);
 	bd_net_set_echo_cb(s->net, net_echo);
 	bd_net_set_prompt_cb(s->net, net_prompt);
 	bd_net_set_package_cb(s->net, net_package);

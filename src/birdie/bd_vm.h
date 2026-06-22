@@ -78,10 +78,12 @@ typedef struct bd_vm_backend {
 	const char *(*error)(void *impl);
 } bd_vm_backend;
 
-/* The three shipped backends. */
+/* The shipped backends. */
 extern const bd_vm_backend bd_vm_null;       /* scripting disabled */
 extern const bd_vm_backend bd_vm_recording;  /* records eval/call for tests */
-/* bd_vm_lua lives in bd_vm_lua.c and is only built when Lua is vendored. */
+/* The v1.0 backend (Lua 5.4 + LPeg). Defined in bd_vm_lua.c; referencing it
+ * requires linking that object plus the vendored lua/lpeg libraries. */
+extern const bd_vm_backend bd_vm_lua;
 
 /* Create a VM on a backend (NULL selects bd_vm_null). */
 bd_vm *bd_vm_new(const bd_vm_backend *backend);
