@@ -158,7 +158,10 @@ through `bd_session`):
   (scripting disabled), and `bd_vm_recording` (tests). Values cross the seam as
   scalars (nil/bool/number/string); structured GMCP/MSDP data crosses as a JSON
   string. `bd_session` runs on the Lua backend, so `@` bodies and `#script`
-  execute; it installs `mud.send(text)` so scripts can reach the MUD.
+  execute. It installs the script API: `mud.send(text)`, `class.enable/disable/
+  toggle` (gating the C trigger classes), and the `on.*` hook tables
+  (`line`/`prompt`/`connect`/`disconnect`/`gmcp`) dispatched from C alongside
+  the verb triggers. `on.gmcp[pkg]` currently receives the raw JSON string.
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
   toggle as a unit, priority ordering (highest first) with `#stop`, and four
   dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
@@ -166,17 +169,18 @@ through `bd_session`):
   captures, `^`/`$` anchors); `gmcp` routes by package name. A matched body is
   either MUD command text (`%0..%9` expanded, emitted to the session) or, with
   a leading `@`, a Lua expression run on `bd_vm`.
-- **`bd_verb`** — the `#action` / `#alias` / `#class` command-line verbs over
-  the engine, wired to the input line in `main.c`.
+- **`bd_verb`** — the `#action` / `#alias` / `#class` / `#script` command-line
+  verbs over the engine, wired to the input line in `main.c`.
 - **`bd_session`** integration — incoming bytes are assembled into lines (ANSI
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the script-facing host API (`mud.gmcp`, the
-`on.*` hook tables, `class.*`, `log.note`, the `var` table); multi-state
-chains; the timer / event / expression / mxp types; the line-rewriting verbs
-(`#substitute` / `#gag` / `#highlight`); `#tick` / `#unaction` / `#list`;
-`#script`; and the recursion cap and sandboxing posture noted below.
+Not yet built: the rest of the host API (`mud.gmcp` send, `log.note`, the
+`var` table, `on.timer` / `on.mxp`) and GMCP JSON-to-table decoding;
+multi-state chains; the timer / event / expression / mxp types; the
+line-rewriting verbs (`#substitute` / `#gag` / `#highlight`); `#tick` /
+`#unaction` / `#list`; and the recursion cap and sandboxing posture noted
+below.
 
 ## Open questions
 
