@@ -147,6 +147,34 @@ accessibility mode). A recording backend exists for tests. A fork can
 swap in another language by implementing `bd_vm` without touching the
 trigger engine.
 
+## Implementation status
+
+Built (`src/birdie/bd_vm.{c,h}`, `bd_trigger.{c,h}`, `bd_verb.{c,h}`, wired
+through `bd_session`):
+
+- **`bd_vm`** — the abstraction above, with a `bd_vm_backend` vtable and two
+  backends: `bd_vm_null` (scripting disabled) and `bd_vm_recording` (tests).
+  Values cross the seam as scalars (nil/bool/number/string); structured
+  GMCP/MSDP data crosses as a JSON string. The Lua 5.4 + LPeg backend is not
+  vendored yet, so `@` bodies and `#script` are inert (no-ops) for now.
+- **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
+  toggle as a unit, priority ordering (highest first) with `#stop`, and four
+  dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
+  patterns use a native TinTin++-style matcher (literal text, greedy `%1..%9`
+  captures, `^`/`$` anchors); `gmcp` routes by package name. A matched body is
+  either MUD command text (`%0..%9` expanded, emitted to the session) or, with
+  a leading `@`, a Lua expression run on `bd_vm`.
+- **`bd_verb`** — the `#action` / `#alias` / `#class` command-line verbs over
+  the engine, wired to the input line in `main.c`.
+- **`bd_session`** integration — incoming bytes are assembled into lines (ANSI
+  stripped) and run through the action/prompt triggers; GMCP/MSDP packages
+  route to gmcp triggers; outgoing input runs through the aliases first.
+
+Not yet built: the Lua 5.4 + LPeg backend; multi-state chains; the timer /
+event / expression / mxp types; the line-rewriting verbs (`#substitute` /
+`#gag` / `#highlight`); `#tick` / `#unaction` / `#list`; and the recursion cap
+and sandboxing posture noted below.
+
 ## Open questions
 
 - Do triggers run in the network thread or the UI thread? Leaning UI thread
