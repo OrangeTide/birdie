@@ -3,21 +3,27 @@
 
 #include "bd_net.h"
 #include "bd_profile.h"
+#include "bd_vm.h"
+#include "bd_trigger.h"
 #include <stddef.h>
 
 /*
  * bd_session -- one connected MUD; the front-end seam (doc/core.md).
  *
- * A session owns the transport (bd_net) and connects using a borrowed
- * bd_profile (host/port/tls/autoreconnect). Everything the net thread
- * produces is delivered to the front-end as bd_session_event callbacks on
- * the UI thread, during bd_session_drain().
+ * A session owns the transport (bd_net), a scripting VM (bd_vm), and the
+ * trigger engine (bd_triggers), and connects using a borrowed bd_profile
+ * (host/port/tls/autoreconnect). Everything the net thread produces is
+ * delivered to the front-end as bd_session_event callbacks on the UI thread,
+ * during bd_session_drain(); along the way the session assembles the byte
+ * stream into lines and runs them (and outgoing input) through the triggers.
  *
- * This is the current, transport-stage slice of the design's seam. The
- * vt_buf grid, line retirement, trigger engine, scripting VM, and log sinks
- * are not built yet; when they land they hang off bd_session without changing
- * this front-end contract. Until then a session forwards decoded bytes as a
- * DATA event so the front-end can feed its own terminal widget.
+ * Still not built: the vt_buf grid + true line retirement (src/vt/) and log
+ * sinks; until the vt module lands the session both forwards decoded bytes as
+ * a DATA event for the front-end's terminal widget and does its own minimal
+ * line assembly (split on newline, strip ANSI) to feed the trigger engine. The
+ * default VM is the null backend (scripting disabled), so command-body
+ * triggers work end to end while '@' Lua bodies are inert until Lua is
+ * vendored; pass a Lua VM via bd_session_set_vm() when it exists.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -72,10 +78,18 @@ void bd_session_disconnect(bd_session *s);
 
 bd_net_state bd_session_state(const bd_session *s);
 
-/* Send a command line (CRLF appended) or raw bytes. Return bytes accepted,
- * or -1 if not connected. */
+/* Send a command line: it is first run through the aliases (an alias may
+ * consume it and emit its own commands); otherwise the line is sent verbatim
+ * with CRLF appended. Returns bytes accepted, -1 if not connected, or 0 when
+ * an alias consumed the input. send_raw bypasses aliases. */
 int bd_session_send_line(bd_session *s, const char *utf8);
 int bd_session_send_raw(bd_session *s, const void *bytes, size_t n);
+
+/* The session's trigger engine and scripting VM, so the verb parser, profile
+ * scripts, and tests can install triggers and run script. Never NULL for a
+ * live session. (The VM is the null backend until Lua is vendored.) */
+bd_triggers *bd_session_triggers(bd_session *s);
+bd_vm       *bd_session_vm(bd_session *s);
 
 /* Report the terminal size to the server (NAWS). */
 void bd_session_set_winsize(bd_session *s, int cols, int rows);
