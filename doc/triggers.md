@@ -161,7 +161,8 @@ through `bd_session`):
   execute. It installs the script API: `mud.send(text)`, `class.enable/disable/
   toggle` (gating the C trigger classes), and the `on.*` hook tables
   (`line`/`prompt`/`connect`/`disconnect`/`gmcp`) dispatched from C alongside
-  the verb triggers. `on.gmcp[pkg]` currently receives the raw JSON string.
+  the verb triggers. GMCP/MSDP payloads are JSON-decoded to a Lua table
+  (`json.decode`, embedded in the bootstrap) before `on.gmcp[pkg]` is called.
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
   toggle as a unit, priority ordering (highest first) with `#stop`, and four
   dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
@@ -176,11 +177,10 @@ through `bd_session`):
   route to gmcp triggers; outgoing input runs through the aliases first.
 
 Not yet built: the rest of the host API (`mud.gmcp` send, `log.note`, the
-`var` table, `on.timer` / `on.mxp`) and GMCP JSON-to-table decoding;
-multi-state chains; the timer / event / expression / mxp types; the
-line-rewriting verbs (`#substitute` / `#gag` / `#highlight`); `#tick` /
-`#unaction` / `#list`; and the recursion cap and sandboxing posture noted
-below.
+`var` table, `on.timer` / `on.mxp`); multi-state chains; the timer / event /
+expression / mxp types; the line-rewriting verbs (`#substitute` / `#gag` /
+`#highlight`); `#tick` / `#unaction` / `#list`; and the recursion cap and
+sandboxing posture noted below.
 
 ## Open questions
 
