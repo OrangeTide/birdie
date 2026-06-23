@@ -330,7 +330,9 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * record to the log sinks (doc/logging.md). on.timer fires for each #tick that
  * elapses (the timer name is the argument). event(name, arg) raises a user
  * event, running on.event[name] (synchronous hook cascades are capped, see
- * dispatch_hook). Deferred (doc/triggers.md): on.mxp.
+ * dispatch_hook). watch(expr, fn) fires fn(new, old) when a watched Lua
+ * expression changes value, polled once per frame from bd_session_drain.
+ * Deferred (doc/triggers.md): on.mxp.
  */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
@@ -445,6 +447,30 @@ static const char bootstrap_lua[] =
 	 * valid JSON) */
 	"  elseif kind=='gmcp' then local h=on.gmcp[a]\n"
 	"   if h then pcall(h, json.decode(b)) end end\n"
+	"end\n"
+	/* expression watches: watch(expr, fn) fires fn(new, old) when a watched
+	 * Lua expression's value changes. The first poll only records a baseline
+	 * (no fire). expr may be a string (compiled as 'return <expr>') or a
+	 * function. Comparison is by value, so watch scalars (number/string/bool).
+	 * __bd_poll_expr is called once per frame from bd_session_drain. */
+	"__watches = __watches or {}\n"
+	"function watch(expr, fn)\n"
+	"  local get\n"
+	"  if type(expr)=='function' then get=expr else get=load('return '..expr) end\n"
+	"  if not get then return false end\n"
+	"  __watches[#__watches+1] = { get=get, fn=fn, last=nil, first=true }\n"
+	"  return true\n"
+	"end\n"
+	"function __bd_poll_expr()\n"
+	"  for _,w in ipairs(__watches) do\n"
+	"    local ok, v = pcall(w.get)\n"
+	"    if ok and (w.first or v ~= w.last) then\n"
+	"      local old = w.last\n"
+	"      w.last = v\n"
+	"      if not w.first then pcall(w.fn, v, old) end\n"
+	"      w.first = false\n"
+	"    end\n"
+	"  end\n"
 	"end\n";
 
 static void
@@ -929,4 +955,5 @@ bd_session_drain(bd_session *s)
 	bd_triggers_set_now(s->trig, now);      /* clock for chain timeouts */
 	bd_net_poll(s->net);                    /* network -> events/triggers */
 	bd_triggers_run_timers(s->trig, now);   /* #tick interval timers */
+	bd_vm_call(s->vm, "__bd_poll_expr", ""); /* expression watches (on change) */
 }

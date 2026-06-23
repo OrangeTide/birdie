@@ -172,7 +172,12 @@ through `bd_session`):
   with the argument; both paths funnel through `bd_triggers_event` and an engine
   event callback. Synchronous hook cascades (an `on.event` handler that re-raises
   events) are bounded by a re-entrancy cap (`BD_MAX_DISPATCH_DEPTH`, 50) in
-  `dispatch_hook`, which logs a single `error` record when it trips. The `var`
+  `dispatch_hook`, which logs a single `error` record when it trips.
+  `watch(expr, fn)` registers an expression watch: `fn(new, old)` runs when the
+  watched Lua expression (a `'return <expr>'` string or a function) changes
+  value. `bd_session_drain` polls all watches once per frame
+  (`__bd_poll_expr`); the first poll only records a baseline. Comparison is by
+  value, so watch scalars (number / string / bool). The `var`
   table persists per
   profile to `<data_dir>/profiles/<name>/vars.json` (loaded when the session's
   data dir is set, saved on disconnect and at free). `log.note(text)` writes a
@@ -215,12 +220,13 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`on.mxp`); the `expression` / `mxp`
-types; `#ungag` / `#unhighlight` and a rewriting-aware `#list`; and the
-sandboxing posture noted below. (The recursion cap from the open questions is
-now in place: `dispatch_hook` bounds synchronous hook cascades at
-`BD_MAX_DISPATCH_DEPTH`. The `event` type is handled through the `on.event`
-hook table rather than a pattern-matched trigger type.)
+Not yet built: the rest of the host API (`on.mxp`); the `mxp` type;
+`#ungag` / `#unhighlight` and a rewriting-aware `#list`; and the sandboxing
+posture noted below. (The recursion cap from the open questions is now in
+place: `dispatch_hook` bounds synchronous hook cascades at
+`BD_MAX_DISPATCH_DEPTH`. The `event` and `expression` types are handled in Lua,
+through the `on.event` hook table and the `watch()` registry, rather than as
+pattern-matched trigger types.)
 
 ## Open questions
 
