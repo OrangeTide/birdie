@@ -145,6 +145,29 @@ install_ui_hooks(bd_session *s)
 	bd_vm_eval(vm, vitals_lua);     /* no-op if scripting is disabled */
 }
 
+/* Per-user data directory for profile state (the var table, later logs).
+ * $BIRDIE_DATA, else $XDG_CONFIG_HOME/birdie, else $HOME/.config/birdie. */
+static const char *
+data_dir(void)
+{
+	static char buf[512];
+	const char *d = getenv("BIRDIE_DATA");
+	const char *xdg, *home;
+	if (d && *d)
+		return d;
+	xdg = getenv("XDG_CONFIG_HOME");
+	if (xdg && *xdg) {
+		snprintf(buf, sizeof buf, "%s/birdie", xdg);
+		return buf;
+	}
+	home = getenv("HOME");
+	if (home && *home) {
+		snprintf(buf, sizeof buf, "%s/.config/birdie", home);
+		return buf;
+	}
+	return NULL;
+}
+
 /* Point the session at `p`, recreating it if the profile changed. The session
  * borrows the profile, so switching MUDs means a fresh session (and net
  * thread); reconnecting to the same one reuses it. */
@@ -160,6 +183,7 @@ rebind_session(const bd_profile *p)
 	bd_session_on_event(session, on_session_event, NULL);
 	bd_session_set_winsize(session, 80, 24);
 	install_ui_hooks(session);
+	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
 }
 
 /* Sidebar label showing the current MUD (borrowed string, so keep it in a
@@ -377,6 +401,7 @@ init(void)
 	bd_session_set_winsize(session, 80, 24);   /* matches the terminal grid */
 	install_ui_hooks(session);   /* GMCP Char.Vitals -> sidebar (host_ui only
 	                              * fires at runtime, after the labels exist) */
+	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",

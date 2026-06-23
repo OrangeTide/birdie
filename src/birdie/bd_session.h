@@ -94,6 +94,11 @@ bd_vm       *bd_session_vm(bd_session *s);
 /* Report the terminal size to the server (NAWS). */
 void bd_session_set_winsize(bd_session *s, int cols, int rows);
 
+/* Set the base directory for this profile's persistent state. The script `var`
+ * table is loaded from <dir>/profiles/<name>/vars.json now and saved back on
+ * disconnect and at free. Pass NULL to make `var` session-only (no disk). */
+void bd_session_set_data_dir(bd_session *s, const char *dir);
+
 /* Pull queued network output and fire events. Call once per frame (UI thread). */
 void bd_session_drain(bd_session *s);
 

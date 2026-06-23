@@ -7,8 +7,11 @@
 #include "bd_session.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 /* Monotonic milliseconds, for the trigger engine's interval timers. */
 static double
@@ -27,11 +30,123 @@ struct bd_session {
 	bd_session_event_fn on_event;
 	void *userdata;
 	int cols, rows;
+	char *data_dir;                 /* base for per-profile state, or NULL */
 
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
 	size_t line_len, line_cap;
 };
+
+/* ---- per-profile persistent var table ---- */
+
+/* mkdir -p path (best effort). */
+static void
+mkdir_p(const char *path)
+{
+	char tmp[1024];
+	char *p;
+	snprintf(tmp, sizeof tmp, "%s", path);
+	for (p = tmp + 1; *p; p++) {
+		if (*p == '/') {
+			*p = '\0';
+			mkdir(tmp, 0755);
+			*p = '/';
+		}
+	}
+	mkdir(tmp, 0755);
+}
+
+/* Build <data_dir>/profiles/<name>/vars.json into buf. Returns 0 if a path
+ * exists (data_dir set and profile has a name), -1 otherwise. */
+static int
+vars_path(bd_session *s, char *buf, size_t cap)
+{
+	const char *name = s->profile ? bd_profile_get(s->profile, "name") : NULL;
+	char safe[128];
+	size_t i;
+
+	if (!s->data_dir || !name || !*name)
+		return -1;
+	for (i = 0; name[i] && i < sizeof safe - 1; i++)
+		safe[i] = (name[i] == '/' || name[i] == '\\') ? '_' : name[i];
+	safe[i] = '\0';
+	snprintf(buf, cap, "%s/profiles/%s/vars.json", s->data_dir, safe);
+	return 0;
+}
+
+/* Host function: __bd_savevars(json) -> write the var dump to disk. */
+static int
+host_savevars(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+              void *ud)
+{
+	bd_session *s = ud;
+	char path[1024], dir[1024];
+	char *slash;
+	FILE *f;
+	(void)vm;
+	(void)ret;
+
+	if (argc < 1 || argv[0].type != BD_VM_STR)
+		return 0;
+	if (vars_path(s, path, sizeof path) != 0)
+		return 0;
+	snprintf(dir, sizeof dir, "%s", path);
+	slash = strrchr(dir, '/');
+	if (slash) {
+		*slash = '\0';
+		mkdir_p(dir);
+	}
+	f = fopen(path, "wb");
+	if (!f)
+		return 0;
+	fwrite(argv[0].u.s, 1, strlen(argv[0].u.s), f);
+	fclose(f);
+	return 0;
+}
+
+/* Load the saved var table into the VM (no-op if the file is absent). */
+static void
+load_vars(bd_session *s)
+{
+	char path[1024];
+	FILE *f;
+	long sz;
+	char *buf;
+	size_t got;
+
+	if (vars_path(s, path, sizeof path) != 0)
+		return;
+	f = fopen(path, "rb");
+	if (!f)
+		return;
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz <= 0) {
+		fclose(f);
+		return;
+	}
+	buf = malloc((size_t)sz + 1);
+	if (!buf) {
+		fclose(f);
+		return;
+	}
+	got = fread(buf, 1, (size_t)sz, f);
+	fclose(f);
+	buf[got] = '\0';
+	bd_vm_call(s->vm, "__bd_setvars", "s", buf);
+	free(buf);
+}
+
+/* Persist the var table (no-op if no data dir / profile name). */
+static void
+save_vars(bd_session *s)
+{
+	char path[1024];
+	if (vars_path(s, path, sizeof path) != 0)
+		return;
+	bd_vm_eval(s->vm, "__bd_savevars(json.encode(var))");
+}
 
 /* truthy values for yes/no-style profile fields */
 static int
@@ -225,6 +340,8 @@ static const char bootstrap_lua[] =
 	" return 'null'\n"
 	"end\n"
 	"json.encode = jenc\n"
+	"var = var or {}\n"
+	"function __bd_setvars(s) var = json.decode(s) or {} end\n"
 	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={} }\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
@@ -243,6 +360,7 @@ install_script_api(bd_session *s)
 	bd_vm_register(s->vm, "__bd_send", host_send, s);
 	bd_vm_register(s->vm, "__bd_class", host_class, s);
 	bd_vm_register(s->vm, "__bd_gmcp", host_gmcp, s);
+	bd_vm_register(s->vm, "__bd_savevars", host_savevars, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
 }
 
@@ -344,10 +462,12 @@ net_state(bd_net_state state, const char *msg, void *arg)
 	ev.detail = msg;
 	emit(s, &ev);
 
-	if (state == BD_NET_CONNECTED)
+	if (state == BD_NET_CONNECTED) {
 		dispatch_hook(s, "connect", NULL, NULL);
-	else if (state == BD_NET_CLOSED || state == BD_NET_ERROR)
+	} else if (state == BD_NET_CLOSED || state == BD_NET_ERROR) {
 		dispatch_hook(s, "disconnect", NULL, NULL);
+		save_vars(s);           /* persist any var changes this session */
+	}
 }
 
 static void
@@ -429,11 +549,13 @@ bd_session_free(bd_session *s)
 {
 	if (!s)
 		return;
+	save_vars(s);                   /* while the vm is still alive */
 	/* reverse of build order: net first (stops callbacks), then the engine
 	 * it fed, then the vm that engine used */
 	bd_net_free(s->net);
 	bd_triggers_free(s->trig);
 	bd_vm_free(s->vm);
+	free(s->data_dir);
 	free(s->linebuf);
 	free(s);
 }
@@ -515,6 +637,16 @@ bd_session_set_winsize(bd_session *s, int cols, int rows)
 	s->cols = cols;
 	s->rows = rows;
 	bd_net_set_winsize(s->net, cols, rows);
+}
+
+void
+bd_session_set_data_dir(bd_session *s, const char *dir)
+{
+	if (!s)
+		return;
+	free(s->data_dir);
+	s->data_dir = (dir && *dir) ? strdup(dir) : NULL;
+	load_vars(s);           /* pull the saved var table into the VM */
 }
 
 bd_triggers *
