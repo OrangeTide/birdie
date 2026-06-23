@@ -316,6 +316,22 @@ verb_hilite(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
 	return 1;
 }
 
+/* #event {name} [arg] -- raise a user event (runs on.event[name]) */
+static int
+verb_event(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char name[128], arg[ARG_MAX];
+	if (!read_brace(&args, name, sizeof name)) {
+		fb(feedback, fbcap, "usage: #event {name} [arg]");
+		return 1;
+	}
+	if (!read_brace(&args, arg, sizeof arg))
+		arg[0] = '\0';
+	bd_triggers_event(t, name, arg);
+	fb(feedback, fbcap, "event raised");
+	return 1;
+}
+
 /* #reset [chain] -- reset all chains, or one named "class/chain" or "chain" */
 static int
 verb_reset(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
@@ -428,6 +444,8 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_untick(t, args, feedback, fbcap);
 	if (!strcmp(verb, "reset"))
 		return verb_reset(t, args, feedback, fbcap);
+	if (!strcmp(verb, "event"))
+		return verb_event(t, args, feedback, fbcap);
 	if (!strcmp(verb, "unaction") || !strcmp(verb, "unact"))
 		return verb_untrigger(t, BD_TRIG_ACTION, args, feedback, fbcap);
 	if (!strcmp(verb, "unalias"))

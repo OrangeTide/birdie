@@ -44,6 +44,12 @@ typedef void (*bd_trigger_send_fn)(const char *cmd, void *ctx);
  * dispatch the on.timer hook table in addition to the timer's own body. */
 typedef void (*bd_trigger_timer_fn)(const char *name, void *ctx);
 
+/* Called when a user event is raised (bd_triggers_event / the #event verb),
+ * with the event name and its argument string. Lets the host dispatch the
+ * on.event hook table. */
+typedef void (*bd_trigger_event_fn)(const char *name, const char *arg,
+                                    void *ctx);
+
 /* Create an engine. `vm` runs '@' Lua bodies (may be a null/recording VM);
  * `send` emits command bodies. Either may be NULL. */
 bd_triggers *bd_triggers_new(bd_vm *vm, bd_trigger_send_fn send, void *ctx);
@@ -148,6 +154,15 @@ void bd_trigger_remove_tick(bd_triggers *t, const char *name);
 /* Register a callback fired (on the same thread as run_timers) for each timer
  * that elapses, after its body runs. Used to drive the on.timer hook table. */
 void bd_triggers_set_timer_cb(bd_triggers *t, bd_trigger_timer_fn fn, void *ctx);
+
+/* ---- user events (#event) ---- */
+
+/* Register the callback that handles a raised event (drives on.event). */
+void bd_triggers_set_event_cb(bd_triggers *t, bd_trigger_event_fn fn, void *ctx);
+
+/* Raise event `name` with argument `arg` (either may be ""/NULL): invokes the
+ * event callback, if set. */
+void bd_triggers_event(bd_triggers *t, const char *name, const char *arg);
 
 /* Fire any timers whose deadline has passed at monotonic time `now_ms`. Call
  * regularly (e.g. once per frame from bd_session_drain). A timer reschedules

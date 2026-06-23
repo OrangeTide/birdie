@@ -43,6 +43,8 @@ struct bd_triggers {
 	void *ctx;
 	bd_trigger_timer_fn timer_cb;
 	void *timer_ctx;
+	bd_trigger_event_fn event_cb;
+	void *event_ctx;
 
 	struct trigger *trig;
 	int n, cap;
@@ -785,6 +787,23 @@ bd_triggers_set_timer_cb(bd_triggers *t, bd_trigger_timer_fn fn, void *ctx)
 		return;
 	t->timer_cb = fn;
 	t->timer_ctx = ctx;
+}
+
+void
+bd_triggers_set_event_cb(bd_triggers *t, bd_trigger_event_fn fn, void *ctx)
+{
+	if (!t)
+		return;
+	t->event_cb = fn;
+	t->event_ctx = ctx;
+}
+
+void
+bd_triggers_event(bd_triggers *t, const char *name, const char *arg)
+{
+	if (!t || !name || !*name || !t->event_cb)
+		return;
+	t->event_cb(name, arg ? arg : "", t->event_ctx);
 }
 
 int

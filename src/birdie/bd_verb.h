@@ -15,7 +15,7 @@
  * Implemented: #action, #alias (each taking an optional class[/chain:state]
  * token for multi-state chains), #unaction / #unalias, #list, #class,
  * #tick / #untick, #reset, #gag, #substitute / #sub, #highlight / #hi,
- * #script. A configurable command char is deferred (doc/triggers.md).
+ * #event, #script. A configurable command char is deferred (doc/triggers.md).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

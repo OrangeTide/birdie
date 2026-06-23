@@ -37,6 +37,7 @@ struct bd_session {
 
 	bd_log *log;                    /* log sinks (NULL until data_dir set) */
 	char session_id[25];            /* stable id for one session's records */
+	int dispatch_depth;             /* re-entrancy guard for hook cascades */
 
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
@@ -238,6 +239,20 @@ host_note(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
 	return 0;
 }
 
+/* Host function: __bd_event(name, arg) -> raise a user event (event() in Lua).
+ * Routes through the engine so the verb and script paths share one entry. */
+static int
+host_event(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	bd_session *s = ud;
+	(void)vm;
+	(void)ret;
+	if (argc >= 1 && argv[0].type == BD_VM_STR)
+		bd_triggers_event(s->trig, argv[0].u.s,
+		    (argc >= 2 && argv[1].type == BD_VM_STR) ? argv[1].u.s : "");
+	return 0;
+}
+
 /* The trigger engine emits MUD commands through here. Send raw (with CRLF) so
  * a fired command does not recurse back through the aliases. */
 static void
@@ -313,13 +328,16 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * abort the rest. GMCP/MSDP payloads are JSON-decoded (json.decode) to a Lua
  * table before the on.gmcp handler is called. log.note(text) writes a `note`
  * record to the log sinks (doc/logging.md). on.timer fires for each #tick that
- * elapses (the timer name is the argument). Deferred (doc/triggers.md): on.mxp.
+ * elapses (the timer name is the argument). event(name, arg) raises a user
+ * event, running on.event[name] (synchronous hook cascades are capped, see
+ * dispatch_hook). Deferred (doc/triggers.md): on.mxp.
  */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
 	"function mud.send(s) __bd_send(tostring(s)) end\n"
 	"log = log or {}\n"
 	"function log.note(s) __bd_note(tostring(s)) end\n"
+	"function event(name, arg) __bd_event(tostring(name), arg==nil and '' or tostring(arg)) end\n"
 	"function mud.gmcp(pkg, data)\n"
 	"  if data == nil then __bd_gmcp(pkg, nil)\n"
 	"  elseif type(data)=='string' then __bd_gmcp(pkg, data)\n"
@@ -414,13 +432,15 @@ static const char bootstrap_lua[] =
 	"json.encode = jenc\n"
 	"var = var or {}\n"
 	"function __bd_setvars(s) var = json.decode(s) or {} end\n"
-	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={}, timer={} }\n"
+	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={}, timer={}, event={} }\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
 	"  elseif kind=='prompt' then for _,f in ipairs(on.prompt) do pcall(f,a) end\n"
 	"  elseif kind=='connect' then for _,f in ipairs(on.connect) do pcall(f) end\n"
 	"  elseif kind=='disconnect' then for _,f in ipairs(on.disconnect) do pcall(f) end\n"
 	"  elseif kind=='timer' then for _,f in ipairs(on.timer) do pcall(f,a) end\n"
+	"  elseif kind=='event' then local h=on.event[a]\n"
+	"   if h then pcall(h, b) end\n"
 	/* hand GMCP/MSDP handlers the decoded table (nil if the payload was not
 	 * valid JSON) */
 	"  elseif kind=='gmcp' then local h=on.gmcp[a]\n"
@@ -435,15 +455,32 @@ install_script_api(bd_session *s)
 	bd_vm_register(s->vm, "__bd_gmcp", host_gmcp, s);
 	bd_vm_register(s->vm, "__bd_savevars", host_savevars, s);
 	bd_vm_register(s->vm, "__bd_note", host_note, s);
+	bd_vm_register(s->vm, "__bd_event", host_event, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
 }
 
 /* Fire the Lua on.* hooks for an event (no-op if scripting is disabled or the
  * dispatcher is absent). Always passes three string args; unused ones empty. */
+/* Ceiling on synchronous hook cascades (e.g. an on.event handler raising
+ * another event), so a runaway script loop cannot hang the client. */
+#define BD_MAX_DISPATCH_DEPTH 50
+
 static void
 dispatch_hook(bd_session *s, const char *kind, const char *a, const char *b)
 {
+	if (s->dispatch_depth >= BD_MAX_DISPATCH_DEPTH) {
+		if (s->log) {           /* record the cap once, where it trips */
+			bd_log_rec r;
+			log_fill(s, &r, BD_LOG_ERROR);
+			r.where = "dispatch";
+			r.message = "hook recursion limit reached";
+			bd_log_write(s->log, &r);
+		}
+		return;
+	}
+	s->dispatch_depth++;
 	bd_vm_call(s->vm, "__bd_dispatch", "sss", kind, a ? a : "", b ? b : "");
+	s->dispatch_depth--;
 }
 
 /* Engine timer-fire callback: run the on.timer hooks with the timer name. */
@@ -451,6 +488,13 @@ static void
 timer_fired(const char *name, void *ctx)
 {
 	dispatch_hook((bd_session *)ctx, "timer", name, NULL);
+}
+
+/* Engine event callback: run the on.event[name] hook with the event arg. */
+static void
+event_fired(const char *name, const char *arg, void *ctx)
+{
+	dispatch_hook((bd_session *)ctx, "event", name, arg);
 }
 
 /* Copy `src` to `dst` (cap incl. NUL) dropping ANSI/VT escape sequences, so
@@ -688,8 +732,10 @@ bd_session_new(const bd_profile *profile)
 	s->net = bd_net_new(net_data, net_state, s);
 	s->vm = bd_vm_new(&bd_vm_lua);           /* Lua 5.4 + LPeg */
 	s->trig = bd_triggers_new(s->vm, trigger_send, s);
-	if (s->trig)
+	if (s->trig) {
 		bd_triggers_set_timer_cb(s->trig, timer_fired, s);
+		bd_triggers_set_event_cb(s->trig, event_fired, s);
+	}
 	if (!s->net || !s->vm || !s->trig) {
 		bd_triggers_free(s->trig);
 		bd_vm_free(s->vm);

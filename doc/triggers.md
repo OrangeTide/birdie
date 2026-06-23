@@ -167,7 +167,13 @@ through `bd_session`):
   `on.gmcp[pkg]` is called. `on.timer` fires (with the timer name) for each
   `#tick` that elapses, driven by an engine timer-fire callback
   (`bd_triggers_set_timer_cb`); a `#tick` with an empty body is a hook-only
-  timer (it sends nothing, just runs `on.timer`). The `var` table persists per
+  timer (it sends nothing, just runs `on.timer`). `event(name, arg)` (Lua) or
+  `#event {name} {arg}` (verb) raises a user event, running `on.event[name]`
+  with the argument; both paths funnel through `bd_triggers_event` and an engine
+  event callback. Synchronous hook cascades (an `on.event` handler that re-raises
+  events) are bounded by a re-entrancy cap (`BD_MAX_DISPATCH_DEPTH`, 50) in
+  `dispatch_hook`, which logs a single `error` record when it trips. The `var`
+  table persists per
   profile to `<data_dir>/profiles/<name>/vars.json` (loaded when the session's
   data dir is set, saved on disconnect and at free). `log.note(text)` writes a
   `note` record to the log sinks (`doc/logging.md`).
@@ -209,21 +215,22 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`on.mxp`);
-the event / expression / mxp types; `#ungag` / `#unhighlight` and a
-rewriting-aware `#list`; and the recursion cap and sandboxing posture noted
-below. (The recursion cap is deferred until a synchronous cascade path exists:
-`trigger_send` sends commands straight to the socket without re-running
-aliases, so triggers cannot yet re-enter the dispatcher. A cap becomes
-necessary once line-injection or an `#event` verb lands.)
+Not yet built: the rest of the host API (`on.mxp`); the `expression` / `mxp`
+types; `#ungag` / `#unhighlight` and a rewriting-aware `#list`; and the
+sandboxing posture noted below. (The recursion cap from the open questions is
+now in place: `dispatch_hook` bounds synchronous hook cascades at
+`BD_MAX_DISPATCH_DEPTH`. The `event` type is handled through the `on.event`
+hook table rather than a pattern-matched trigger type.)
 
 ## Open questions
 
 - Do triggers run in the network thread or the UI thread? Leaning UI thread
   for simplicity; network thread only parses and enqueues lines. Matches
   the decision in `doc/gui.md`.
-- Rate limiting / recursion cap for trigger cascades. Some ceiling is
-  mandatory to prevent script loops from hanging the client.
+- Rate limiting / recursion cap for trigger cascades. Resolved: a re-entrancy
+  cap (`BD_MAX_DISPATCH_DEPTH` in `bd_session`) bounds synchronous hook
+  cascades. Per-second rate limiting (vs. depth) is still open if a slow
+  steady-state loop proves a problem.
 - Sandboxing posture for imported scripts (untrusted gist URLs etc.):
   default to restricted (`os.execute` stripped, `io` limited to a
   per-profile scratch dir). Opt-in to full standard library.
