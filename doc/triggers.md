@@ -172,17 +172,19 @@ through `bd_session`):
   captures, `^`/`$` anchors); `gmcp` routes by package name. A matched body is
   either MUD command text (`%0..%9` expanded, emitted to the session) or, with
   a leading `@`, a Lua expression run on `bd_vm`.
-- **`bd_verb`** — the `#action` / `#alias` / `#class` / `#script` command-line
-  verbs over the engine, wired to the input line in `main.c`.
+- **`bd_verb`** — the `#action` / `#alias` / `#class` / `#tick` / `#untick` /
+  `#script` command-line verbs over the engine, wired to the input line in
+  `main.c`. Interval timers fire from `bd_session_drain` against a monotonic
+  clock.
 - **`bd_session`** integration — incoming bytes are assembled into lines (ANSI
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
 Not yet built: the rest of the host API (`log.note`, the `var` table,
-`on.timer` / `on.mxp`); multi-state chains; the timer / event / expression /
-mxp types; the line-rewriting verbs (`#substitute` / `#gag` / `#highlight`);
-`#tick` / `#unaction` / `#list`; and the recursion cap and sandboxing posture
-noted below.
+`on.timer` / `on.mxp`); multi-state chains; the event / expression / mxp
+types; the line-rewriting verbs (`#substitute` / `#gag` / `#highlight`);
+`#unaction` / `#list`; and the recursion cap and sandboxing posture noted
+below.
 
 ## Open questions
 
