@@ -93,26 +93,84 @@ extract_stop(char *body)
 	return 1;
 }
 
-/* #action / #alias {pattern} {body} [class] */
+/*
+ * Parse a trailing class token of the form "class", "class/chain:state",
+ * "class/chain", or "chain:state". Splits off ":state" first, then "/chain";
+ * a token with a chain part but no explicit class uses the default class. On
+ * return cls[] holds the class (empty -> default), chain[] holds the chain
+ * name (empty -> no chain), and *state holds the state (0 -> none).
+ */
+static void
+parse_class_token(const char *tok, char *cls, size_t ccap, char *chain,
+                  size_t chcap, int *state)
+{
+	char buf[256];
+	char *colon, *slash;
+
+	cls[0] = '\0';
+	chain[0] = '\0';
+	*state = 0;
+	if (!tok || !tok[0])
+		return;
+	snprintf(buf, sizeof buf, "%s", tok);
+
+	colon = strrchr(buf, ':');
+	if (colon) {
+		*colon = '\0';
+		*state = atoi(colon + 1);
+	}
+	slash = strchr(buf, '/');
+	if (slash) {
+		*slash = '\0';
+		snprintf(cls, ccap, "%s", buf);        /* may be empty -> default */
+		snprintf(chain, chcap, "%s", slash + 1);
+	} else if (*state > 0) {
+		/* "name:state" -> name is the chain, default class */
+		snprintf(chain, chcap, "%s", buf);
+	} else {
+		snprintf(cls, ccap, "%s", buf);
+	}
+}
+
+/* #action / #alias {pattern} {body} [class[/chain:state]] */
 static int
 verb_trigger(bd_triggers *t, bd_trigger_type type, const char *args,
              char *feedback, size_t fbcap)
 {
-	char pat[ARG_MAX], body[ARG_MAX], cls[128];
-	int stop;
+	char pat[ARG_MAX], body[ARG_MAX], tok[128];
+	char cls[128], chain[128];
+	int stop, state, rc;
 
 	if (!read_brace(&args, pat, sizeof pat) ||
 	    !read_brace(&args, body, sizeof body)) {
-		fb(feedback, fbcap, "usage: {pattern} {body} [class]");
+		fb(feedback, fbcap, "usage: {pattern} {body} [class[/chain:state]]");
 		return 1;
 	}
-	read_word(&args, cls, sizeof cls);
+	read_word(&args, tok, sizeof tok);
+	parse_class_token(tok, cls, sizeof cls, chain, sizeof chain, &state);
 	stop = extract_stop(body);
-	if (bd_trigger_add(t, type, pat, body, cls[0] ? cls : NULL, -1, stop) < 0)
+	if (chain[0] && state > 0)
+		rc = bd_trigger_add_chained(t, type, pat, body,
+		    cls[0] ? cls : NULL, chain, state, -1, stop);
+	else
+		rc = bd_trigger_add(t, type, pat, body, cls[0] ? cls : NULL,
+		    -1, stop);
+	if (rc < 0)
 		fb(feedback, fbcap, "could not add trigger");
 	else
 		fb(feedback, fbcap,
 		    type == BD_TRIG_ALIAS ? "alias added" : "action added");
+	return 1;
+}
+
+/* #reset [chain] -- reset all chains, or one named "class/chain" or "chain" */
+static int
+verb_reset(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char name[128];
+	read_word(&args, name, sizeof name);
+	bd_trigger_reset(t, name[0] ? name : NULL);
+	fb(feedback, fbcap, "chain reset");
 	return 1;
 }
 
@@ -215,6 +273,8 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_tick(t, args, feedback, fbcap);
 	if (!strcmp(verb, "untick"))
 		return verb_untick(t, args, feedback, fbcap);
+	if (!strcmp(verb, "reset"))
+		return verb_reset(t, args, feedback, fbcap);
 	if (!strcmp(verb, "script")) {
 		char src[ARG_MAX];
 		bd_vm *vm = bd_triggers_vm(t);

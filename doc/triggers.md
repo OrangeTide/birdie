@@ -175,17 +175,23 @@ through `bd_session`):
   either MUD command text (`%0..%9` expanded, emitted to the session) or, with
   a leading `@`, a Lua expression run on `bd_vm`.
 - **`bd_verb`** — the `#action` / `#alias` / `#class` / `#tick` / `#untick` /
-  `#script` command-line verbs over the engine, wired to the input line in
-  `main.c`. Interval timers fire from `bd_session_drain` against a monotonic
-  clock.
+  `#reset` / `#script` command-line verbs over the engine, wired to the input
+  line in `main.c`. Interval timers fire from `bd_session_drain` against a
+  monotonic clock.
+- **multi-state chains** — `#action`/`#alias` take an optional
+  `class[/chain:state]` token (e.g. `combat/cast:1`). Only state 1 of a chain
+  is armed initially; firing state N arms state N+1, wrapping back to 1 past the
+  highest state. A chain resets to state 1 after `CHAIN_TIMEOUT_MS` (8s) of
+  inactivity (clocked via `bd_triggers_set_now` from `bd_session_drain`) or on
+  `#reset [chain]`. The engine entry point is `bd_trigger_add_chained`.
 - **`bd_session`** integration — incoming bytes are assembled into lines (ANSI
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
 Not yet built: the rest of the host API (`log.note`, `on.timer` / `on.mxp`);
-multi-state chains; the event / expression / mxp types; the line-rewriting
-verbs (`#substitute` / `#gag` / `#highlight`); `#unaction` / `#list`; and the
-recursion cap and sandboxing posture noted below.
+the event / expression / mxp types; the line-rewriting verbs (`#substitute` /
+`#gag` / `#highlight`); `#unaction` / `#list`; and the recursion cap and
+sandboxing posture noted below.
 
 ## Open questions
 

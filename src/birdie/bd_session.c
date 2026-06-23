@@ -664,8 +664,11 @@ bd_session_vm(bd_session *s)
 void
 bd_session_drain(bd_session *s)
 {
+	double now;
 	if (!s)
 		return;
+	now = mono_ms();
+	bd_triggers_set_now(s->trig, now);      /* clock for chain timeouts */
 	bd_net_poll(s->net);                    /* network -> events/triggers */
-	bd_triggers_run_timers(s->trig, mono_ms());  /* #tick interval timers */
+	bd_triggers_run_timers(s->trig, now);   /* #tick interval timers */
 }

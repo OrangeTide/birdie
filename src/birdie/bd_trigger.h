@@ -53,6 +53,17 @@ void bd_triggers_free(bd_triggers *t);
 int bd_trigger_add(bd_triggers *t, bd_trigger_type type, const char *pattern,
                    const char *body, const char *class, int priority, int stop);
 
+/* Like bd_trigger_add, but the trigger joins a multi-state chain: it can only
+ * fire while the chain is armed at `state` (1..N), and firing advances the
+ * chain to the next state (wrapping to 1 past the highest state seen). The
+ * chain is identified by `class`+`chain` and resets to state 1 on timeout (see
+ * bd_triggers_set_now) or bd_trigger_reset. chain NULL/"" or state <= 0 means
+ * an ordinary (always-armed) trigger. Returns the trigger id, or -1. */
+int bd_trigger_add_chained(bd_triggers *t, bd_trigger_type type,
+                           const char *pattern, const char *body,
+                           const char *class, const char *chain, int state,
+                           int priority, int stop);
+
 /* Remove a trigger by id. */
 void bd_trigger_remove(bd_triggers *t, int id);
 
@@ -99,5 +110,15 @@ void bd_trigger_remove_tick(bd_triggers *t, const char *name);
  * from now, so a stalled frame fires it once, not a catch-up burst. Returns
  * the number of timers fired. */
 int bd_triggers_run_timers(bd_triggers *t, double now_ms);
+
+/* ---- multi-state chains ---- */
+
+/* Tell the engine the current monotonic time (ms), used to time out stalled
+ * chains. Call once per frame before dispatch. */
+void bd_triggers_set_now(bd_triggers *t, double now_ms);
+
+/* Reset chains to state 1. `chain` matches the full key "class/chain" or just
+ * the chain name; NULL/"" resets every chain. */
+void bd_trigger_reset(bd_triggers *t, const char *chain);
 
 #endif /* BD_TRIGGER_H */

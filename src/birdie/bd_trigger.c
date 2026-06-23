@@ -7,10 +7,12 @@
 
 #include "bd_trigger.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define BODY_MAX 4096
+#define CHAIN_TIMEOUT_MS 8000.0   /* default chain reset timeout */
 
 struct trigger {
 	int id;
@@ -18,10 +20,21 @@ struct trigger {
 	char *pattern;
 	char *body;
 	char *cls;
+	char *chain;    /* full chain key "class/chain", or NULL if not chained */
+	int state;      /* position in the chain (1..N), 0 if not chained */
 	int priority;
 	int stop;
 	int seq;        /* insertion order, for stable priority sort */
 	int alive;
+};
+
+/* A multi-state chain: only its `cur` state is armed; firing a trigger in that
+ * state advances it, wrapping to 1 past `max`. It resets to 1 on timeout. */
+struct chain {
+	char *key;
+	int cur, max;
+	double last_ms;         /* monotonic time of the last advance */
+	double timeout_ms;
 };
 
 struct bd_triggers {
@@ -40,6 +53,10 @@ struct bd_triggers {
 
 	struct timer *timers;   /* interval timers (#tick) */
 	int nt, t_cap;
+
+	struct chain *chains;   /* multi-state chain registry */
+	int nch, ch_cap;
+	double now_ms;          /* current monotonic time (set by the session) */
 };
 
 struct timer {
@@ -244,6 +261,7 @@ bd_triggers_free(bd_triggers *t)
 		free(t->trig[i].pattern);
 		free(t->trig[i].body);
 		free(t->trig[i].cls);
+		free(t->trig[i].chain);
 	}
 	free(t->trig);
 	for (i = 0; i < t->ndis; i++)
@@ -255,14 +273,59 @@ bd_triggers_free(bd_triggers *t)
 		free(t->timers[i].cls);
 	}
 	free(t->timers);
+	for (i = 0; i < t->nch; i++)
+		free(t->chains[i].key);
+	free(t->chains);
 	free(t);
 }
 
+/* Find/create the chain registered under `key`. ensure_chain returns NULL on
+ * allocation failure. */
+static struct chain *
+find_chain(bd_triggers *t, const char *key)
+{
+	int i;
+	for (i = 0; i < t->nch; i++)
+		if (strcmp(t->chains[i].key, key) == 0)
+			return &t->chains[i];
+	return NULL;
+}
+
+static struct chain *
+ensure_chain(bd_triggers *t, const char *key)
+{
+	struct chain *c = find_chain(t, key);
+	if (c)
+		return c;
+	if (t->nch == t->ch_cap) {
+		int nc = t->ch_cap ? t->ch_cap * 2 : 8;
+		struct chain *nv = realloc(t->chains, (size_t)nc * sizeof *nv);
+		if (!nv)
+			return NULL;
+		t->chains = nv;
+		t->ch_cap = nc;
+	}
+	c = &t->chains[t->nch];
+	memset(c, 0, sizeof *c);
+	c->key = strdup(key);
+	if (!c->key)
+		return NULL;
+	c->cur = 1;             /* state 1 armed initially */
+	c->max = 0;
+	c->last_ms = t->now_ms;
+	c->timeout_ms = CHAIN_TIMEOUT_MS;
+	t->nch++;
+	return c;
+}
+
 int
-bd_trigger_add(bd_triggers *t, bd_trigger_type type, const char *pattern,
-               const char *body, const char *class, int priority, int stop)
+bd_trigger_add_chained(bd_triggers *t, bd_trigger_type type,
+                       const char *pattern, const char *body,
+                       const char *class, const char *chain, int state,
+                       int priority, int stop)
 {
 	struct trigger *tr;
+	const char *cls;
 
 	if (!t || !pattern || !body)
 		return -1;
@@ -280,20 +343,41 @@ bd_trigger_add(bd_triggers *t, bd_trigger_type type, const char *pattern,
 	tr->type = type;
 	tr->pattern = strdup(pattern);
 	tr->body = strdup(body);
-	tr->cls = strdup((class && *class) ? class : "default");
+	cls = (class && *class) ? class : "default";
+	tr->cls = strdup(cls);
 	tr->priority = priority < 0 ? BD_TRIG_PRIO_DEFAULT : priority;
 	tr->stop = stop ? 1 : 0;
 	tr->seq = t->next_seq++;
 	tr->alive = 1;
-	if (!tr->pattern || !tr->body || !tr->cls) {
+	if (chain && *chain && state > 0) {
+		char key[256];
+		struct chain *c;
+		snprintf(key, sizeof key, "%s/%s", cls, chain);
+		tr->chain = strdup(key);
+		tr->state = state;
+		c = ensure_chain(t, key);
+		if (c && state > c->max)
+			c->max = state;
+	}
+	if (!tr->pattern || !tr->body || !tr->cls ||
+	    (chain && *chain && state > 0 && !tr->chain)) {
 		free(tr->pattern);
 		free(tr->body);
 		free(tr->cls);
+		free(tr->chain);
 		return -1;
 	}
 	t->n++;
 	t->sorted = 0;
 	return tr->id;
+}
+
+int
+bd_trigger_add(bd_triggers *t, bd_trigger_type type, const char *pattern,
+               const char *body, const char *class, int priority, int stop)
+{
+	return bd_trigger_add_chained(t, type, pattern, body, class, NULL, 0,
+	    priority, stop);
 }
 
 void
@@ -308,6 +392,7 @@ bd_trigger_remove(bd_triggers *t, int id)
 		free(t->trig[i].pattern);
 		free(t->trig[i].body);
 		free(t->trig[i].cls);
+		free(t->trig[i].chain);
 		t->trig[i] = t->trig[--t->n];
 		t->sorted = 0;
 		return;
@@ -382,15 +467,33 @@ dispatch_text(bd_triggers *t, bd_trigger_type type, const char *subject)
 	ensure_sorted(t);
 	for (i = 0; i < t->n; i++) {
 		struct trigger *tr = &t->trig[i];
+		struct chain *c = NULL;
 		if (tr->type != type)
 			continue;
 		if (!bd_class_enabled(t, tr->cls))
 			continue;
+		if (tr->chain) {
+			c = find_chain(t, tr->chain);
+			if (c) {
+				/* a stalled chain resets to state 1 on timeout */
+				if (c->cur > 1 &&
+				    t->now_ms - c->last_ms > c->timeout_ms)
+					c->cur = 1;
+				if (c->cur != tr->state)
+					continue;       /* this state not armed */
+			}
+		}
 		memset(cap, 0, sizeof cap);
 		if (!match(tr->pattern, subject, cap))
 			continue;
 		fire(t, tr, subject, cap);
 		fired = 1;
+		if (c) {                        /* advance the chain, wrap past max */
+			c->cur = tr->state + 1;
+			if (c->cur > c->max)
+				c->cur = 1;
+			c->last_ms = t->now_ms;
+		}
 		if (tr->stop)
 			break;
 	}
@@ -526,4 +629,34 @@ bd_triggers_run_timers(bd_triggers *t, double now_ms)
 		tm->next_ms = now_ms + tm->interval_ms;
 	}
 	return fired;
+}
+
+/* ---- multi-state chains ---- */
+
+void
+bd_triggers_set_now(bd_triggers *t, double now_ms)
+{
+	if (t)
+		t->now_ms = now_ms;
+}
+
+void
+bd_trigger_reset(bd_triggers *t, const char *chain)
+{
+	int i;
+	if (!t)
+		return;
+	for (i = 0; i < t->nch; i++) {
+		const char *key = t->chains[i].key;
+		const char *slash;
+		if (chain && *chain) {
+			/* match the full key "class/chain" or just the chain part */
+			slash = strrchr(key, '/');
+			if (strcmp(key, chain) != 0 &&
+			    !(slash && strcmp(slash + 1, chain) == 0))
+				continue;
+		}
+		t->chains[i].cur = 1;
+		t->chains[i].last_ms = t->now_ms;
+	}
 }
