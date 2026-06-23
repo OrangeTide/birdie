@@ -158,11 +158,13 @@ through `bd_session`):
   (scripting disabled), and `bd_vm_recording` (tests). Values cross the seam as
   scalars (nil/bool/number/string); structured GMCP/MSDP data crosses as a JSON
   string. `bd_session` runs on the Lua backend, so `@` bodies and `#script`
-  execute. It installs the script API: `mud.send(text)`, `class.enable/disable/
-  toggle` (gating the C trigger classes), and the `on.*` hook tables
-  (`line`/`prompt`/`connect`/`disconnect`/`gmcp`) dispatched from C alongside
-  the verb triggers. GMCP/MSDP payloads are JSON-decoded to a Lua table
-  (`json.decode`, embedded in the bootstrap) before `on.gmcp[pkg]` is called.
+  execute. It installs the script API: `mud.send(text)`, `mud.gmcp(pkg,
+  data)` (sends an outbound GMCP package, encoding a table via `json.encode`),
+  `class.enable/disable/toggle` (gating the C trigger classes), and the `on.*`
+  hook tables (`line`/`prompt`/`connect`/`disconnect`/`gmcp`) dispatched from C
+  alongside the verb triggers. GMCP/MSDP payloads are JSON-decoded to a Lua
+  table (`json.decode`/`json.encode`, embedded in the bootstrap) before
+  `on.gmcp[pkg]` is called.
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
   toggle as a unit, priority ordering (highest first) with `#stop`, and four
   dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
@@ -176,11 +178,11 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`mud.gmcp` send, `log.note`, the
-`var` table, `on.timer` / `on.mxp`); multi-state chains; the timer / event /
-expression / mxp types; the line-rewriting verbs (`#substitute` / `#gag` /
-`#highlight`); `#tick` / `#unaction` / `#list`; and the recursion cap and
-sandboxing posture noted below.
+Not yet built: the rest of the host API (`log.note`, the `var` table,
+`on.timer` / `on.mxp`); multi-state chains; the timer / event / expression /
+mxp types; the line-rewriting verbs (`#substitute` / `#gag` / `#highlight`);
+`#tick` / `#unaction` / `#list`; and the recursion cap and sandboxing posture
+noted below.
 
 ## Open questions
 
