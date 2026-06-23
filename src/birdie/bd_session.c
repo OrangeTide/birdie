@@ -312,8 +312,8 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * from C via __bd_dispatch. Each handler runs in pcall so one bad hook does not
  * abort the rest. GMCP/MSDP payloads are JSON-decoded (json.decode) to a Lua
  * table before the on.gmcp handler is called. log.note(text) writes a `note`
- * record to the log sinks (doc/logging.md). Deferred (doc/triggers.md):
- * on.timer/on.mxp.
+ * record to the log sinks (doc/logging.md). on.timer fires for each #tick that
+ * elapses (the timer name is the argument). Deferred (doc/triggers.md): on.mxp.
  */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
@@ -414,12 +414,13 @@ static const char bootstrap_lua[] =
 	"json.encode = jenc\n"
 	"var = var or {}\n"
 	"function __bd_setvars(s) var = json.decode(s) or {} end\n"
-	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={} }\n"
+	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={}, timer={} }\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
 	"  elseif kind=='prompt' then for _,f in ipairs(on.prompt) do pcall(f,a) end\n"
 	"  elseif kind=='connect' then for _,f in ipairs(on.connect) do pcall(f) end\n"
 	"  elseif kind=='disconnect' then for _,f in ipairs(on.disconnect) do pcall(f) end\n"
+	"  elseif kind=='timer' then for _,f in ipairs(on.timer) do pcall(f,a) end\n"
 	/* hand GMCP/MSDP handlers the decoded table (nil if the payload was not
 	 * valid JSON) */
 	"  elseif kind=='gmcp' then local h=on.gmcp[a]\n"
@@ -443,6 +444,13 @@ static void
 dispatch_hook(bd_session *s, const char *kind, const char *a, const char *b)
 {
 	bd_vm_call(s->vm, "__bd_dispatch", "sss", kind, a ? a : "", b ? b : "");
+}
+
+/* Engine timer-fire callback: run the on.timer hooks with the timer name. */
+static void
+timer_fired(const char *name, void *ctx)
+{
+	dispatch_hook((bd_session *)ctx, "timer", name, NULL);
 }
 
 /* Copy `src` to `dst` (cap incl. NUL) dropping ANSI/VT escape sequences, so
@@ -680,6 +688,8 @@ bd_session_new(const bd_profile *profile)
 	s->net = bd_net_new(net_data, net_state, s);
 	s->vm = bd_vm_new(&bd_vm_lua);           /* Lua 5.4 + LPeg */
 	s->trig = bd_triggers_new(s->vm, trigger_send, s);
+	if (s->trig)
+		bd_triggers_set_timer_cb(s->trig, timer_fired, s);
 	if (!s->net || !s->vm || !s->trig) {
 		bd_triggers_free(s->trig);
 		bd_vm_free(s->vm);

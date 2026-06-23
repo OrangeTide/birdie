@@ -41,6 +41,8 @@ struct bd_triggers {
 	bd_vm *vm;
 	bd_trigger_send_fn send;
 	void *ctx;
+	bd_trigger_timer_fn timer_cb;
+	void *timer_ctx;
 
 	struct trigger *trig;
 	int n, cap;
@@ -776,6 +778,15 @@ bd_trigger_remove_tick(bd_triggers *t, const char *name)
 	}
 }
 
+void
+bd_triggers_set_timer_cb(bd_triggers *t, bd_trigger_timer_fn fn, void *ctx)
+{
+	if (!t)
+		return;
+	t->timer_cb = fn;
+	t->timer_ctx = ctx;
+}
+
 int
 bd_triggers_run_timers(bd_triggers *t, double now_ms)
 {
@@ -794,7 +805,10 @@ bd_triggers_run_timers(bd_triggers *t, double now_ms)
 		if (now_ms < tm->next_ms)
 			continue;
 		if (bd_class_enabled(t, tm->cls)) {
-			fire_body(t, tm->body, "", cap);
+			if (tm->body[0])                /* empty body: hook-only timer */
+				fire_body(t, tm->body, "", cap);
+			if (t->timer_cb)
+				t->timer_cb(tm->name, t->timer_ctx);
 			fired++;
 		}
 		/* reschedule from now, so a stalled frame does not fire a burst */

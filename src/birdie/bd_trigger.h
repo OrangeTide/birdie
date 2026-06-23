@@ -40,6 +40,10 @@ typedef struct bd_triggers bd_triggers;
 /* The engine emits MUD commands through this; it does not own the socket. */
 typedef void (*bd_trigger_send_fn)(const char *cmd, void *ctx);
 
+/* Called when an interval timer fires, with the timer's name. Lets the host
+ * dispatch the on.timer hook table in addition to the timer's own body. */
+typedef void (*bd_trigger_timer_fn)(const char *name, void *ctx);
+
 /* Create an engine. `vm` runs '@' Lua bodies (may be a null/recording VM);
  * `send` emits command bodies. Either may be NULL. */
 bd_triggers *bd_triggers_new(bd_vm *vm, bd_trigger_send_fn send, void *ctx);
@@ -140,6 +144,10 @@ int bd_trigger_add_tick(bd_triggers *t, const char *name, const char *body,
 
 /* Remove a timer by name. */
 void bd_trigger_remove_tick(bd_triggers *t, const char *name);
+
+/* Register a callback fired (on the same thread as run_timers) for each timer
+ * that elapses, after its body runs. Used to drive the on.timer hook table. */
+void bd_triggers_set_timer_cb(bd_triggers *t, bd_trigger_timer_fn fn, void *ctx);
 
 /* Fire any timers whose deadline has passed at monotonic time `now_ms`. Call
  * regularly (e.g. once per frame from bd_session_drain). A timer reschedules
