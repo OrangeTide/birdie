@@ -147,10 +147,18 @@ Built (`src/birdie/bd_log.{c,h}`, wired through `bd_session`):
   `log.note(text)` script API (`__bd_note` host fn). Each session gets a
   process-unique `session` id at creation.
 
+- **replay** (`src/birdie/bd_replay.{c,h}`) — `bd_replay_recv` walks the
+  NDJSON buckets for a `(mud, character)` pair newest-first (stopping once it
+  has enough), unescapes each `recv` record's `raw`, and hands the last N back
+  oldest-first. `bd_session_replay(s, max)` re-emits those as
+  `BD_SESSION_DATA` events with the `replay` flag set (no triggers, no `on.*`
+  hooks); the ludica front-end calls it on connect to restore recent
+  scrollback and notes the restored count.
+
 Not yet built: configurable/multiple user-defined sinks (only the two defaults
 are wired), Lua-predicate filters, the `mxp` record path (no MXP parser yet),
-`error` records, password redaction on `send`, and the replay / history-viewer
-re-ingest path.
+`error` records, password redaction on `send`, and the paging scrollback
+viewer (the replay primitive above is its building block).
 
 ## Open questions
 

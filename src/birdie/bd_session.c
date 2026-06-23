@@ -6,6 +6,7 @@
 
 #include "bd_session.h"
 #include "bd_log.h"
+#include "bd_replay.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -787,6 +788,36 @@ bd_vm *
 bd_session_vm(bd_session *s)
 {
 	return s ? s->vm : NULL;
+}
+
+/* Re-emit one replayed line as a DATA event (no triggers, no line assembly). */
+static void
+replay_emit(const char *raw, size_t len, void *ctx)
+{
+	bd_session *s = ctx;
+	bd_session_event ev = { 0 };
+	ev.kind = BD_SESSION_DATA;
+	ev.data = raw;
+	ev.len = (int)len;
+	ev.replay = 1;
+	emit(s, &ev);
+	ev.data = "\r\n";       /* the logged raw line has no trailing newline */
+	ev.len = 2;
+	emit(s, &ev);
+}
+
+int
+bd_session_replay(bd_session *s, int max)
+{
+	char root[1024];
+	const char *mud, *character;
+
+	if (!s || !s->data_dir || max <= 0)
+		return -1;
+	mud = s->profile ? bd_profile_get(s->profile, "name") : NULL;
+	character = s->profile ? bd_profile_get(s->profile, "character") : NULL;
+	snprintf(root, sizeof root, "%s/logs", s->data_dir);
+	return bd_replay_recv(root, mud, character, max, replay_emit, s);
 }
 
 void

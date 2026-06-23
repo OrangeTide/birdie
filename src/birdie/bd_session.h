@@ -48,6 +48,7 @@ typedef struct bd_session_event {
 	/* BD_SESSION_DATA */
 	const char *data;
 	int len;
+	int replay;             /* 1 if this is replayed scrollback, not live */
 
 	/* BD_SESSION_ECHO */
 	int echo_suppress;
@@ -101,5 +102,15 @@ void bd_session_set_data_dir(bd_session *s, const char *dir);
 
 /* Pull queued network output and fire events. Call once per frame (UI thread). */
 void bd_session_drain(bd_session *s);
+
+/*
+ * Replay the last `max` logged inbound lines for this profile through the
+ * front-end as BD_SESSION_DATA events with `replay` set, oldest-first, each
+ * terminated with CRLF. Triggers and on.* hooks do NOT fire on replayed lines
+ * (doc/network.md). Needs the data dir set (that is where logs live); a no-op
+ * otherwise. Returns the number of lines replayed, or -1. Intended for "show
+ * last N lines on reconnect" and the scrollback viewer.
+ */
+int bd_session_replay(bd_session *s, int max);
 
 #endif /* BD_SESSION_H */

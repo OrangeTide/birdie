@@ -52,7 +52,6 @@ mudlist_cell(void *ctx, int row, int col)
 static void
 on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 {
-	(void)s;
 	(void)arg;
 	switch (ev->kind) {
 	case BD_SESSION_DATA:
@@ -73,10 +72,20 @@ on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 			snprintf(line + n, sizeof line - (size_t)n, " (%s)",
 			    ev->detail);
 		bd_set(status_label, BD_LABEL_S, line, BD_END);
-		if (ev->state == BD_NET_CONNECTED)
+		if (ev->state == BD_NET_CONNECTED) {
+			/* restore recent scrollback from the logs (the replayed
+			 * DATA events arrive above with ev->replay set) */
+			int rn = bd_session_replay(s, 20);
+			if (rn > 0) {
+				char note[64];
+				snprintf(note, sizeof note,
+				    "\033[2m*** restored %d line%s of scrollback\033[0m\r\n",
+				    rn, rn == 1 ? "" : "s");
+				bd_terminal_write(terminal, note, -1);
+			}
 			bd_terminal_write(terminal,
 			    "\033[32m*** connected\033[0m\r\n", -1);
-		else if (ev->state == BD_NET_CLOSED || ev->state == BD_NET_ERROR)
+		} else if (ev->state == BD_NET_CLOSED || ev->state == BD_NET_ERROR)
 			bd_terminal_write(terminal,
 			    "\033[31m*** disconnected\033[0m\r\n", -1);
 		break;
