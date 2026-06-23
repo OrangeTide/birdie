@@ -84,4 +84,9 @@ void bd_telopt_set_termtype(bd_telopt *t, const char *type);
  * a fresh NAWS subnegotiation is transmitted immediately. */
 void bd_telopt_set_winsize(bd_telopt *t, int cols, int rows);
 
+/* Send an outbound GMCP package: "Package.Name <json>" framed as a GMCP
+ * subnegotiation (json may be NULL/empty for a bare package). Transmitted via
+ * the xmit callback. */
+void bd_telopt_send_gmcp(bd_telopt *t, const char *pkg, const char *json);
+
 #endif /* BD_TELOPT_H */

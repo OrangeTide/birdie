@@ -137,6 +137,46 @@ send_sb(struct bd_telopt *t, unsigned char opt,
 	xmit(t, buf, n);
 }
 
+/* Send an outbound GMCP message: IAC SB GMCP "pkg json" IAC SE, payload 0xFF
+ * doubled. Heap-buffered so a large package is not truncated (unlike send_sb,
+ * which only originates small fixed replies). No-op if pkg is empty. */
+void
+bd_telopt_send_gmcp(struct bd_telopt *t, const char *pkg, const char *json)
+{
+	size_t pl, jl, plen, cap, n, i;
+	unsigned char *buf;
+	const unsigned char *p;
+
+	if (!t || !pkg || !*pkg)
+		return;
+	pl = strlen(pkg);
+	jl = json ? strlen(json) : 0;
+	plen = pl + (jl ? 1 + jl : 0);          /* "pkg" + ' ' + "json" */
+	cap = 3 + plen * 2 + 2;                  /* worst case all bytes doubled */
+	buf = malloc(cap);
+	if (!buf)
+		return;
+
+	n = 0;
+	buf[n++] = TC_IAC;
+	buf[n++] = TC_SB;
+	buf[n++] = OPT_GMCP;
+#define APPEND(byte) do { buf[n++] = (byte); \
+		if ((byte) == TC_IAC) buf[n++] = TC_IAC; } while (0)
+	for (i = 0, p = (const unsigned char *)pkg; i < pl; i++)
+		APPEND(p[i]);
+	if (jl) {
+		buf[n++] = ' ';
+		for (i = 0, p = (const unsigned char *)json; i < jl; i++)
+			APPEND(p[i]);
+	}
+#undef APPEND
+	buf[n++] = TC_IAC;
+	buf[n++] = TC_SE;
+	xmit(t, buf, n);
+	free(buf);
+}
+
 static void
 send_naws(struct bd_telopt *t)
 {

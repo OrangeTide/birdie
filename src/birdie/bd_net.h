@@ -99,6 +99,11 @@ void bd_net_set_termtype(bd_net *n, const char *type);
  * server if it changes while connected. */
 void bd_net_set_winsize(bd_net *n, int cols, int rows);
 
+/* Send an outbound GMCP package "pkg <json>" (json may be NULL for a bare
+ * package). Framed and escaped on the net thread. Returns 0 if queued, -1 if
+ * it could not be (too large, or not enough tx room). */
+int bd_net_send_gmcp(bd_net *n, const char *pkg, const char *json);
+
 /* Current state. */
 bd_net_state bd_net_state_get(const bd_net *n);
 

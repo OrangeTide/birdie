@@ -72,6 +72,19 @@ host_send(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
 	return 0;
 }
 
+/* Host function: __bd_gmcp(pkg, json) -> send an outbound GMCP package. */
+static int
+host_gmcp(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	bd_session *s = ud;
+	(void)vm;
+	(void)ret;
+	if (argc >= 1 && argv[0].type == BD_VM_STR)
+		bd_net_send_gmcp(s->net, argv[0].u.s,
+		    (argc >= 2 && argv[1].type == BD_VM_STR) ? argv[1].u.s : NULL);
+	return 0;
+}
+
 /* Host function: __bd_class(name, enable) -> toggle a trigger class.
  * enable true=enable, false=disable, nil=toggle. */
 static int
@@ -110,6 +123,11 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
 	"function mud.send(s) __bd_send(tostring(s)) end\n"
+	"function mud.gmcp(pkg, data)\n"
+	"  if data == nil then __bd_gmcp(pkg, nil)\n"
+	"  elseif type(data)=='string' then __bd_gmcp(pkg, data)\n"
+	"  else __bd_gmcp(pkg, json.encode(data)) end\n"
+	"end\n"
 	"class = class or {}\n"
 	"function class.enable(n) __bd_class(n, true) end\n"
 	"function class.disable(n) __bd_class(n, false) end\n"
@@ -165,6 +183,38 @@ static const char bootstrap_lua[] =
 	"end\n"
 	"json = json or {}\n"
 	"function json.decode(s) local ok,v=pcall(jdec,s); if ok then return v end return nil end\n"
+	/* JSON encoder. byte codes avoid quote/backslash escaping in this C
+	 * string; BS is a literal backslash. */
+	"local BS = string.char(92)\n"
+	"local function jstr(s)\n"
+	" local r='\"'\n"
+	" for i=1,#s do local b=s:byte(i)\n"
+	"  if b==34 then r=r..BS..'\"'\n"
+	"  elseif b==92 then r=r..BS..BS\n"
+	"  elseif b==10 then r=r..BS..'n'\n"
+	"  elseif b==9 then r=r..BS..'t'\n"
+	"  elseif b==13 then r=r..BS..'r'\n"
+	"  elseif b<32 then r=r..string.format(BS..'u%04x', b)\n"
+	"  else r=r..string.char(b) end end\n"
+	" return r..'\"'\n"
+	"end\n"
+	"local function jenc(v)\n"
+	" local tp=type(v)\n"
+	" if v==nil then return 'null'\n"
+	" elseif tp=='boolean' then if v then return 'true' else return 'false' end\n"
+	" elseif tp=='number' then return tostring(v)\n"
+	" elseif tp=='string' then return jstr(v)\n"
+	" elseif tp=='table' then\n"
+	"  local n=0; for _ in pairs(v) do n=n+1 end\n"
+	"  if n==0 then return '{}' end\n"
+	"  if n==#v then local p={}; for i=1,#v do p[i]=jenc(v[i]) end\n"
+	"   return '['..table.concat(p,',')..']'\n"
+	"  else local p={}; for k,val in pairs(v) do p[#p+1]=jstr(tostring(k))..':'..jenc(val) end\n"
+	"   return '{'..table.concat(p,',')..'}' end\n"
+	" end\n"
+	" return 'null'\n"
+	"end\n"
+	"json.encode = jenc\n"
 	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={} }\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
@@ -182,6 +232,7 @@ install_script_api(bd_session *s)
 {
 	bd_vm_register(s->vm, "__bd_send", host_send, s);
 	bd_vm_register(s->vm, "__bd_class", host_class, s);
+	bd_vm_register(s->vm, "__bd_gmcp", host_gmcp, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
 }
 

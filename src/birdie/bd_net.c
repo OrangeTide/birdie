@@ -60,7 +60,8 @@ enum {
 	MSG_SEND,       /* bytes to transmit */
 	MSG_CLOSE,
 	MSG_WINSIZE,    /* u16 cols, u16 rows (native order) */
-	MSG_TERMTYPE    /* terminal type string */
+	MSG_TERMTYPE,   /* terminal type string */
+	MSG_GMCP        /* pkg '\0' json -- outbound GMCP package */
 };
 
 /* rx message types (net -> UI) */
@@ -955,6 +956,18 @@ wake_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 			buf[len < sizeof buf ? len : sizeof buf - 1] = '\0';
 			bd_telopt_set_termtype(c->telopt, (char *)buf);
 			break;
+		case MSG_GMCP:
+			/* payload: pkg '\0' json. telopt frames + escapes; the
+			 * xmit lands in out, flushed below via update_interest */
+			if (len >= 1) {
+				const char *pkg = (const char *)buf;
+				size_t kl = strnlen(pkg, len);
+				/* json (if any) follows the NUL after the package */
+				const char *json = (kl + 1 < len) ? pkg + kl + 1 : NULL;
+				bd_telopt_send_gmcp(c->telopt, pkg, json);
+				update_interest(c);
+			}
+			break;
 		}
 	}
 
@@ -1264,6 +1277,28 @@ bd_net_set_termtype(bd_net *n, const char *type)
 		l = 63;
 	if (ring_put(n->tx, MSG_TERMTYPE, type, (uint32_t)l) == 0)
 		wake(n);
+}
+
+int
+bd_net_send_gmcp(bd_net *n, const char *pkg, const char *json)
+{
+	unsigned char payload[CHUNK];
+	size_t kl, jl, total;
+
+	if (!n || !pkg || !*pkg)
+		return -1;
+	kl = strlen(pkg);
+	jl = json ? strlen(json) : 0;
+	total = kl + 1 + jl;                    /* pkg '\0' json */
+	if (total > sizeof payload)
+		return -1;
+	memcpy(payload, pkg, kl + 1);           /* includes NUL */
+	if (jl)
+		memcpy(payload + kl + 1, json, jl);
+	if (ring_put(n->tx, MSG_GMCP, payload, (uint32_t)total) < 0)
+		return -1;
+	wake(n);
+	return 0;
 }
 
 void
