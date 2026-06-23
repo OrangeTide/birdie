@@ -595,6 +595,134 @@ bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json)
 	return fired;
 }
 
+/* ---- line rewriting (#gag / #substitute / #highlight) ---- */
+
+/* Resolve a #highlight color token to SGR parameter text. A leading digit is
+ * taken as raw SGR params ("1;33"); otherwise a small set of names is mapped. */
+static const char *
+hilite_sgr(const char *color)
+{
+	if (!color || !*color)
+		return "1";                     /* bold, a safe default */
+	if (color[0] >= '0' && color[0] <= '9')
+		return color;
+	if (!strcmp(color, "bold"))    return "1";
+	if (!strcmp(color, "red"))     return "31";
+	if (!strcmp(color, "green"))   return "32";
+	if (!strcmp(color, "yellow"))  return "33";
+	if (!strcmp(color, "blue"))    return "34";
+	if (!strcmp(color, "magenta")) return "35";
+	if (!strcmp(color, "cyan"))    return "36";
+	if (!strcmp(color, "white"))   return "37";
+	if (!strcmp(color, "bred"))    return "91";
+	if (!strcmp(color, "bgreen"))  return "92";
+	if (!strcmp(color, "byellow")) return "93";
+	if (!strcmp(color, "bcyan"))   return "96";
+	return "1";
+}
+
+/* Append up to `n` bytes of `src` to out[*o] (bounded by cap). */
+static void
+app(char *out, size_t cap, size_t *o, const char *src, size_t n)
+{
+	size_t k;
+	for (k = 0; k < n && *o + 1 < cap; k++)
+		out[(*o)++] = src[k];
+}
+
+/* Rewrite every non-overlapping match of `pattern` in `work` (NUL-terminated)
+ * into out[outcap]. For highlight, each match is wrapped in ESC[<sgr>m..ESC[0m;
+ * otherwise `body` is the substitution (%0..%9 expanded). Returns 1 if any
+ * match was rewritten. */
+static int
+rewrite_pass(const char *work, char *out, size_t outcap, const char *pattern,
+             int hilite, const char *body)
+{
+	struct span cap[10];
+	const char *s = work;
+	size_t o = 0;
+	int changed = 0;
+
+	while (*s) {
+		int adv;
+		memset(cap, 0, sizeof cap);
+		if (!match(pattern, s, cap)) {
+			app(out, outcap, &o, s, strlen(s));
+			break;
+		}
+		app(out, outcap, &o, s, (size_t)cap[0].off);   /* text before */
+		if (hilite) {
+			app(out, outcap, &o, "\033[", 2);
+			app(out, outcap, &o, body, strlen(body));
+			app(out, outcap, &o, "m", 1);
+			app(out, outcap, &o, s + cap[0].off, (size_t)cap[0].len);
+			app(out, outcap, &o, "\033[0m", 4);
+		} else {
+			char rep[BODY_MAX];
+			expand(body, s, cap, rep, sizeof rep);
+			app(out, outcap, &o, rep, strlen(rep));
+		}
+		changed = 1;
+		adv = cap[0].off + cap[0].len;
+		if (cap[0].len == 0) {          /* zero-width: emit a char, advance */
+			if (s[adv]) {
+				app(out, outcap, &o, s + adv, 1);
+				adv++;
+			} else {
+				break;
+			}
+		}
+		s += adv;
+	}
+	out[o < outcap ? o : outcap - 1] = '\0';
+	return changed;
+}
+
+void
+bd_triggers_rewrite(bd_triggers *t, const char *line, bd_line_edit *e)
+{
+	char work[sizeof e->text];
+	char next[sizeof e->text];
+	int i;
+
+	if (!e)
+		return;
+	e->gag = 0;
+	e->changed = 0;
+	e->text[0] = '\0';
+	if (!t || !line)
+		return;
+	snprintf(work, sizeof work, "%s", line);
+
+	ensure_sorted(t);
+	for (i = 0; i < t->n; i++) {
+		struct trigger *tr = &t->trig[i];
+		struct span cap[10];
+		if (tr->type != BD_TRIG_GAG && tr->type != BD_TRIG_SUBST &&
+		    tr->type != BD_TRIG_HILITE)
+			continue;
+		if (!bd_class_enabled(t, tr->cls))
+			continue;
+		if (tr->type == BD_TRIG_GAG) {
+			/* match the original line, so a prior substitution cannot
+			 * hide text from a gag (predictable ordering) */
+			memset(cap, 0, sizeof cap);
+			if (match(tr->pattern, line, cap)) {
+				e->gag = 1;
+				return;                 /* dropped: nothing else matters */
+			}
+			continue;
+		}
+		if (rewrite_pass(work, next, sizeof next, tr->pattern,
+		    tr->type == BD_TRIG_HILITE,
+		    tr->type == BD_TRIG_HILITE ? hilite_sgr(tr->body) : tr->body)) {
+			memcpy(work, next, sizeof work);
+			e->changed = 1;
+		}
+	}
+	snprintf(e->text, sizeof e->text, "%s", work);
+}
+
 /* ---- interval timers (#tick) ---- */
 
 int

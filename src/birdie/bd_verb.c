@@ -205,6 +205,9 @@ type_tag(bd_trigger_type type)
 	case BD_TRIG_ALIAS:  return "ali";
 	case BD_TRIG_PROMPT: return "prm";
 	case BD_TRIG_GMCP:   return "gmcp";
+	case BD_TRIG_GAG:    return "gag";
+	case BD_TRIG_SUBST:  return "sub";
+	case BD_TRIG_HILITE: return "hi";
 	}
 	return "?";
 }
@@ -257,6 +260,59 @@ verb_list(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
 	bd_trigger_foreach(t, list_cb, &l);
 	if (l.count == 0)
 		fb(feedback, fbcap, "no triggers");
+	return 1;
+}
+
+/* #gag {pattern} [class] -- drop matching lines from display */
+static int
+verb_gag(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char pat[ARG_MAX], cls[128];
+	if (!read_brace(&args, pat, sizeof pat)) {
+		fb(feedback, fbcap, "usage: #gag {pattern} [class]");
+		return 1;
+	}
+	read_word(&args, cls, sizeof cls);
+	if (bd_trigger_add(t, BD_TRIG_GAG, pat, "", cls[0] ? cls : NULL, -1, 0) < 0)
+		fb(feedback, fbcap, "could not add gag");
+	else
+		fb(feedback, fbcap, "gag added");
+	return 1;
+}
+
+/* #substitute {pattern} {replacement} [class] -- rewrite matched text */
+static int
+verb_subst(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char pat[ARG_MAX], rep[ARG_MAX], cls[128];
+	if (!read_brace(&args, pat, sizeof pat) ||
+	    !read_brace(&args, rep, sizeof rep)) {
+		fb(feedback, fbcap, "usage: #substitute {pattern} {replacement} [class]");
+		return 1;
+	}
+	read_word(&args, cls, sizeof cls);
+	if (bd_trigger_add(t, BD_TRIG_SUBST, pat, rep, cls[0] ? cls : NULL, -1, 0) < 0)
+		fb(feedback, fbcap, "could not add substitution");
+	else
+		fb(feedback, fbcap, "substitution added");
+	return 1;
+}
+
+/* #highlight {pattern} {color} [class] -- recolor matched text */
+static int
+verb_hilite(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char pat[ARG_MAX], color[64], cls[128];
+	if (!read_brace(&args, pat, sizeof pat) ||
+	    !read_brace(&args, color, sizeof color)) {
+		fb(feedback, fbcap, "usage: #highlight {pattern} {color} [class]");
+		return 1;
+	}
+	read_word(&args, cls, sizeof cls);
+	if (bd_trigger_add(t, BD_TRIG_HILITE, pat, color, cls[0] ? cls : NULL, -1, 0) < 0)
+		fb(feedback, fbcap, "could not add highlight");
+	else
+		fb(feedback, fbcap, "highlight added");
 	return 1;
 }
 
@@ -378,6 +434,12 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_untrigger(t, BD_TRIG_ALIAS, args, feedback, fbcap);
 	if (!strcmp(verb, "list"))
 		return verb_list(t, args, feedback, fbcap);
+	if (!strcmp(verb, "gag"))
+		return verb_gag(t, args, feedback, fbcap);
+	if (!strcmp(verb, "substitute") || !strcmp(verb, "sub"))
+		return verb_subst(t, args, feedback, fbcap);
+	if (!strcmp(verb, "highlight") || !strcmp(verb, "hi"))
+		return verb_hilite(t, args, feedback, fbcap);
 	if (!strcmp(verb, "script")) {
 		char src[ARG_MAX];
 		bd_vm *vm = bd_triggers_vm(t);

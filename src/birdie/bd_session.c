@@ -472,44 +472,87 @@ strip_ansi(const char *src, size_t len, char *dst, size_t cap)
 	dst[o] = '\0';
 }
 
-/* Run one assembled raw line through the action triggers (ANSI stripped). */
+/* Emit a run of display bytes to the front-end as a DATA event. */
 static void
-dispatch_line(bd_session *s, const char *raw, size_t len)
+emit_data(bd_session *s, const char *bytes, int len)
+{
+	bd_session_event ev = { 0 };
+	if (len <= 0)
+		return;
+	ev.kind = BD_SESSION_DATA;
+	ev.data = bytes;
+	ev.len = len;
+	emit(s, &ev);
+}
+
+/*
+ * Retire the buffered line: run it through the action triggers and on.line
+ * hooks, log it, then reconcile the display. The line's content (and any
+ * trailing '\r') was already streamed live; here we emit only the line ending,
+ * rewritten if a #gag / #substitute / #highlight applies. A gag erases the
+ * streamed row (CR + clear-line) and writes no newline; a substitution or
+ * highlight erases and rewrites the line; an unmatched line just gets its '\n'
+ * (byte-identical to raw passthrough). Limitation: the erase clears one row, so
+ * gagging a line that wrapped across rows leaves remnants.
+ */
+static void
+retire_line(bd_session *s)
 {
 	char plain[4096];
-	strip_ansi(raw, len, plain, sizeof plain);
+	bd_line_edit edit;
+	size_t n = s->line_len;
+
+	if (n > 0 && s->linebuf[n - 1] == '\r')
+		n--;
+	strip_ansi(s->linebuf, n, plain, sizeof plain);
 	bd_triggers_line(s->trig, plain);       /* #action triggers */
 	dispatch_hook(s, "line", plain, NULL);  /* on.line hooks */
+	bd_triggers_rewrite(s->trig, plain, &edit);
+
 	if (s->log) {                           /* recv record (raw + stripped) */
 		char rawz[4096];
-		size_t rl = len < sizeof rawz - 1 ? len : sizeof rawz - 1;
+		size_t rl = n < sizeof rawz - 1 ? n : sizeof rawz - 1;
 		bd_log_rec r;
-		memcpy(rawz, raw, rl);
+		memcpy(rawz, s->linebuf, rl);
 		rawz[rl] = '\0';
 		log_fill(s, &r, BD_LOG_RECV);
 		r.raw = rawz;
 		r.text = plain;
+		r.suppressed = edit.gag;
 		bd_log_write(s->log, &r);
 	}
+
+	if (edit.gag) {
+		emit_data(s, "\r\033[2K", 5);   /* erase the streamed line */
+	} else if (edit.changed) {
+		emit_data(s, "\r\033[2K", 5);
+		emit_data(s, edit.text, (int)strlen(edit.text));
+		emit_data(s, "\r\n", 2);
+	} else {
+		emit_data(s, "\n", 1);          /* normal: just terminate the line */
+	}
+	s->line_len = 0;
 }
 
-/* Append received bytes to the line buffer and dispatch each completed line
- * (split on '\n', trailing '\r' trimmed). The unterminated remainder stays
- * buffered and is also the pending prompt text. */
+/*
+ * Assemble incoming bytes into lines. Bytes are streamed live to the display
+ * (so prompts and partial lines appear immediately) and buffered for trigger
+ * matching; each '\n' retires a line (see retire_line). The unterminated
+ * remainder stays buffered and is also the pending prompt text.
+ */
 static void
 feed_lines(bd_session *s, const char *data, int len)
 {
-	int i;
+	int i, run = 0;
 	for (i = 0; i < len; i++) {
 		char c = data[i];
 		if (c == '\n') {
-			size_t n = s->line_len;
-			if (n > 0 && s->linebuf[n - 1] == '\r')
-				n--;
-			dispatch_line(s, s->linebuf, n);
-			s->line_len = 0;
+			emit_data(s, data + run, i - run);  /* stream the line live */
+			retire_line(s);                     /* triggers/rewrite/'\n' */
+			run = i + 1;
 			continue;
 		}
+		/* buffer the byte for trigger matching (it is streamed in a run) */
 		if (s->line_len + 1 > s->line_cap) {
 			size_t nc = s->line_cap ? s->line_cap * 2 : 256;
 			char *nb = realloc(s->linebuf, nc);
@@ -520,6 +563,8 @@ feed_lines(bd_session *s, const char *data, int len)
 		}
 		s->linebuf[s->line_len++] = c;
 	}
+	if (len > run)                          /* stream the unterminated tail */
+		emit_data(s, data + run, len - run);
 }
 
 /* ---- bd_net callbacks (fire on the UI thread during drain) ---- */
@@ -528,12 +573,10 @@ static void
 net_data(const char *data, int len, void *arg)
 {
 	bd_session *s = arg;
-	bd_session_event ev = { 0 };
-	ev.kind = BD_SESSION_DATA;
-	ev.data = data;
-	ev.len = len;
-	emit(s, &ev);                   /* terminal display gets the raw bytes */
-	feed_lines(s, data, len);       /* trigger engine gets assembled lines */
+	/* feed_lines streams bytes to the display run-by-run and retires each
+	 * completed line through the triggers / rewriting verbs (a gagged line is
+	 * erased, a rewritten one replaced) before the line ending is emitted */
+	feed_lines(s, data, len);
 }
 
 static void

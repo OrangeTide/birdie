@@ -172,6 +172,8 @@ fmt_ndjson(struct sbuf *s, const bd_log_rec *r)
 	case BD_LOG_SEND:
 		if (r->raw)  { sb_putc(s, ','); sb_kv(s, "raw", r->raw); }
 		if (r->text) { sb_putc(s, ','); sb_kv(s, "text", r->text); }
+		if (r->kind == BD_LOG_RECV && r->suppressed)
+			sb_puts(s, ",\"suppressed\":true");
 		break;
 	case BD_LOG_GMCP:
 		if (r->package) { sb_putc(s, ','); sb_kv(s, "package", r->package); }

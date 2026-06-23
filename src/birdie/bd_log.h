@@ -43,6 +43,7 @@ typedef struct bd_log_rec {
 	/* recv / send / note */
 	const char *raw;        /* original bytes, ANSI intact (recv/send) */
 	const char *text;       /* ANSI-stripped text; the note body for NOTE */
+	int         suppressed; /* recv: 1 if gagged from display (still logged) */
 
 	/* connect */
 	const char *host;

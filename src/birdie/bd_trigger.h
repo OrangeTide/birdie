@@ -26,7 +26,11 @@ typedef enum bd_trigger_type {
 	BD_TRIG_ACTION,   /* matches an incoming MUD line (#action) */
 	BD_TRIG_ALIAS,    /* matches outgoing user input (#alias) */
 	BD_TRIG_PROMPT,   /* matches a prompt line (EOR/GA-marked) */
-	BD_TRIG_GMCP      /* matches a GMCP package by name */
+	BD_TRIG_GMCP,     /* matches a GMCP package by name */
+	/* line-rewriting types: applied to a line's display text, not "fired" */
+	BD_TRIG_GAG,      /* #gag: drop the line from display */
+	BD_TRIG_SUBST,    /* #substitute: replace matched text (body = replacement) */
+	BD_TRIG_HILITE    /* #highlight: recolor matched text (body = color) */
 } bd_trigger_type;
 
 #define BD_TRIG_PRIO_DEFAULT 5
@@ -101,6 +105,23 @@ int  bd_class_enabled(bd_triggers *t, const char *name);
 int bd_triggers_line(bd_triggers *t, const char *line);    /* BD_TRIG_ACTION */
 int bd_triggers_prompt(bd_triggers *t, const char *text);  /* BD_TRIG_PROMPT */
 int bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json);
+
+/* ---- line rewriting (#gag / #substitute / #highlight) ---- */
+
+typedef struct bd_line_edit {
+	int gag;                /* 1 -> drop the line from display */
+	int changed;            /* 1 -> `text` differs from the input line */
+	char text[4096];        /* rewritten display text (valid unless gagged) */
+} bd_line_edit;
+
+/* Apply the gag / substitute / highlight triggers (in priority order, class
+ * gated) to `line`, filling `*e`. A gag wins immediately. Substitute replaces
+ * all non-overlapping matches with its body (%0..%9 expanded); highlight wraps
+ * each match in an ANSI color (its body is a color name or raw SGR params).
+ * The input is the line's plain display text; highlight/substitute output is
+ * plain text plus any color this layer adds (original server color on a
+ * rewritten line is not preserved). */
+void bd_triggers_rewrite(bd_triggers *t, const char *line, bd_line_edit *e);
 
 /*
  * Run outgoing user input through the aliases. Returns 1 if an alias fired

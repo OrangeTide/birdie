@@ -176,12 +176,26 @@ through `bd_session`):
   either MUD command text (`%0..%9` expanded, emitted to the session) or, with
   a leading `@`, a Lua expression run on `bd_vm`.
 - **`bd_verb`** — the `#action` / `#alias` / `#unaction` / `#unalias` /
-  `#list` / `#class` / `#tick` / `#untick` / `#reset` / `#script` command-line
-  verbs over the engine, wired to the input line in `main.c`. `#unaction` /
-  `#unalias {pattern} [class]` remove triggers by exact pattern (optionally
-  class-scoped); `#list [class]` enumerates triggers (type tag, class, pattern,
-  priority, chain state). Interval timers fire from `bd_session_drain` against a
-  monotonic clock.
+  `#list` / `#class` / `#tick` / `#untick` / `#reset` / `#gag` /
+  `#substitute` / `#highlight` / `#script` command-line verbs over the engine,
+  wired to the input line in `main.c`. `#unaction` / `#unalias {pattern}
+  [class]` remove triggers by exact pattern (optionally class-scoped); `#list
+  [class]` enumerates triggers (type tag, class, pattern, priority, chain
+  state). Interval timers fire from `bd_session_drain` against a monotonic
+  clock.
+- **line rewriting** (`#gag` / `#substitute` / `#highlight`) — three trigger
+  types applied to a retired line's display text by `bd_triggers_rewrite`
+  (priority order, class gated): `#gag {pattern}` drops the line, `#substitute
+  {pattern} {replacement}` rewrites all non-overlapping matches (`%0..%9`
+  expanded), `#highlight {pattern} {color}` wraps matches in an ANSI color (a
+  name like `red`/`byellow` or raw SGR params like `1;33`). `bd_session`
+  streams MUD bytes to the display live, then on each line retirement emits the
+  reconciliation: a gag erases the streamed row (`CR` + erase-line) with no
+  newline, a substitute/highlight erases and rewrites it, and an unmatched line
+  just gets its `\n` (byte-identical to raw passthrough). Gags are still
+  logged, with `suppressed:true`. Limitation: the erase clears one terminal
+  row, so gagging a line that wrapped across rows leaves remnants; a gag
+  matches the original line (a prior substitution cannot hide text from it).
 - **multi-state chains** — `#action`/`#alias` take an optional
   `class[/chain:state]` token (e.g. `combat/cast:1`). Only state 1 of a chain
   is armed initially; firing state N arms state N+1, wrapping back to 1 past the
@@ -193,8 +207,8 @@ through `bd_session`):
   route to gmcp triggers; outgoing input runs through the aliases first.
 
 Not yet built: the rest of the host API (`on.timer` / `on.mxp`);
-the event / expression / mxp types; the line-rewriting verbs (`#substitute` /
-`#gag` / `#highlight`); and the recursion cap and sandboxing posture noted
+the event / expression / mxp types; `#ungag` / `#unhighlight` and a
+rewriting-aware `#list`; and the recursion cap and sandboxing posture noted
 below. (The recursion cap is deferred until a synchronous cascade path exists:
 `trigger_send` sends commands straight to the socket without re-running
 aliases, so triggers cannot yet re-enter the dispatcher. A cap becomes
