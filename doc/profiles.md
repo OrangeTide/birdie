@@ -128,13 +128,19 @@ the CSV in `profiles/<name>/`:
     profiles/
         Aardwolf/
             triggers.lua
-            vars.lua
+            vars.json
             classes.toml
         Achaea/
             ...
 
 These are not part of the CSV and are not shared by the CSV export
 path. They have their own (later) export-as-zip story.
+
+`vars.json` is the persistent script `var` table (doc/triggers.md), a JSON
+dump written via the engine's `json.encode`/`json.decode` codecs (the design
+originally said a Lua dump; JSON reuses the GMCP codecs already in the
+bootstrap). `bd_session` loads it when its data dir is set and saves it on
+disconnect and at free.
 
 ## Password storage
 
