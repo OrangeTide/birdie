@@ -192,8 +192,10 @@ through `bd_session`):
 - **`bd_verb`** — the `#action` / `#alias` / `#unaction` / `#unalias` /
   `#list` / `#class` / `#tick` / `#untick` / `#reset` / `#gag` /
   `#substitute` / `#highlight` / `#script` command-line verbs over the engine,
-  wired to the input line in `main.c`. `#unaction` / `#unalias {pattern}
-  [class]` remove triggers by exact pattern (optionally class-scoped); `#list
+  wired to the input line in `main.c`. The `#un*` verbs (`#unaction` /
+  `#unalias` / `#ungag` / `#unsubstitute` / `#unhighlight`) remove triggers of
+  that type by exact pattern (optionally class-scoped, reporting the count);
+  `#list
   [class]` enumerates triggers (type tag, class, pattern, priority, chain
   state). Interval timers fire from `bd_session_drain` against a monotonic
   clock.
@@ -220,9 +222,9 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`on.mxp`); the `mxp` type;
-`#ungag` / `#unhighlight` and a rewriting-aware `#list`; and the sandboxing
-posture noted below. (The recursion cap from the open questions is now in
+Not yet built: the rest of the host API (`on.mxp`); the `mxp` type; a
+rewriting-aware `#list` (it lists every type, but does not yet show
+substitution/highlight bodies); and the sandboxing posture noted below. (The recursion cap from the open questions is now in
 place: `dispatch_hook` bounds synchronous hook cascades at
 `BD_MAX_DISPATCH_DEPTH`. The `event` and `expression` types are handled in Lua,
 through the `on.event` hook table and the `watch()` registry, rather than as

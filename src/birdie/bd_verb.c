@@ -450,6 +450,12 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_untrigger(t, BD_TRIG_ACTION, args, feedback, fbcap);
 	if (!strcmp(verb, "unalias"))
 		return verb_untrigger(t, BD_TRIG_ALIAS, args, feedback, fbcap);
+	if (!strcmp(verb, "ungag"))
+		return verb_untrigger(t, BD_TRIG_GAG, args, feedback, fbcap);
+	if (!strcmp(verb, "unsubstitute") || !strcmp(verb, "unsub"))
+		return verb_untrigger(t, BD_TRIG_SUBST, args, feedback, fbcap);
+	if (!strcmp(verb, "unhighlight") || !strcmp(verb, "unhi"))
+		return verb_untrigger(t, BD_TRIG_HILITE, args, feedback, fbcap);
 	if (!strcmp(verb, "list"))
 		return verb_list(t, args, feedback, fbcap);
 	if (!strcmp(verb, "gag"))
