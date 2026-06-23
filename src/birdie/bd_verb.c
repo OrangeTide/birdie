@@ -8,6 +8,7 @@
 #include "bd_vm.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ARG_MAX 1024
@@ -115,6 +116,47 @@ verb_trigger(bd_triggers *t, bd_trigger_type type, const char *args,
 	return 1;
 }
 
+/* #tick {name} {body} <seconds> [class] */
+static int
+verb_tick(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char name[128], body[ARG_MAX], secs[32], cls[128];
+	double s;
+
+	if (!read_brace(&args, name, sizeof name) ||
+	    !read_brace(&args, body, sizeof body)) {
+		fb(feedback, fbcap, "usage: #tick {name} {body} <seconds> [class]");
+		return 1;
+	}
+	read_word(&args, secs, sizeof secs);
+	read_word(&args, cls, sizeof cls);
+	s = atof(secs);
+	if (s <= 0) {
+		fb(feedback, fbcap, "usage: #tick {name} {body} <seconds> [class]");
+		return 1;
+	}
+	if (bd_trigger_add_tick(t, name, body, s, cls[0] ? cls : NULL) < 0)
+		fb(feedback, fbcap, "could not add timer");
+	else
+		fb(feedback, fbcap, "timer added");
+	return 1;
+}
+
+/* #untick {name} */
+static int
+verb_untick(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char name[128];
+	read_word(&args, name, sizeof name);
+	if (!name[0]) {
+		fb(feedback, fbcap, "usage: #untick <name>");
+		return 1;
+	}
+	bd_trigger_remove_tick(t, name);
+	fb(feedback, fbcap, "timer removed");
+	return 1;
+}
+
 /* #class <name> on|off  (also accepts "enable"/"disable") */
 static int
 verb_class(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
@@ -169,6 +211,10 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_trigger(t, BD_TRIG_ALIAS, args, feedback, fbcap);
 	if (!strcmp(verb, "class"))
 		return verb_class(t, args, feedback, fbcap);
+	if (!strcmp(verb, "tick"))
+		return verb_tick(t, args, feedback, fbcap);
+	if (!strcmp(verb, "untick"))
+		return verb_untick(t, args, feedback, fbcap);
 	if (!strcmp(verb, "script")) {
 		char src[ARG_MAX];
 		bd_vm *vm = bd_triggers_vm(t);

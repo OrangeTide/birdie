@@ -83,4 +83,21 @@ int bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json);
  */
 int bd_triggers_input(bd_triggers *t, const char *cmd);
 
+/* ---- interval timers (#tick) ---- */
+
+/* Add or replace a repeating timer named `name`: fire `body` (command text, or
+ * '@' Lua) every `seconds`. `class` gates it like other triggers (NULL/"" ->
+ * "default"). seconds <= 0 is rejected. Returns 0 on success, -1 on error. */
+int bd_trigger_add_tick(bd_triggers *t, const char *name, const char *body,
+                        double seconds, const char *class);
+
+/* Remove a timer by name. */
+void bd_trigger_remove_tick(bd_triggers *t, const char *name);
+
+/* Fire any timers whose deadline has passed at monotonic time `now_ms`. Call
+ * regularly (e.g. once per frame from bd_session_drain). A timer reschedules
+ * from now, so a stalled frame fires it once, not a catch-up burst. Returns
+ * the number of timers fired. */
+int bd_triggers_run_timers(bd_triggers *t, double now_ms);
+
 #endif /* BD_TRIGGER_H */

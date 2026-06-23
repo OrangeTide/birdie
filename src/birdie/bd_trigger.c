@@ -37,6 +37,17 @@ struct bd_triggers {
 
 	char **disabled;        /* explicitly disabled class names */
 	int ndis, dis_cap;
+
+	struct timer *timers;   /* interval timers (#tick) */
+	int nt, t_cap;
+};
+
+struct timer {
+	char *name;
+	char *body;
+	char *cls;
+	double interval_ms;
+	double next_ms;         /* monotonic deadline; <0 = not yet scheduled */
 };
 
 /* ---- pattern matching (TinTin++-style %1..%9 captures) ---- */
@@ -238,6 +249,12 @@ bd_triggers_free(bd_triggers *t)
 	for (i = 0; i < t->ndis; i++)
 		free(t->disabled[i]);
 	free(t->disabled);
+	for (i = 0; i < t->nt; i++) {
+		free(t->timers[i].name);
+		free(t->timers[i].body);
+		free(t->timers[i].cls);
+	}
+	free(t->timers);
 	free(t);
 }
 
@@ -330,11 +347,10 @@ ensure_sorted(bd_triggers *t)
 
 /* Run a matched trigger's body: '@' -> Lua eval, else send as a command. */
 static void
-fire(bd_triggers *t, struct trigger *tr, const char *subject,
-     const struct span cap[10])
+fire_body(bd_triggers *t, const char *body, const char *subject,
+          const struct span cap[10])
 {
 	char buf[BODY_MAX];
-	const char *body = tr->body;
 
 	if (body[0] == '@') {
 		expand(body + 1, subject, cap, buf, sizeof buf);
@@ -345,6 +361,13 @@ fire(bd_triggers *t, struct trigger *tr, const char *subject,
 		if (t->send)
 			t->send(buf, t->ctx);
 	}
+}
+
+static void
+fire(bd_triggers *t, struct trigger *tr, const char *subject,
+     const struct span cap[10])
+{
+	fire_body(t, tr->body, subject, cap);
 }
 
 /* Common path for the text-matched types (action/alias/prompt). */
@@ -421,6 +444,86 @@ bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json)
 		fired = 1;
 		if (tr->stop)
 			break;
+	}
+	return fired;
+}
+
+/* ---- interval timers (#tick) ---- */
+
+int
+bd_trigger_add_tick(bd_triggers *t, const char *name, const char *body,
+                    double seconds, const char *class)
+{
+	struct timer *tm;
+
+	if (!t || !name || !*name || !body || seconds <= 0)
+		return -1;
+	bd_trigger_remove_tick(t, name);        /* replace same-named timer */
+	if (t->nt == t->t_cap) {
+		int nc = t->t_cap ? t->t_cap * 2 : 8;
+		struct timer *nv = realloc(t->timers, (size_t)nc * sizeof *nv);
+		if (!nv)
+			return -1;
+		t->timers = nv;
+		t->t_cap = nc;
+	}
+	tm = &t->timers[t->nt];
+	memset(tm, 0, sizeof *tm);
+	tm->name = strdup(name);
+	tm->body = strdup(body);
+	tm->cls = strdup((class && *class) ? class : "default");
+	tm->interval_ms = seconds * 1000.0;
+	tm->next_ms = -1.0;                     /* scheduled on first run */
+	if (!tm->name || !tm->body || !tm->cls) {
+		free(tm->name);
+		free(tm->body);
+		free(tm->cls);
+		return -1;
+	}
+	t->nt++;
+	return 0;
+}
+
+void
+bd_trigger_remove_tick(bd_triggers *t, const char *name)
+{
+	int i;
+	if (!t || !name)
+		return;
+	for (i = 0; i < t->nt; i++) {
+		if (strcmp(t->timers[i].name, name) != 0)
+			continue;
+		free(t->timers[i].name);
+		free(t->timers[i].body);
+		free(t->timers[i].cls);
+		t->timers[i] = t->timers[--t->nt];
+		return;
+	}
+}
+
+int
+bd_triggers_run_timers(bd_triggers *t, double now_ms)
+{
+	struct span cap[10];
+	int i, fired = 0;
+
+	if (!t)
+		return 0;
+	memset(cap, 0, sizeof cap);
+	for (i = 0; i < t->nt; i++) {
+		struct timer *tm = &t->timers[i];
+		if (tm->next_ms < 0) {          /* first sight: schedule */
+			tm->next_ms = now_ms + tm->interval_ms;
+			continue;
+		}
+		if (now_ms < tm->next_ms)
+			continue;
+		if (bd_class_enabled(t, tm->cls)) {
+			fire_body(t, tm->body, "", cap);
+			fired++;
+		}
+		/* reschedule from now, so a stalled frame does not fire a burst */
+		tm->next_ms = now_ms + tm->interval_ms;
 	}
 	return fired;
 }

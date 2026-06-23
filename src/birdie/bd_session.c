@@ -8,6 +8,16 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+/* Monotonic milliseconds, for the trigger engine's interval timers. */
+static double
+mono_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1.0e6;
+}
 
 struct bd_session {
 	const bd_profile *profile;      /* borrowed */
@@ -522,6 +532,8 @@ bd_session_vm(bd_session *s)
 void
 bd_session_drain(bd_session *s)
 {
-	if (s)
-		bd_net_poll(s->net);
+	if (!s)
+		return;
+	bd_net_poll(s->net);                    /* network -> events/triggers */
+	bd_triggers_run_timers(s->trig, mono_ms());  /* #tick interval timers */
 }
