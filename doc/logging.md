@@ -124,6 +124,34 @@ Rotation is inherent (new hour → new file). Retention is a user concern;
 Birdie does not delete logs. Document a suggested cron/`tmpwatch` recipe
 and move on.
 
+## Implementation status
+
+Built (`src/birdie/bd_log.{c,h}`, wired through `bd_session`):
+
+- **`bd_log`** — a set of sinks, each a `(filter, formatter, destination)`
+  triple. Filters: `all` / `recv` / `send` / `traffic` / `gmcp` / `mxp` /
+  `notes`. Formatters: `ndjson`, `plaintext`, `plaintext-ansi`. Destinations:
+  hour-bucketed files (path template expanded per record, reopened as records
+  cross hour boundaries, parent dirs created, plaintext gets the hourly header
+  on a fresh bucket) and a caller callback (tests / future front-ends).
+  Records carry their own wall-clock time (`bd_log_now_ms()` in production) so
+  the layer is deterministic under test. NDJSON escapes strings per RFC 8259
+  and emits already-parsed `gmcp` `data` verbatim (not re-quoted).
+- **`bd_session` integration** — when a session's data dir is set, two default
+  sinks are installed under `<data_dir>/logs`: a full NDJSON log (source of
+  truth) and a plaintext `traffic` log, both hour-bucketed per profile via the
+  documented path template. The session emits `recv` (raw + ANSI-stripped),
+  `send` (every outbound path: aliases, `@`/`mud.send`, and un-aliased input),
+  `connect` (`host`/`port`/`tls`), `disconnect` (`reason`), and `gmcp`
+  (`package` + parsed `data`) records, plus `note` records via the
+  `log.note(text)` script API (`__bd_note` host fn). Each session gets a
+  process-unique `session` id at creation.
+
+Not yet built: configurable/multiple user-defined sinks (only the two defaults
+are wired), Lua-predicate filters, the `mxp` record path (no MXP parser yet),
+`error` records, password redaction on `send`, and the replay / history-viewer
+re-ingest path.
+
 ## Open questions
 
 - Compression of old buckets. `.ndjson.zst` is attractive; we can read it

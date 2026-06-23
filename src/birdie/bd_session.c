@@ -5,11 +5,13 @@
  */
 
 #include "bd_session.h"
+#include "bd_log.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -32,10 +34,26 @@ struct bd_session {
 	int cols, rows;
 	char *data_dir;                 /* base for per-profile state, or NULL */
 
+	bd_log *log;                    /* log sinks (NULL until data_dir set) */
+	char session_id[25];            /* stable id for one session's records */
+
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
 	size_t line_len, line_cap;
 };
+
+/* A non-cryptographic, process-unique id used to tag a session's log records
+ * (doc/logging.md). Stable for the life of the bd_session. */
+static void
+gen_session_id(char *out, size_t cap)
+{
+	struct timespec ts;
+	static unsigned seq;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	snprintf(out, cap, "%08lx%08lx%04x",
+	    (unsigned long)ts.tv_sec, (unsigned long)ts.tv_nsec,
+	    (unsigned)((getpid() ^ seq++) & 0xffff));
+}
 
 /* ---- per-profile persistent var table ---- */
 
@@ -171,6 +189,54 @@ emit(bd_session *s, const bd_session_event *ev)
 		s->on_event(s, ev, s->userdata);
 }
 
+/* Prefill the common log fields for `kind` (mud / character / session / time).
+ * Returns 0 if logging is active, -1 if there are no sinks (so callers can
+ * skip building the payload). */
+static int
+log_fill(bd_session *s, bd_log_rec *r, bd_log_kind kind)
+{
+	if (!s->log)
+		return -1;
+	memset(r, 0, sizeof *r);
+	r->kind = kind;
+	r->t_ms = bd_log_now_ms();
+	r->session = s->session_id;
+	if (s->profile) {
+		r->mud = bd_profile_get(s->profile, "name");
+		r->character = bd_profile_get(s->profile, "character");
+	}
+	return 0;
+}
+
+/* Log an outbound command (send paths funnel through here). */
+static void
+log_send(bd_session *s, const char *text)
+{
+	bd_log_rec r;
+	if (log_fill(s, &r, BD_LOG_SEND) != 0)
+		return;
+	r.raw = text;
+	r.text = text;
+	bd_log_write(s->log, &r);
+}
+
+/* Host function: __bd_note(text) -> write a `note` record (log.note in Lua). */
+static int
+host_note(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
+{
+	bd_session *s = ud;
+	bd_log_rec r;
+	(void)vm;
+	(void)ret;
+	if (argc < 1 || argv[0].type != BD_VM_STR || !argv[0].u.s)
+		return 0;
+	if (log_fill(s, &r, BD_LOG_NOTE) != 0)
+		return 0;
+	r.text = argv[0].u.s;
+	bd_log_write(s->log, &r);
+	return 0;
+}
+
 /* The trigger engine emits MUD commands through here. Send raw (with CRLF) so
  * a fired command does not recurse back through the aliases. */
 static void
@@ -179,6 +245,7 @@ trigger_send(const char *cmd, void *ctx)
 	bd_session *s = ctx;
 	bd_net_send(s->net, cmd, (int)strlen(cmd));
 	bd_net_send(s->net, "\r\n", 2);
+	log_send(s, cmd);
 }
 
 /* Host function exposed to scripts: __bd_send(text) -> send a command line.
@@ -193,6 +260,7 @@ host_send(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
 	if (argc >= 1 && argv[0].type == BD_VM_STR && argv[0].u.s) {
 		bd_net_send(s->net, argv[0].u.s, (int)strlen(argv[0].u.s));
 		bd_net_send(s->net, "\r\n", 2);
+		log_send(s, argv[0].u.s);
 	}
 	return 0;
 }
@@ -242,12 +310,15 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * let scripts react to events alongside the #action/#alias triggers, dispatched
  * from C via __bd_dispatch. Each handler runs in pcall so one bad hook does not
  * abort the rest. GMCP/MSDP payloads are JSON-decoded (json.decode) to a Lua
- * table before the on.gmcp handler is called. Deferred (doc/triggers.md):
- * mud.gmcp (send), log.note, the var table, on.timer/on.mxp.
+ * table before the on.gmcp handler is called. log.note(text) writes a `note`
+ * record to the log sinks (doc/logging.md). Deferred (doc/triggers.md):
+ * on.timer/on.mxp.
  */
 static const char bootstrap_lua[] =
 	"mud = mud or {}\n"
 	"function mud.send(s) __bd_send(tostring(s)) end\n"
+	"log = log or {}\n"
+	"function log.note(s) __bd_note(tostring(s)) end\n"
 	"function mud.gmcp(pkg, data)\n"
 	"  if data == nil then __bd_gmcp(pkg, nil)\n"
 	"  elseif type(data)=='string' then __bd_gmcp(pkg, data)\n"
@@ -361,6 +432,7 @@ install_script_api(bd_session *s)
 	bd_vm_register(s->vm, "__bd_class", host_class, s);
 	bd_vm_register(s->vm, "__bd_gmcp", host_gmcp, s);
 	bd_vm_register(s->vm, "__bd_savevars", host_savevars, s);
+	bd_vm_register(s->vm, "__bd_note", host_note, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
 }
 
@@ -407,6 +479,17 @@ dispatch_line(bd_session *s, const char *raw, size_t len)
 	strip_ansi(raw, len, plain, sizeof plain);
 	bd_triggers_line(s->trig, plain);       /* #action triggers */
 	dispatch_hook(s, "line", plain, NULL);  /* on.line hooks */
+	if (s->log) {                           /* recv record (raw + stripped) */
+		char rawz[4096];
+		size_t rl = len < sizeof rawz - 1 ? len : sizeof rawz - 1;
+		bd_log_rec r;
+		memcpy(rawz, raw, rl);
+		rawz[rl] = '\0';
+		log_fill(s, &r, BD_LOG_RECV);
+		r.raw = rawz;
+		r.text = plain;
+		bd_log_write(s->log, &r);
+	}
 }
 
 /* Append received bytes to the line buffer and dispatch each completed line
@@ -464,8 +547,23 @@ net_state(bd_net_state state, const char *msg, void *arg)
 
 	if (state == BD_NET_CONNECTED) {
 		dispatch_hook(s, "connect", NULL, NULL);
+		if (s->log) {
+			bd_log_rec r;
+			log_fill(s, &r, BD_LOG_CONNECT);
+			r.host = bd_profile_get(s->profile, "host");
+			r.port = atoi(bd_profile_get(s->profile, "port") ?
+			    bd_profile_get(s->profile, "port") : "0");
+			r.tls = prop_bool(s->profile, "tls", 0);
+			bd_log_write(s->log, &r);
+		}
 	} else if (state == BD_NET_CLOSED || state == BD_NET_ERROR) {
 		dispatch_hook(s, "disconnect", NULL, NULL);
+		if (s->log) {
+			bd_log_rec r;
+			log_fill(s, &r, BD_LOG_DISCONNECT);
+			r.reason = msg;
+			bd_log_write(s->log, &r);
+		}
 		save_vars(s);           /* persist any var changes this session */
 	}
 }
@@ -514,6 +612,13 @@ net_package(int proto, const char *name, const char *json, void *arg)
 	/* route GMCP/MSDP packages to gmcp-type triggers and on.gmcp hooks */
 	bd_triggers_gmcp(s->trig, name, json);
 	dispatch_hook(s, "gmcp", name, json);
+	if (s->log) {
+		bd_log_rec r;
+		log_fill(s, &r, BD_LOG_GMCP);
+		r.package = name;
+		r.data = json;          /* already-parsed JSON text */
+		bd_log_write(s->log, &r);
+	}
 }
 
 /* ---- API ---- */
@@ -527,6 +632,7 @@ bd_session_new(const bd_profile *profile)
 	s->profile = profile;
 	s->cols = 80;
 	s->rows = 24;
+	gen_session_id(s->session_id, sizeof s->session_id);
 	s->net = bd_net_new(net_data, net_state, s);
 	s->vm = bd_vm_new(&bd_vm_lua);           /* Lua 5.4 + LPeg */
 	s->trig = bd_triggers_new(s->vm, trigger_send, s);
@@ -555,6 +661,7 @@ bd_session_free(bd_session *s)
 	bd_net_free(s->net);
 	bd_triggers_free(s->trig);
 	bd_vm_free(s->vm);
+	bd_log_free(s->log);            /* flushes and closes the sink files */
 	free(s->data_dir);
 	free(s->linebuf);
 	free(s);
@@ -611,13 +718,15 @@ bd_session_send_line(bd_session *s, const char *utf8)
 
 	if (!s || !utf8)
 		return -1;
-	/* an alias may consume the input and emit its own commands */
+	/* an alias may consume the input and emit its own commands (logged via
+	 * trigger_send); only an un-aliased line is logged here */
 	if (bd_triggers_input(s->trig, utf8))
 		return 0;
 	n = bd_net_send(s->net, utf8, (int)strlen(utf8));
 	if (n < 0)
 		return -1;
 	bd_net_send(s->net, "\r\n", 2);
+	log_send(s, utf8);
 	return n;
 }
 
@@ -647,6 +756,25 @@ bd_session_set_data_dir(bd_session *s, const char *dir)
 	free(s->data_dir);
 	s->data_dir = (dir && *dir) ? strdup(dir) : NULL;
 	load_vars(s);           /* pull the saved var table into the VM */
+
+	/* (re)build the default log sinks under <data_dir>/logs: a full NDJSON
+	 * log (source of truth) and a human-readable plaintext traffic log, each
+	 * hour-bucketed per profile (doc/logging.md) */
+	bd_log_free(s->log);
+	s->log = NULL;
+	if (s->data_dir) {
+		char root[1024];
+		const char *tmpl =
+		    "{root}/{year}/{mud}/{character}/{year}-{month}-{day}-{hour}00.{ext}";
+		snprintf(root, sizeof root, "%s/logs", s->data_dir);
+		s->log = bd_log_new();
+		if (s->log) {
+			bd_log_add_file(s->log, BD_LOGF_ALL, BD_LOGFMT_NDJSON,
+			    root, tmpl);
+			bd_log_add_file(s->log, BD_LOGF_TRAFFIC,
+			    BD_LOGFMT_PLAINTEXT, root, tmpl);
+		}
+	}
 }
 
 bd_triggers *

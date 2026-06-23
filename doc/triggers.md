@@ -166,7 +166,8 @@ through `bd_session`):
   table (`json.decode`/`json.encode`, embedded in the bootstrap) before
   `on.gmcp[pkg]` is called. The `var` table persists per profile to
   `<data_dir>/profiles/<name>/vars.json` (loaded when the session's data dir
-  is set, saved on disconnect and at free).
+  is set, saved on disconnect and at free). `log.note(text)` writes a `note`
+  record to the log sinks (`doc/logging.md`).
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
   toggle as a unit, priority ordering (highest first) with `#stop`, and four
   dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
@@ -191,7 +192,7 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`log.note`, `on.timer` / `on.mxp`);
+Not yet built: the rest of the host API (`on.timer` / `on.mxp`);
 the event / expression / mxp types; the line-rewriting verbs (`#substitute` /
 `#gag` / `#highlight`); and the recursion cap and sandboxing posture noted
 below. (The recursion cap is deferred until a synchronous cascade path exists:
