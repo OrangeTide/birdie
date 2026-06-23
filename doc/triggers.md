@@ -174,9 +174,12 @@ through `bd_session`):
   captures, `^`/`$` anchors); `gmcp` routes by package name. A matched body is
   either MUD command text (`%0..%9` expanded, emitted to the session) or, with
   a leading `@`, a Lua expression run on `bd_vm`.
-- **`bd_verb`** — the `#action` / `#alias` / `#class` / `#tick` / `#untick` /
-  `#reset` / `#script` command-line verbs over the engine, wired to the input
-  line in `main.c`. Interval timers fire from `bd_session_drain` against a
+- **`bd_verb`** — the `#action` / `#alias` / `#unaction` / `#unalias` /
+  `#list` / `#class` / `#tick` / `#untick` / `#reset` / `#script` command-line
+  verbs over the engine, wired to the input line in `main.c`. `#unaction` /
+  `#unalias {pattern} [class]` remove triggers by exact pattern (optionally
+  class-scoped); `#list [class]` enumerates triggers (type tag, class, pattern,
+  priority, chain state). Interval timers fire from `bd_session_drain` against a
   monotonic clock.
 - **multi-state chains** — `#action`/`#alias` take an optional
   `class[/chain:state]` token (e.g. `combat/cast:1`). Only state 1 of a chain
@@ -190,8 +193,11 @@ through `bd_session`):
 
 Not yet built: the rest of the host API (`log.note`, `on.timer` / `on.mxp`);
 the event / expression / mxp types; the line-rewriting verbs (`#substitute` /
-`#gag` / `#highlight`); `#unaction` / `#list`; and the recursion cap and
-sandboxing posture noted below.
+`#gag` / `#highlight`); and the recursion cap and sandboxing posture noted
+below. (The recursion cap is deferred until a synchronous cascade path exists:
+`trigger_send` sends commands straight to the socket without re-running
+aliases, so triggers cannot yet re-enter the dispatcher. A cap becomes
+necessary once line-injection or an `#event` verb lands.)
 
 ## Open questions
 

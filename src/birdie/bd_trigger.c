@@ -399,10 +399,54 @@ bd_trigger_remove(bd_triggers *t, int id)
 	}
 }
 
+static void ensure_sorted(bd_triggers *t);
+
+int
+bd_trigger_remove_pattern(bd_triggers *t, bd_trigger_type type,
+                          const char *pattern, const char *class)
+{
+	int i, removed = 0;
+	const char *cls;
+
+	if (!t || !pattern)
+		return 0;
+	cls = (class && *class) ? class : NULL;
+	for (i = 0; i < t->n; ) {
+		struct trigger *tr = &t->trig[i];
+		if (tr->type != type || strcmp(tr->pattern, pattern) != 0 ||
+		    (cls && strcmp(tr->cls, cls) != 0)) {
+			i++;
+			continue;
+		}
+		free(tr->pattern);
+		free(tr->body);
+		free(tr->cls);
+		free(tr->chain);
+		t->trig[i] = t->trig[--t->n];
+		t->sorted = 0;
+		removed++;
+	}
+	return removed;
+}
+
 int
 bd_trigger_count(const bd_triggers *t)
 {
 	return t ? t->n : 0;
+}
+
+void
+bd_trigger_foreach(bd_triggers *t, bd_trigger_iter_fn fn, void *ctx)
+{
+	int i;
+	if (!t || !fn)
+		return;
+	ensure_sorted(t);
+	for (i = 0; i < t->n; i++) {
+		struct trigger *tr = &t->trig[i];
+		fn(tr->type, tr->pattern, tr->body, tr->cls, tr->chain,
+		   tr->state, tr->priority, bd_class_enabled(t, tr->cls), ctx);
+	}
 }
 
 bd_vm *

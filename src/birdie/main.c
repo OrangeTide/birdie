@@ -292,14 +292,14 @@ on_submit(bd_id id, void *arg)
 	(void)arg;
 	const char *cmd = bd_get_s(id, BD_LABEL_S);
 	const char *literal = NULL;
-	char fb[160];
+	char fb[2048];
 
 	if (!cmd || !cmd[0])
 		return;
 
 	if (bd_verb_exec(bd_session_triggers(session), cmd, &literal,
 	    fb, sizeof fb)) {
-		char line[200];
+		char line[2100];
 		snprintf(line, sizeof line, "\033[36m# %s\033[0m\r\n", fb);
 		bd_terminal_write(terminal, line, -1);
 		return;

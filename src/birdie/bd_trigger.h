@@ -67,8 +67,23 @@ int bd_trigger_add_chained(bd_triggers *t, bd_trigger_type type,
 /* Remove a trigger by id. */
 void bd_trigger_remove(bd_triggers *t, int id);
 
+/* Remove every trigger of `type` whose pattern equals `pattern` (exact text).
+ * If `class` is non-NULL/"" only triggers in that class are removed. Returns
+ * the number removed. Backs #unaction / #unalias. */
+int bd_trigger_remove_pattern(bd_triggers *t, bd_trigger_type type,
+                              const char *pattern, const char *class);
+
 /* Number of triggers currently in the table. */
 int bd_trigger_count(const bd_triggers *t);
+
+/* Enumerate triggers in dispatch order (priority, then insertion). The
+ * callback gets the type, pattern, body, class, chain key (NULL if none),
+ * state (0 if none), priority, and the per-class enabled flag. Backs #list. */
+typedef void (*bd_trigger_iter_fn)(bd_trigger_type type, const char *pattern,
+                                   const char *body, const char *cls,
+                                   const char *chain, int state, int priority,
+                                   int enabled, void *ctx);
+void bd_trigger_foreach(bd_triggers *t, bd_trigger_iter_fn fn, void *ctx);
 
 /* The scripting VM the engine runs '@' bodies on (for #script and the
  * event-hook dispatch). May be NULL. */

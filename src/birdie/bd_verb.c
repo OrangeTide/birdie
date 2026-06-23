@@ -163,6 +163,103 @@ verb_trigger(bd_triggers *t, bd_trigger_type type, const char *args,
 	return 1;
 }
 
+/* #unaction / #unalias {pattern} [class] -- remove matching triggers */
+static int
+verb_untrigger(bd_triggers *t, bd_trigger_type type, const char *args,
+               char *feedback, size_t fbcap)
+{
+	char pat[ARG_MAX], cls[128];
+	int n;
+
+	if (!read_brace(&args, pat, sizeof pat)) {
+		fb(feedback, fbcap, "usage: {pattern} [class]");
+		return 1;
+	}
+	read_word(&args, cls, sizeof cls);
+	n = bd_trigger_remove_pattern(t, type, pat, cls[0] ? cls : NULL);
+	if (n == 0)
+		fb(feedback, fbcap, "no match");
+	else if (n == 1)
+		fb(feedback, fbcap, "removed 1");
+	else {
+		char msg[48];
+		snprintf(msg, sizeof msg, "removed %d", n);
+		fb(feedback, fbcap, msg);
+	}
+	return 1;
+}
+
+/* #list collects a compact one-line-per-trigger listing into a buffer. */
+struct list_ctx {
+	char *buf;
+	size_t cap, len;
+	const char *only;       /* class filter, or NULL */
+	int count;
+};
+
+static const char *
+type_tag(bd_trigger_type type)
+{
+	switch (type) {
+	case BD_TRIG_ACTION: return "act";
+	case BD_TRIG_ALIAS:  return "ali";
+	case BD_TRIG_PROMPT: return "prm";
+	case BD_TRIG_GMCP:   return "gmcp";
+	}
+	return "?";
+}
+
+static void
+list_cb(bd_trigger_type type, const char *pattern, const char *body,
+        const char *cls, const char *chain, int state, int priority,
+        int enabled, void *ctx)
+{
+	struct list_ctx *l = ctx;
+	char line[ARG_MAX];
+	int k;
+
+	(void)body;
+	(void)chain;
+	if (l->only && strcmp(cls, l->only) != 0)
+		return;
+	l->count++;
+	if (l->len + 1 >= l->cap)
+		return;         /* full; count still climbs so we can note it */
+	if (state > 0)
+		snprintf(line, sizeof line, "\r\n  [%s] %s {%s} p%d s%d",
+		    enabled ? type_tag(type) : "off", cls, pattern, priority,
+		    state);
+	else
+		snprintf(line, sizeof line, "\r\n  [%s] %s {%s} p%d",
+		    enabled ? type_tag(type) : "off", cls, pattern, priority);
+	k = snprintf(l->buf + l->len, l->cap - l->len, "%s", line);
+	if (k > 0)
+		l->len += (size_t)k;
+	if (l->len >= l->cap)
+		l->len = l->cap - 1;
+}
+
+/* #list [class] -- enumerate triggers (optionally one class) into feedback */
+static int
+verb_list(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char cls[128];
+	struct list_ctx l;
+
+	read_word(&args, cls, sizeof cls);
+	if (!feedback || fbcap == 0)
+		return 1;
+	memset(&l, 0, sizeof l);
+	l.buf = feedback;
+	l.cap = fbcap;
+	l.only = cls[0] ? cls : NULL;
+	l.len = (size_t)snprintf(feedback, fbcap, "triggers:");
+	bd_trigger_foreach(t, list_cb, &l);
+	if (l.count == 0)
+		fb(feedback, fbcap, "no triggers");
+	return 1;
+}
+
 /* #reset [chain] -- reset all chains, or one named "class/chain" or "chain" */
 static int
 verb_reset(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
@@ -275,6 +372,12 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_untick(t, args, feedback, fbcap);
 	if (!strcmp(verb, "reset"))
 		return verb_reset(t, args, feedback, fbcap);
+	if (!strcmp(verb, "unaction") || !strcmp(verb, "unact"))
+		return verb_untrigger(t, BD_TRIG_ACTION, args, feedback, fbcap);
+	if (!strcmp(verb, "unalias"))
+		return verb_untrigger(t, BD_TRIG_ALIAS, args, feedback, fbcap);
+	if (!strcmp(verb, "list"))
+		return verb_list(t, args, feedback, fbcap);
 	if (!strcmp(verb, "script")) {
 		char src[ARG_MAX];
 		bd_vm *vm = bd_triggers_vm(t);

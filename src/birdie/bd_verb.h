@@ -13,9 +13,10 @@
  * engine. Anything the verbs do is reachable through bd_trigger directly.
  *
  * Implemented: #action, #alias (each taking an optional class[/chain:state]
- * token for multi-state chains), #class, #tick / #untick, #reset, #script. The
- * line-rewriting verbs (#substitute / #gag / #highlight), #unaction / #list,
- * and a configurable command char are deferred (doc/triggers.md).
+ * token for multi-state chains), #unaction / #unalias, #list, #class,
+ * #tick / #untick, #reset, #script. The line-rewriting verbs (#substitute /
+ * #gag / #highlight) and a configurable command char are deferred
+ * (doc/triggers.md).
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
