@@ -130,6 +130,7 @@ the CSV in `profiles/<name>/`:
             triggers.lua
             vars.json
             classes.toml
+            scratch/        # confined file.* script storage (doc/triggers.md)
         Achaea/
             ...
 

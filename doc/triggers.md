@@ -222,10 +222,9 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`on.mxp`); the `mxp` type; a
+Not yet built: the rest of the host API (`on.mxp`); the `mxp` type; and a
 rewriting-aware `#list` (it lists every type, but does not yet show
-substitution/highlight bodies); and a confined scratch-dir file API (the
-sandbox currently removes `io` outright). (The recursion cap from the open questions is now in
+substitution/highlight bodies). (The recursion cap from the open questions is now in
 place: `dispatch_hook` bounds synchronous hook cascades at
 `BD_MAX_DISPATCH_DEPTH`. The `event` and `expression` types are handled in Lua,
 through the `on.event` hook table and the `watch()` registry, rather than as
@@ -248,5 +247,8 @@ pattern-matched trigger types.)
   from the shared script environment; the safe stdlib (string / table / math /
   utf8 / coroutine / `load` / the read-only `os` clocks) stays, and `load`'s
   chunks inherit the hardened `_ENV`. A profile sets `unsafe_scripts=yes` to
-  opt out. Still open: a confined per-profile scratch-dir file API to replace
-  the removed `io` (today scripts persist state through the `var` table).
+  opt out. In place of the removed `io`, a confined `file.*` table
+  (`write` / `append` / `read` / `remove` / `list`) is rooted at the
+  per-profile scratch dir (`<data_dir>/profiles/<name>/scratch/`); filenames
+  must be single safe basenames, so path traversal and absolute paths are
+  rejected.

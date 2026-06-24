@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -38,6 +39,7 @@ struct bd_session {
 	bd_log *log;                    /* log sinks (NULL until data_dir set) */
 	char session_id[25];            /* stable id for one session's records */
 	int dispatch_depth;             /* re-entrancy guard for hook cascades */
+	char *scratch_rd;               /* reusable buffer for file.read/list ret */
 
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
@@ -166,6 +168,204 @@ save_vars(bd_session *s)
 	if (vars_path(s, path, sizeof path) != 0)
 		return;
 	bd_vm_eval(s->vm, "__bd_savevars(json.encode(var))");
+}
+
+/* ---- confined per-profile scratch-dir file API (doc/triggers.md) ---- */
+
+/* A scratch filename must be a single safe basename: non-empty, no path
+ * separators, no "..", not hidden. This is the path-traversal guard. */
+static int
+valid_scratch_name(const char *name)
+{
+	size_t i;
+	if (!name || !name[0] || name[0] == '.')
+		return 0;
+	for (i = 0; name[i]; i++) {
+		char c = name[i];
+		if (c == '/' || c == '\\')
+			return 0;
+		if (c == '.' && name[i + 1] == '.')
+			return 0;
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		    (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+			return 0;
+	}
+	return 1;
+}
+
+/* Build <data_dir>/profiles/<profile>/scratch[/<fname>] into buf. fname may be
+ * NULL for just the directory. Returns 0 on success, -1 if there is no data
+ * dir / profile name, or fname is unsafe. */
+static int
+scratch_path(bd_session *s, const char *fname, char *buf, size_t cap)
+{
+	const char *name = s->profile ? bd_profile_get(s->profile, "name") : NULL;
+	char safe[128];
+	size_t i;
+
+	if (!s->data_dir || !name || !*name)
+		return -1;
+	if (fname && !valid_scratch_name(fname))
+		return -1;
+	for (i = 0; name[i] && i < sizeof safe - 1; i++)
+		safe[i] = (name[i] == '/' || name[i] == '\\') ? '_' : name[i];
+	safe[i] = '\0';
+	if (fname)
+		snprintf(buf, cap, "%s/profiles/%s/scratch/%s",
+		    s->data_dir, safe, fname);
+	else
+		snprintf(buf, cap, "%s/profiles/%s/scratch", s->data_dir, safe);
+	return 0;
+}
+
+/* __bd_file_write(name, data) / __bd_file_append: write to the scratch dir.
+ * Returns a boolean: true on success. */
+static int
+file_put(bd_session *s, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+         const char *mode)
+{
+	char path[1024], dir[1024];
+	FILE *f;
+
+	*ret = bd_vm_bool(0);
+	if (argc < 2 || argv[0].type != BD_VM_STR || argv[1].type != BD_VM_STR)
+		return 0;
+	if (scratch_path(s, argv[0].u.s, path, sizeof path) != 0)
+		return 0;
+	if (scratch_path(s, NULL, dir, sizeof dir) == 0)
+		mkdir_p(dir);
+	f = fopen(path, mode);
+	if (!f)
+		return 0;
+	fwrite(argv[1].u.s, 1, strlen(argv[1].u.s), f);
+	fclose(f);
+	*ret = bd_vm_bool(1);
+	return 0;
+}
+
+static int
+host_file_write(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+                void *ud)
+{
+	(void)vm;
+	return file_put((bd_session *)ud, argc, argv, ret, "wb");
+}
+
+static int
+host_file_append(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+                 void *ud)
+{
+	(void)vm;
+	return file_put((bd_session *)ud, argc, argv, ret, "ab");
+}
+
+/* __bd_file_read(name) -> file contents as a string, or nil. The result is
+ * kept in s->scratch_rd, which stays valid until the next read/list or free. */
+static int
+host_file_read(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+               void *ud)
+{
+	bd_session *s = ud;
+	char path[1024];
+	FILE *f;
+	long sz;
+	char *buf;
+	size_t got;
+	(void)vm;
+
+	*ret = bd_vm_nil();
+	if (argc < 1 || argv[0].type != BD_VM_STR)
+		return 0;
+	if (scratch_path(s, argv[0].u.s, path, sizeof path) != 0)
+		return 0;
+	f = fopen(path, "rb");
+	if (!f)
+		return 0;
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz < 0) {
+		fclose(f);
+		return 0;
+	}
+	buf = realloc(s->scratch_rd, (size_t)sz + 1);
+	if (!buf) {
+		fclose(f);
+		return 0;
+	}
+	s->scratch_rd = buf;
+	got = fread(buf, 1, (size_t)sz, f);
+	fclose(f);
+	buf[got] = '\0';
+	*ret = bd_vm_str(buf);          /* push_val copies it into Lua */
+	return 0;
+}
+
+/* __bd_file_remove(name) -> boolean success. */
+static int
+host_file_remove(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+                 void *ud)
+{
+	bd_session *s = ud;
+	char path[1024];
+	(void)vm;
+
+	*ret = bd_vm_bool(0);
+	if (argc < 1 || argv[0].type != BD_VM_STR)
+		return 0;
+	if (scratch_path(s, argv[0].u.s, path, sizeof path) != 0)
+		return 0;
+	*ret = bd_vm_bool(remove(path) == 0);
+	return 0;
+}
+
+/* __bd_file_list() -> newline-joined filenames in the scratch dir (Lua splits).
+ * Result kept in s->scratch_rd. */
+static int
+host_file_list(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret,
+               void *ud)
+{
+	bd_session *s = ud;
+	char dir[1024];
+	DIR *d;
+	struct dirent *e;
+	size_t len = 0, cap = 256;
+	char *buf;
+	(void)vm;
+	(void)argc;
+	(void)argv;
+
+	*ret = bd_vm_str("");
+	if (scratch_path(s, NULL, dir, sizeof dir) != 0)
+		return 0;
+	d = opendir(dir);
+	if (!d)
+		return 0;
+	buf = realloc(s->scratch_rd, cap);
+	if (!buf) {
+		closedir(d);
+		return 0;
+	}
+	s->scratch_rd = buf;
+	buf[0] = '\0';
+	while ((e = readdir(d)) != NULL) {
+		size_t nl = strlen(e->d_name);
+		if (e->d_name[0] == '.')
+			continue;
+		if (len + nl + 2 > cap) {
+			char *nb = realloc(buf, (cap = (len + nl + 2) * 2));
+			if (!nb)
+				break;
+			buf = s->scratch_rd = nb;
+		}
+		memcpy(buf + len, e->d_name, nl);
+		len += nl;
+		buf[len++] = '\n';
+	}
+	closedir(d);
+	buf[len] = '\0';
+	*ret = bd_vm_str(buf);
+	return 0;
 }
 
 /* truthy values for yes/no-style profile fields */
@@ -331,7 +531,9 @@ host_class(bd_vm *vm, int argc, const bd_vm_val *argv, bd_vm_val *ret, void *ud)
  * elapses (the timer name is the argument). event(name, arg) raises a user
  * event, running on.event[name] (synchronous hook cascades are capped, see
  * dispatch_hook). watch(expr, fn) fires fn(new, old) when a watched Lua
- * expression changes value, polled once per frame from bd_session_drain.
+ * expression changes value, polled once per frame from bd_session_drain. The
+ * file.* table is a confined read/write/append/list/remove API rooted at the
+ * per-profile scratch dir (the replacement for the sandboxed-away io).
  * Deferred (doc/triggers.md): on.mxp.
  */
 static const char bootstrap_lua[] =
@@ -340,6 +542,17 @@ static const char bootstrap_lua[] =
 	"log = log or {}\n"
 	"function log.note(s) __bd_note(tostring(s)) end\n"
 	"function event(name, arg) __bd_event(tostring(name), arg==nil and '' or tostring(arg)) end\n"
+	/* confined per-profile scratch file API (replaces the sandboxed-away io) */
+	"file = file or {}\n"
+	"function file.write(n, d) return __bd_file_write(tostring(n), tostring(d)) end\n"
+	"function file.append(n, d) return __bd_file_append(tostring(n), tostring(d)) end\n"
+	"function file.read(n) return __bd_file_read(tostring(n)) end\n"
+	"function file.remove(n) return __bd_file_remove(tostring(n)) end\n"
+	"function file.list()\n"
+	"  local s = __bd_file_list(); local t = {}\n"
+	"  for w in s:gmatch('[^\\n]+') do t[#t+1] = w end\n"
+	"  return t\n"
+	"end\n"
 	"function mud.gmcp(pkg, data)\n"
 	"  if data == nil then __bd_gmcp(pkg, nil)\n"
 	"  elseif type(data)=='string' then __bd_gmcp(pkg, data)\n"
@@ -501,6 +714,11 @@ install_script_api(bd_session *s)
 	bd_vm_register(s->vm, "__bd_savevars", host_savevars, s);
 	bd_vm_register(s->vm, "__bd_note", host_note, s);
 	bd_vm_register(s->vm, "__bd_event", host_event, s);
+	bd_vm_register(s->vm, "__bd_file_write", host_file_write, s);
+	bd_vm_register(s->vm, "__bd_file_append", host_file_append, s);
+	bd_vm_register(s->vm, "__bd_file_read", host_file_read, s);
+	bd_vm_register(s->vm, "__bd_file_remove", host_file_remove, s);
+	bd_vm_register(s->vm, "__bd_file_list", host_file_list, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
 	if (!s->profile || !prop_bool(s->profile, "unsafe_scripts", 0))
 		bd_vm_eval(s->vm, sandbox_lua); /* default-restricted environment */
@@ -811,6 +1029,7 @@ bd_session_free(bd_session *s)
 	bd_log_free(s->log);            /* flushes and closes the sink files */
 	free(s->data_dir);
 	free(s->linebuf);
+	free(s->scratch_rd);
 	free(s);
 }
 
