@@ -48,6 +48,10 @@ typedef void (*bd_net_prompt_cb)(void *arg);
 typedef void (*bd_net_package_cb)(int proto, const char *name,
                                   const char *json, void *arg);
 
+/* MXP (telnet option 91) became active (1) or off (0); the consumer should run
+ * the data stream through an MXP parser while active (see bd_mxp). */
+typedef void (*bd_net_mxp_cb)(int active, void *arg);
+
 typedef struct bd_net bd_net;
 
 /* Create a connection object. Callbacks may be NULL. arg is passed back to
@@ -90,6 +94,7 @@ void bd_net_set_autoreconnect(bd_net *n, int enable);
 void bd_net_set_echo_cb(bd_net *n, bd_net_echo_cb cb);
 void bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb);
 void bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb);
+void bd_net_set_mxp_cb(bd_net *n, bd_net_mxp_cb cb);
 
 /* Advertise the terminal type (TTYPE/MTTS), e.g. "birdie/0.0". Copied.
  * Takes effect on the next negotiation; set before connecting. */

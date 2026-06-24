@@ -13,7 +13,7 @@
  * engine. Anything the verbs do is reachable through bd_trigger directly.
  *
  * Implemented: #action, #alias (each taking an optional class[/chain:state]
- * token for multi-state chains), #unaction / #unalias, #list, #class,
+ * token for multi-state chains), #mxp, #unaction / #unalias, #list, #class,
  * #tick / #untick, #reset, #gag / #ungag, #substitute / #sub / #unsubstitute,
  * #highlight / #hi / #unhighlight, #event, #script. A configurable command
  * char is deferred (doc/triggers.md).

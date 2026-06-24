@@ -599,6 +599,40 @@ bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json)
 	return fired;
 }
 
+/* Dispatch an MXP tag to mxp-type triggers (matched by tag name). %0 in the
+ * body expands to the tag's attribute string. */
+int
+bd_triggers_mxp(bd_triggers *t, const char *tag, const char *attrs)
+{
+	struct span cap[10];
+	int i, fired = 0;
+
+	if (!t || !tag)
+		return 0;
+	ensure_sorted(t);
+	memset(cap, 0, sizeof cap);
+	for (i = 0; i < t->n; i++) {
+		struct trigger *tr = &t->trig[i];
+		if (tr->type != BD_TRIG_MXP)
+			continue;
+		if (!bd_class_enabled(t, tr->cls))
+			continue;
+		if (strcmp(tr->pattern, tag) != 0)
+			continue;
+		if (attrs) {
+			cap[0].off = 0;
+			cap[0].len = (int)strlen(attrs);
+			fire(t, tr, attrs, cap);
+		} else {
+			fire(t, tr, "", cap);
+		}
+		fired = 1;
+		if (tr->stop)
+			break;
+	}
+	return fired;
+}
+
 /* ---- line rewriting (#gag / #substitute / #highlight) ---- */
 
 /* Resolve a #highlight color token to SGR parameter text. A leading digit is

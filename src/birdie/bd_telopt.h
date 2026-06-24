@@ -23,6 +23,8 @@
  *   GMCP           out-of-band JSON packages, routed by name
  *   MSDP           out-of-band key/value data, converted to JSON and routed
  *   MCCP2          server->client zlib stream compression (start signal)
+ *   MXP            in-band tag protocol (option 91); signals active, the
+ *                  caller runs the data stream through bd_mxp
  * Every other option is refused (DO->WONT, WILL->DONT).
  *
  * Deferred (doc/network.md): MSSP and MCCP3 (client->server compression).
@@ -57,6 +59,10 @@ typedef struct bd_telopt_cb {
 	 * be inflated before being fed back in. May be NULL (compression then
 	 * stays refused). */
 	void (*compress)(void *arg);
+	/* MXP (option 91) became active (1) or was turned off (0). When active,
+	 * the caller should run the application bytes through an MXP parser
+	 * (bd_mxp) before display. May be NULL (MXP then stays refused). */
+	void (*mxp)(int active, void *arg);
 	void *arg;
 } bd_telopt_cb;
 

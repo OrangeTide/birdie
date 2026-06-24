@@ -70,7 +70,8 @@ enum {
 	MSG_STATE,      /* [u8 state][detail string] */
 	MSG_PROMPT,     /* no payload */
 	MSG_ECHO,       /* [u8 suppress] */
-	MSG_PKG         /* [u8 proto][name '\0'][json] -- GMCP/MSDP package */
+	MSG_PKG,        /* [u8 proto][name '\0'][json] -- GMCP/MSDP package */
+	MSG_MXP         /* [u8 active] -- MXP became active/inactive */
 };
 
 #define RX_CAP   (1u << 20)     /* 1 MiB inbound buffer */
@@ -86,6 +87,7 @@ struct bd_net {
 	bd_net_echo_cb on_echo;
 	bd_net_prompt_cb on_prompt;
 	bd_net_package_cb on_package;
+	bd_net_mxp_cb on_mxp;
 	void *arg;
 
 	_Atomic int state;
@@ -346,6 +348,14 @@ telopt_compress(void *arg)
 {
 	struct net_ctx *c = arg;
 	c->want_inflate = 1;            /* do_read switches to inflate next */
+}
+
+static void
+telopt_mxp(int active, void *arg)
+{
+	struct net_ctx *c = arg;
+	unsigned char b = active ? 1 : 0;
+	pend_put(c, MSG_MXP, &b, 1);
 }
 
 /* ---- net thread: I/O -------------------------------------------------- */
@@ -1075,6 +1085,7 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	tcb.echo = telopt_echo;
 	tcb.package = telopt_package;
 	tcb.compress = telopt_compress;
+	tcb.mxp = telopt_mxp;
 	tcb.arg = c;
 
 	c->loop = iox_loop_new();
@@ -1201,6 +1212,13 @@ bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb)
 {
 	if (n)
 		n->on_package = cb;
+}
+
+void
+bd_net_set_mxp_cb(bd_net *n, bd_net_mxp_cb cb)
+{
+	if (n)
+		n->on_mxp = cb;
 }
 
 void
@@ -1379,6 +1397,10 @@ bd_net_poll(bd_net *n)
 				const char *json = (const char *)(p + 1 + nl + 1);
 				n->on_package(p[0], name, json, n->arg);
 			}
+			break;
+		case MSG_MXP:
+			if (n->on_mxp)
+				n->on_mxp(len >= 1 && p[0], n->arg);
 			break;
 		}
 

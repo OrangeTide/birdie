@@ -7,6 +7,7 @@
 #include "bd_session.h"
 #include "bd_log.h"
 #include "bd_replay.h"
+#include "bd_mxp.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -40,6 +41,8 @@ struct bd_session {
 	char session_id[25];            /* stable id for one session's records */
 	int dispatch_depth;             /* re-entrancy guard for hook cascades */
 	char *scratch_rd;               /* reusable buffer for file.read/list ret */
+	bd_mxp *mxp;                    /* MXP tag parser (active when negotiated) */
+	int mxp_active;                 /* server negotiated MXP */
 
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
@@ -647,7 +650,11 @@ static const char bootstrap_lua[] =
 	"json.encode = jenc\n"
 	"var = var or {}\n"
 	"function __bd_setvars(s) var = json.decode(s) or {} end\n"
-	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={}, timer={}, event={} }\n"
+	"on = on or { line={}, prompt={}, connect={}, disconnect={}, gmcp={}, timer={}, event={}, mxp={} }\n"
+	/* MXP tags route to on.mxp[tag](attrs, closing) */
+	"function __bd_mxp(tag, attrs, closing)\n"
+	"  local h = on.mxp[tag]; if h then pcall(h, attrs, closing) end\n"
+	"end\n"
 	"function __bd_dispatch(kind, a, b)\n"
 	"  if kind=='line' then for _,f in ipairs(on.line) do pcall(f,a) end\n"
 	"  elseif kind=='prompt' then for _,f in ipairs(on.prompt) do pcall(f,a) end\n"
@@ -884,16 +891,56 @@ feed_lines(bd_session *s, const char *data, int len)
 		emit_data(s, data + run, len - run);
 }
 
+/* ---- MXP (parser callbacks fire from bd_mxp_feed, on the UI thread) ---- */
+
+/* Cleaned display text from the MXP parser feeds the normal line pipeline. */
+static void
+mxp_text(const char *bytes, size_t len, void *arg)
+{
+	feed_lines((bd_session *)arg, bytes, (int)len);
+}
+
+/* An MXP tag: route to on.mxp[name], the mxp triggers, and the log. */
+static void
+mxp_tag(const char *name, const char *attrs, int closing, void *arg)
+{
+	bd_session *s = arg;
+	bd_vm_call(s->vm, "__bd_mxp", "ssb", name, attrs, closing);
+	if (!closing)                           /* triggers fire on open tags */
+		bd_triggers_mxp(s->trig, name, attrs);
+	if (s->log) {
+		bd_log_rec r;
+		log_fill(s, &r, BD_LOG_MXP);
+		r.tag = name;
+		r.attrs = attrs;
+		bd_log_write(s->log, &r);
+	}
+}
+
 /* ---- bd_net callbacks (fire on the UI thread during drain) ---- */
 
 static void
 net_data(const char *data, int len, void *arg)
 {
 	bd_session *s = arg;
-	/* feed_lines streams bytes to the display run-by-run and retires each
-	 * completed line through the triggers / rewriting verbs (a gagged line is
-	 * erased, a rewritten one replaced) before the line ending is emitted */
-	feed_lines(s, data, len);
+	/* When MXP is active the byte stream is parsed for tags first; its cleaned
+	 * text flows on into feed_lines. Otherwise feed_lines streams bytes to the
+	 * display run-by-run and retires each completed line through the triggers /
+	 * rewriting verbs before the line ending is emitted. */
+	if (s->mxp_active && s->mxp)
+		bd_mxp_feed(s->mxp, (const unsigned char *)data, (size_t)len);
+	else
+		feed_lines(s, data, len);
+}
+
+/* MXP became active/inactive (telnet option 91). */
+static void
+net_mxp(int active, void *arg)
+{
+	bd_session *s = arg;
+	s->mxp_active = active;
+	if (active && s->mxp)
+		bd_mxp_reset(s->mxp);
 }
 
 static void
@@ -1009,9 +1056,14 @@ bd_session_new(const bd_profile *profile)
 		return NULL;
 	}
 	install_script_api(s);
+	{
+		bd_mxp_cb mc = { mxp_text, mxp_tag, s };
+		s->mxp = bd_mxp_new(&mc);
+	}
 	bd_net_set_echo_cb(s->net, net_echo);
 	bd_net_set_prompt_cb(s->net, net_prompt);
 	bd_net_set_package_cb(s->net, net_package);
+	bd_net_set_mxp_cb(s->net, net_mxp);
 	return s;
 }
 
@@ -1027,6 +1079,7 @@ bd_session_free(bd_session *s)
 	bd_triggers_free(s->trig);
 	bd_vm_free(s->vm);
 	bd_log_free(s->log);            /* flushes and closes the sink files */
+	bd_mxp_free(s->mxp);
 	free(s->data_dir);
 	free(s->linebuf);
 	free(s->scratch_rd);
@@ -1060,6 +1113,9 @@ bd_session_connect(bd_session *s)
 	ttype = bd_profile_get(s->profile, "termtype");
 	bd_net_set_termtype(s->net, ttype ? ttype : "birdie/0.0");
 	bd_net_set_winsize(s->net, s->cols, s->rows);
+
+	s->mxp_active = 0;                       /* renegotiated each connection */
+	bd_mxp_reset(s->mxp);
 
 	return bd_net_connect(s->net, host, port, tls);
 }

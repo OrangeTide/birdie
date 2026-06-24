@@ -30,7 +30,8 @@ typedef enum bd_trigger_type {
 	/* line-rewriting types: applied to a line's display text, not "fired" */
 	BD_TRIG_GAG,      /* #gag: drop the line from display */
 	BD_TRIG_SUBST,    /* #substitute: replace matched text (body = replacement) */
-	BD_TRIG_HILITE    /* #highlight: recolor matched text (body = color) */
+	BD_TRIG_HILITE,   /* #highlight: recolor matched text (body = color) */
+	BD_TRIG_MXP       /* matches an MXP tag by name; %0 = the tag attributes */
 } bd_trigger_type;
 
 #define BD_TRIG_PRIO_DEFAULT 5
@@ -115,6 +116,7 @@ int  bd_class_enabled(bd_triggers *t, const char *name);
 int bd_triggers_line(bd_triggers *t, const char *line);    /* BD_TRIG_ACTION */
 int bd_triggers_prompt(bd_triggers *t, const char *text);  /* BD_TRIG_PROMPT */
 int bd_triggers_gmcp(bd_triggers *t, const char *pkg, const char *json);
+int bd_triggers_mxp(bd_triggers *t, const char *tag, const char *attrs);
 
 /* ---- line rewriting (#gag / #substitute / #highlight) ---- */
 

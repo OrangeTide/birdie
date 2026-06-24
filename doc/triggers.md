@@ -67,7 +67,7 @@ One underlying table, one `type` field. The dispatcher routes by type:
 |--------------|--------------------------------------------|
 | `line`       | a line of MUD output (default)             |
 | `prompt`     | text identified as a prompt                |
-| `mxp`        | an MXP tag                                 |
+| `mxp`        | an MXP tag (matched by tag name)           |
 | `gmcp`       | a GMCP message (matched by package.name)   |
 | `timer`      | wall-clock interval or one-shot delay      |
 | `event`      | user-fired event (`#event name args...`)   |
@@ -95,7 +95,7 @@ Lua has first-class access to:
 - `mud.send(text)`, `mud.sendraw(bytes)`
 - `mud.gmcp(package, data)` — send GMCP
 - `on.line`, `on.prompt`, `on.gmcp[pkg]`, `on.timer`, `on.connect`,
-  `on.disconnect`, `on.mxp` — hook tables (append a function, it runs in
+  `on.disconnect`, `on.event[name]`, `on.mxp[tag]` — hook tables (append a function, it runs in
   addition to declared triggers)
 - `class.enable(name)`, `class.disable(name)`, `class.toggle(name)`
 - `log.note(text)` — write an annotation into the NDJSON log (see
@@ -181,17 +181,22 @@ through `bd_session`):
   table persists per
   profile to `<data_dir>/profiles/<name>/vars.json` (loaded when the session's
   data dir is set, saved on disconnect and at free). `log.note(text)` writes a
-  `note` record to the log sinks (`doc/logging.md`).
+  `note` record to the log sinks (`doc/logging.md`). When the server
+  negotiates MXP (telnet option 91), inbound text is parsed by `bd_mxp`: tag
+  markup is stripped from the display, entities are decoded, and each tag
+  routes to `on.mxp[tag](attrs, closing)`, the `mxp` triggers, and an `mxp` log
+  record.
 - **`bd_trigger`** — the engine: a trigger table in dot-nestable classes that
-  toggle as a unit, priority ordering (highest first) with `#stop`, and four
-  dispatch paths (action / alias / prompt / gmcp). `line`/`prompt`/`alias`
+  toggle as a unit, priority ordering (highest first) with `#stop`, and five
+  dispatch paths (action / alias / prompt / gmcp / mxp). `line`/`prompt`/`alias`
   patterns use a native TinTin++-style matcher (literal text, greedy `%1..%9`
-  captures, `^`/`$` anchors); `gmcp` routes by package name. A matched body is
-  either MUD command text (`%0..%9` expanded, emitted to the session) or, with
-  a leading `@`, a Lua expression run on `bd_vm`.
-- **`bd_verb`** — the `#action` / `#alias` / `#unaction` / `#unalias` /
+  captures, `^`/`$` anchors); `gmcp` routes by package name and `mxp` by tag
+  name (`%0` = the tag attributes). A matched body is either MUD command text
+  (`%0..%9` expanded, emitted to the session) or, with a leading `@`, a Lua
+  expression run on `bd_vm`.
+- **`bd_verb`** — the `#action` / `#alias` / `#mxp` / `#unaction` / `#unalias` /
   `#list` / `#class` / `#tick` / `#untick` / `#reset` / `#gag` /
-  `#substitute` / `#highlight` / `#script` command-line verbs over the engine,
+  `#substitute` / `#highlight` / `#event` / `#script` command-line verbs over the engine,
   wired to the input line in `main.c`. The `#un*` verbs (`#unaction` /
   `#unalias` / `#ungag` / `#unsubstitute` / `#unhighlight`) remove triggers of
   that type by exact pattern (optionally class-scoped, reporting the count);
@@ -222,9 +227,10 @@ through `bd_session`):
   stripped) and run through the action/prompt triggers; GMCP/MSDP packages
   route to gmcp triggers; outgoing input runs through the aliases first.
 
-Not yet built: the rest of the host API (`on.mxp`); the `mxp` type; and a
-rewriting-aware `#list` (it lists every type, but does not yet show
-substitution/highlight bodies). (The recursion cap from the open questions is now in
+Not yet built: a rewriting-aware `#list` (it lists every type, but does not
+yet show substitution/highlight bodies), and the visual rendering of MXP
+formatting (the tags are parsed and routed to scripts/triggers, but colors and
+`<send>` clickable links are not yet styled in the terminal widget). (The recursion cap from the open questions is now in
 place: `dispatch_hook` bounds synchronous hook cascades at
 `BD_MAX_DISPATCH_DEPTH`. The `event` and `expression` types are handled in Lua,
 through the `on.event` hook table and the `watch()` registry, rather than as

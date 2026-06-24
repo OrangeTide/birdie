@@ -109,6 +109,7 @@ All covered by MTH; listing here so the set is explicit.
 | `MSSP`       | MUD status report                          | surfaced in profile dialog    |
 | `MSDP`       | structured out-of-band messaging           | routed to `bd_vm` as tables   |
 | `GMCP`       | structured out-of-band messaging (JSON)    | routed to `bd_vm` as tables; NDJSON-logged |
+| `MXP`        | in-band tag protocol (option 91)           | parsed by `bd_mxp`; tags routed to `on.mxp`/`mxp` triggers, NDJSON-logged |
 
 MSDP and GMCP packages are **routed by name**, not interpreted by
 birdie. The scripting layer's `on.gmcp["Char.Vitals"]` hook table is

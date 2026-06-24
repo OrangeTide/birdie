@@ -37,6 +37,7 @@
 #define OPT_CHARSET     42
 #define OPT_MSDP        69
 #define OPT_MCCP2       86
+#define OPT_MXP         91
 #define OPT_GMCP       201
 
 /* TTYPE / NEW-ENVIRON / CHARSET subnegotiation sub-commands */
@@ -111,7 +112,7 @@ remote_wanted(unsigned char opt)
 	return opt == OPT_CHARSET || opt == OPT_EOR ||
 	       opt == OPT_ECHO || opt == OPT_SGA ||
 	       opt == OPT_GMCP || opt == OPT_MSDP ||
-	       opt == OPT_MCCP2;
+	       opt == OPT_MCCP2 || opt == OPT_MXP;
 }
 
 /* Build and send an escaped subnegotiation: IAC SB <opt> <payload> IAC SE,
@@ -561,6 +562,8 @@ on_will(struct bd_telopt *t, unsigned char opt)
 				t->cb.echo(1, t->cb.arg);
 			if (opt == OPT_GMCP)
 				gmcp_hello(t);
+			if (opt == OPT_MXP && t->cb.mxp)
+				t->cb.mxp(1, t->cb.arg);
 		}
 	} else {
 		send3(t, TC_DONT, opt);
@@ -576,6 +579,8 @@ on_wont(struct bd_telopt *t, unsigned char opt)
 		send3(t, TC_DONT, opt);
 		if (opt == OPT_ECHO && t->cb.echo)
 			t->cb.echo(0, t->cb.arg);
+		if (opt == OPT_MXP && t->cb.mxp)
+			t->cb.mxp(0, t->cb.arg);
 	}
 }
 

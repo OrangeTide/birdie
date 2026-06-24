@@ -208,6 +208,7 @@ type_tag(bd_trigger_type type)
 	case BD_TRIG_GAG:    return "gag";
 	case BD_TRIG_SUBST:  return "sub";
 	case BD_TRIG_HILITE: return "hi";
+	case BD_TRIG_MXP:    return "mxp";
 	}
 	return "?";
 }
@@ -313,6 +314,27 @@ verb_hilite(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
 		fb(feedback, fbcap, "could not add highlight");
 	else
 		fb(feedback, fbcap, "highlight added");
+	return 1;
+}
+
+/* #mxp {tag} {body} [class] -- fire body when MXP tag <tag> arrives */
+static int
+verb_mxp(bd_triggers *t, const char *args, char *feedback, size_t fbcap)
+{
+	char tag[128], body[ARG_MAX], cls[128];
+	int stop;
+
+	if (!read_brace(&args, tag, sizeof tag) ||
+	    !read_brace(&args, body, sizeof body)) {
+		fb(feedback, fbcap, "usage: #mxp {tag} {body} [class]");
+		return 1;
+	}
+	read_word(&args, cls, sizeof cls);
+	stop = extract_stop(body);
+	if (bd_trigger_add(t, BD_TRIG_MXP, tag, body, cls[0] ? cls : NULL, -1, stop) < 0)
+		fb(feedback, fbcap, "could not add mxp trigger");
+	else
+		fb(feedback, fbcap, "mxp trigger added");
 	return 1;
 }
 
@@ -446,6 +468,8 @@ bd_verb_exec(bd_triggers *t, const char *input, const char **literal,
 		return verb_reset(t, args, feedback, fbcap);
 	if (!strcmp(verb, "event"))
 		return verb_event(t, args, feedback, fbcap);
+	if (!strcmp(verb, "mxp"))
+		return verb_mxp(t, args, feedback, fbcap);
 	if (!strcmp(verb, "unaction") || !strcmp(verb, "unact"))
 		return verb_untrigger(t, BD_TRIG_ACTION, args, feedback, fbcap);
 	if (!strcmp(verb, "unalias"))
