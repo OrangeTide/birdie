@@ -1,6 +1,7 @@
 #include "widget.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_table.h"
+#include "bd_widget_value.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -11,6 +12,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static bd_id status_label;              /* connection status, in the sidebar */
 static bd_id mud_label;                 /* current MUD name, in the sidebar */
@@ -20,9 +22,40 @@ static bd_id terminal;
 static bd_id input_line;
 static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
 static bd_id connect_dialog;            /* the modal MUD picker */
+static bd_id edit_dialog;               /* add/edit a profile */
+static bd_id edit_name, edit_host, edit_port, edit_tls;
+static bd_id import_path;               /* CSV import file-path field */
+static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
 static bd_session *session;
+
+/* Per-user data dir (defined below) and the profile-list CSV under it. */
+static const char *data_dir(void);
+
+static const char *
+profiles_path(void)
+{
+	static char buf[600];
+	const char *d = data_dir();
+	if (!d)
+		return NULL;
+	snprintf(buf, sizeof buf, "%s/profiles.csv", d);
+	return buf;
+}
+
+/* Persist the profile store to <data_dir>/profiles.csv (best effort). */
+static void
+save_profiles(void)
+{
+	const char *path = profiles_path();
+	const char *d = data_dir();
+	if (!path)
+		return;
+	if (d)
+		mkdir(d, 0755);         /* ensure the dir exists (best effort) */
+	bd_profiles_save(profiles, path);
+}
 
 /* ---- MUD-list table model (reads the profile store) ---- */
 
@@ -292,6 +325,152 @@ on_dialog_cancel(bd_id id, void *arg)
 	bd_modal_close(connect_dialog);
 }
 
+/* ---- add / edit / delete / import a profile ---- */
+
+/* Open the edit dialog. `p` NULL means "add a new profile" (blank form);
+ * otherwise the form is prefilled and Save updates that profile. */
+static void
+open_edit(const bd_profile *p)
+{
+	const char *host = p ? bd_profile_get(p, "host") : NULL;
+	const char *port = p ? bd_profile_get(p, "port") : NULL;
+	const char *name = p ? bd_profile_get(p, "name") : NULL;
+	const char *tls = p ? bd_profile_get(p, "tls") : NULL;
+
+	snprintf(editing_name, sizeof editing_name, "%s", name ? name : "");
+	bd_set(edit_name, BD_LABEL_S, name ? name : "", BD_END);
+	bd_set(edit_host, BD_LABEL_S, host ? host : "", BD_END);
+	bd_set(edit_port, BD_LABEL_S, port ? port : "23", BD_END);
+	bd_toggle_set(edit_tls, tls && strcmp(tls, "no") != 0 &&
+	    strcmp(tls, "") != 0);
+	bd_modal_open(edit_dialog);
+}
+
+static void
+on_add(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	open_edit(NULL);
+}
+
+static void
+on_edit(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	open_edit(selected_profile());
+}
+
+/* Save the edit form into the store (creating or updating), persist, refresh. */
+static void
+on_edit_save(bd_id id, void *arg)
+{
+	const char *name = bd_get_s(edit_name, BD_LABEL_S);
+	bd_profile *p;
+	(void)id;
+	(void)arg;
+
+	if (!name || !name[0]) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** profile needs a name\033[0m\r\n", -1);
+		return;
+	}
+	/* a rename (editing an existing profile to a new name) drops the old */
+	if (editing_name[0] && strcmp(editing_name, name) != 0)
+		bd_profiles_remove(profiles, editing_name);
+	p = bd_profiles_add(profiles, name);            /* find or create */
+	if (!p) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** could not save profile\033[0m\r\n", -1);
+		return;
+	}
+	bd_profile_set(p, "host", bd_get_s(edit_host, BD_LABEL_S));
+	bd_profile_set(p, "port", bd_get_s(edit_port, BD_LABEL_S));
+	bd_profile_set(p, "tls", bd_toggle_get(edit_tls) ? "yes" : "no");
+	save_profiles();
+	bd_table_refresh(mudlist);
+	bd_modal_close(edit_dialog);
+}
+
+static void
+on_edit_cancel(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_modal_close(edit_dialog);
+}
+
+static void
+on_delete(bd_id id, void *arg)
+{
+	const bd_profile *p = selected_profile();
+	const char *name = p ? bd_profile_get(p, "name") : NULL;
+	(void)id;
+	(void)arg;
+	if (!name)
+		return;
+	bd_profiles_remove(profiles, name);
+	save_profiles();
+	bd_table_refresh(mudlist);
+}
+
+/* Import a local CSV file (path from the import field) into the store, merging
+ * by name and dropping any column outside the safe set. */
+static void
+on_import(bd_id id, void *arg)
+{
+	const char *path = bd_get_s(import_path, BD_LABEL_S);
+	char line[200];
+	FILE *f;
+	long sz;
+	char *buf;
+	size_t got;
+	int n;
+	(void)id;
+	(void)arg;
+
+	if (!path || !path[0]) {
+		bd_terminal_write(terminal,
+		    "\033[33m*** enter a CSV file path to import\033[0m\r\n", -1);
+		return;
+	}
+	f = fopen(path, "rb");
+	if (!f) {
+		snprintf(line, sizeof line,
+		    "\033[31m*** cannot open %s\033[0m\r\n", path);
+		bd_terminal_write(terminal, line, -1);
+		return;
+	}
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz <= 0) {
+		fclose(f);
+		return;
+	}
+	buf = malloc((size_t)sz + 1);
+	if (!buf) {
+		fclose(f);
+		return;
+	}
+	got = fread(buf, 1, (size_t)sz, f);
+	fclose(f);
+	buf[got] = '\0';
+	n = bd_profiles_import_csv(profiles, buf, got, BD_PROFILE_SAFE_COLUMNS);
+	free(buf);
+	if (n < 0) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** import failed (parse error)\033[0m\r\n", -1);
+		return;
+	}
+	save_profiles();
+	bd_table_refresh(mudlist);
+	snprintf(line, sizeof line,
+	    "\033[36m*** imported %d profile%s\033[0m\r\n", n, n == 1 ? "" : "s");
+	bd_terminal_write(terminal, line, -1);
+}
+
 /* Double-click / Enter on a dialog row connects to it and closes the dialog. */
 static void
 mudlist_activate(bd_id w, int row, void *ctx)
@@ -393,13 +572,17 @@ static const bd_profile *
 load_profiles(void)
 {
 	const char *path = getenv("BIRDIE_PROFILES");
+	const char *saved = profiles_path();
 	const char *want = getenv("BIRDIE_PROFILE");
 	const char *host = getenv("BIRDIE_HOST");
 	const char *port = getenv("BIRDIE_PORT");
 	bd_profile *p;
 
 	if (path && bd_profiles_load(profiles, path) == 0) {
-		/* loaded a real list */
+		/* an explicit BIRDIE_PROFILES list wins */
+	} else if (saved && bd_profiles_load(profiles, saved) == 0 &&
+	    bd_profiles_count(profiles) > 0) {
+		/* the user's persisted list (edited/imported in-app) */
 	} else {
 		seed_profile("Aardwolf", "aardmud.org", "23", "no");
 		seed_profile("Discworld", "discworld.starturtle.net", "4242", "no");
@@ -541,12 +724,55 @@ init(void)
 		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
 		&(bd_table_cb){ .activate = mudlist_activate },
 		BD_GROW_I, 1, BD_END);
+	/* manage row: add / edit / delete profiles, and a local CSV import */
+	bd_id mbtn = bd_create(connect_dialog, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
+	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Add", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_add, BD_END);
+	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Edit", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_edit, BD_END);
+	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Delete", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_delete, BD_END);
+	bd_id ibtn = bd_create(connect_dialog, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
+	import_path = bd_create(ibtn, BD_INPUT_LINE, BD_GROW_I, 1,
+		BD_PAD_I, 3, BD_END);
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import CSV", BD_PREF_W_I, 100,
+		BD_ON_CLICK_F, on_import, BD_END);
+
 	bd_id dbtn = bd_create(connect_dialog, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);
 	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Connect", BD_GROW_I, 1,
 		BD_ON_CLICK_F, on_dialog_connect, BD_END);
 	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Cancel", BD_GROW_I, 1,
 		BD_ON_CLICK_F, on_dialog_cancel, BD_END);
+
+	/* the add/edit profile form (modal) */
+	edit_dialog = bd_create(BD_NONE, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 360, BD_PREF_H_I, 230,
+		BD_BG_C, 0x313335FFu, BD_PAD_I, 10, BD_GAP_I, 8, BD_END);
+	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Profile",
+		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
+	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Name", BD_PREF_H_I, 14, BD_END);
+	edit_name = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
+		BD_PAD_I, 3, BD_END);
+	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Host", BD_PREF_H_I, 14, BD_END);
+	edit_host = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
+		BD_PAD_I, 3, BD_END);
+	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Port", BD_PREF_H_I, 14, BD_END);
+	edit_port = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
+		BD_PAD_I, 3, BD_END);
+	bd_id trow = bd_create(edit_dialog, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
+	bd_create(trow, BD_LABEL, BD_LABEL_S, "TLS", BD_PREF_W_I, 40, BD_END);
+	edit_tls = bd_toggle_create(trow, 0, NULL, NULL, BD_END);
+	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "", BD_GROW_I, 1, BD_END);
+	bd_id ebtn = bd_create(edit_dialog, BD_PANEL,
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);
+	bd_create(ebtn, BD_BUTTON, BD_LABEL_S, "Save", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_edit_save, BD_END);
+	bd_create(ebtn, BD_BUTTON, BD_LABEL_S, "Cancel", BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_edit_cancel, BD_END);
 
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
