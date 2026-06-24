@@ -473,6 +473,25 @@ static const char bootstrap_lua[] =
 	"  end\n"
 	"end\n";
 
+/*
+ * The default sandbox (doc/triggers.md). Run once after the trusted bootstrap
+ * so user scripts, profile scripts, #script, and any imported (untrusted) gist
+ * scripts cannot reach process control, the filesystem, or sandbox-escape
+ * hatches. The safe stdlib stays: string / table / math / utf8 / coroutine /
+ * select / pairs / pcall / load (load's chunks inherit this hardened _ENV).
+ * os keeps the read-only clocks (time / clock / date / difftime). A profile can
+ * opt out with unsafe_scripts=yes for fully trusted local setups.
+ */
+static const char sandbox_lua[] =
+	"if os then\n"
+	"  os.execute=nil; os.remove=nil; os.rename=nil; os.exit=nil\n"
+	"  os.tmpname=nil; os.getenv=nil; os.setlocale=nil\n"
+	"end\n"
+	"io=nil\n"                      /* no raw filesystem access (var persists state) */
+	"dofile=nil; loadfile=nil\n"
+	"package=nil; require=nil\n"
+	"debug=nil\n";
+
 static void
 install_script_api(bd_session *s)
 {
@@ -483,6 +502,8 @@ install_script_api(bd_session *s)
 	bd_vm_register(s->vm, "__bd_note", host_note, s);
 	bd_vm_register(s->vm, "__bd_event", host_event, s);
 	bd_vm_eval(s->vm, bootstrap_lua);   /* no-op on the null backend */
+	if (!s->profile || !prop_bool(s->profile, "unsafe_scripts", 0))
+		bd_vm_eval(s->vm, sandbox_lua); /* default-restricted environment */
 }
 
 /* Fire the Lua on.* hooks for an event (no-op if scripting is disabled or the

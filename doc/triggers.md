@@ -224,7 +224,8 @@ through `bd_session`):
 
 Not yet built: the rest of the host API (`on.mxp`); the `mxp` type; a
 rewriting-aware `#list` (it lists every type, but does not yet show
-substitution/highlight bodies); and the sandboxing posture noted below. (The recursion cap from the open questions is now in
+substitution/highlight bodies); and a confined scratch-dir file API (the
+sandbox currently removes `io` outright). (The recursion cap from the open questions is now in
 place: `dispatch_hook` bounds synchronous hook cascades at
 `BD_MAX_DISPATCH_DEPTH`. The `event` and `expression` types are handled in Lua,
 through the `on.event` hook table and the `watch()` registry, rather than as
@@ -240,5 +241,12 @@ pattern-matched trigger types.)
   cascades. Per-second rate limiting (vs. depth) is still open if a slow
   steady-state loop proves a problem.
 - Sandboxing posture for imported scripts (untrusted gist URLs etc.):
-  default to restricted (`os.execute` stripped, `io` limited to a
-  per-profile scratch dir). Opt-in to full standard library.
+  default to restricted, opt-in to full standard library. Implemented:
+  after the trusted bootstrap, `bd_session` strips the process / filesystem
+  / escape hatches (`os.execute`/`remove`/`rename`/`exit`/`tmpname`/`getenv`/
+  `setlocale`, all of `io`, `dofile`/`loadfile`, `package`/`require`, `debug`)
+  from the shared script environment; the safe stdlib (string / table / math /
+  utf8 / coroutine / `load` / the read-only `os` clocks) stays, and `load`'s
+  chunks inherit the hardened `_ENV`. A profile sets `unsafe_scripts=yes` to
+  opt out. Still open: a confined per-profile scratch-dir file API to replace
+  the removed `io` (today scripts persist state through the `var` table).
