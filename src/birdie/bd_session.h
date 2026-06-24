@@ -100,6 +100,13 @@ void bd_session_set_winsize(bd_session *s, int cols, int rows);
  * disconnect and at free. Pass NULL to make `var` session-only (no disk). */
 void bd_session_set_data_dir(bd_session *s, const char *dir);
 
+/* Load and run <data_dir>/profiles/<name>/triggers.lua if it exists (in the
+ * sandboxed script environment). Returns 1 if a script ran, 0 if none is
+ * present, -1 on a script error (message via bd_vm_error(bd_session_vm(s))).
+ * Call after the data dir is set; the script registers the profile's triggers,
+ * aliases, and on.* hooks. */
+int bd_session_load_profile_script(bd_session *s);
+
 /* Pull queued network output and fire events. Call once per frame (UI thread). */
 void bd_session_drain(bd_session *s);
 

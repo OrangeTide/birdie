@@ -137,6 +137,13 @@ the CSV in `profiles/<name>/`:
 These are not part of the CSV and are not shared by the CSV export
 path. They have their own (later) export-as-zip story.
 
+`triggers.lua` is the per-profile script: `bd_session_load_profile_script`
+runs it (in the sandboxed environment, doc/triggers.md) when a session binds to
+the profile, so the user's `#action`/`#alias` triggers and `on.*` hooks are
+live for the connection. The client re-runs it on a fresh session via
+`Session > Reload Script` (disconnected only, so the engine starts clean rather
+than accumulating duplicate triggers).
+
 `vars.json` is the persistent script `var` table (doc/triggers.md), a JSON
 dump written via the engine's `json.encode`/`json.decode` codecs (the design
 originally said a Lua dump; JSON reuses the GMCP codecs already in the

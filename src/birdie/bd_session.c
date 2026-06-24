@@ -81,10 +81,10 @@ mkdir_p(const char *path)
 	mkdir(tmp, 0755);
 }
 
-/* Build <data_dir>/profiles/<name>/vars.json into buf. Returns 0 if a path
+/* Build <data_dir>/profiles/<name>/<fname> into buf. Returns 0 if a path
  * exists (data_dir set and profile has a name), -1 otherwise. */
 static int
-vars_path(bd_session *s, char *buf, size_t cap)
+profile_file_path(bd_session *s, const char *fname, char *buf, size_t cap)
 {
 	const char *name = s->profile ? bd_profile_get(s->profile, "name") : NULL;
 	char safe[128];
@@ -95,8 +95,14 @@ vars_path(bd_session *s, char *buf, size_t cap)
 	for (i = 0; name[i] && i < sizeof safe - 1; i++)
 		safe[i] = (name[i] == '/' || name[i] == '\\') ? '_' : name[i];
 	safe[i] = '\0';
-	snprintf(buf, cap, "%s/profiles/%s/vars.json", s->data_dir, safe);
+	snprintf(buf, cap, "%s/profiles/%s/%s", s->data_dir, safe, fname);
 	return 0;
+}
+
+static int
+vars_path(bd_session *s, char *buf, size_t cap)
+{
+	return profile_file_path(s, "vars.json", buf, cap);
 }
 
 /* Host function: __bd_savevars(json) -> write the var dump to disk. */
@@ -1197,6 +1203,41 @@ bd_session_set_data_dir(bd_session *s, const char *dir)
 			    BD_LOGFMT_PLAINTEXT, root, tmpl);
 		}
 	}
+}
+
+int
+bd_session_load_profile_script(bd_session *s)
+{
+	char path[1024];
+	FILE *f;
+	long sz;
+	char *buf;
+	size_t got;
+	int rc;
+
+	if (!s || profile_file_path(s, "triggers.lua", path, sizeof path) != 0)
+		return 0;
+	f = fopen(path, "rb");
+	if (!f)
+		return 0;                       /* no script for this profile */
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz <= 0) {
+		fclose(f);
+		return 0;
+	}
+	buf = malloc((size_t)sz + 1);
+	if (!buf) {
+		fclose(f);
+		return 0;
+	}
+	got = fread(buf, 1, (size_t)sz, f);
+	fclose(f);
+	buf[got] = '\0';
+	rc = bd_vm_eval(s->vm, buf);             /* runs in the sandbox */
+	free(buf);
+	return rc == 0 ? 1 : -1;
 }
 
 bd_triggers *

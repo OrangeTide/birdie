@@ -193,6 +193,25 @@ rebind_session(const bd_profile *p)
 	bd_session_set_winsize(session, 80, 24);
 	install_ui_hooks(session);
 	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
+
+	/* run the profile's triggers.lua so the user's triggers/aliases/hooks
+	 * are live for this session */
+	switch (bd_session_load_profile_script(session)) {
+	case 1:
+		bd_terminal_write(terminal,
+		    "\033[36m*** loaded profile script\033[0m\r\n", -1);
+		break;
+	case -1: {
+		char line[400];
+		snprintf(line, sizeof line,
+		    "\033[31m*** script error: %s\033[0m\r\n",
+		    bd_vm_error(bd_session_vm(session)));
+		bd_terminal_write(terminal, line, -1);
+		break;
+	}
+	default:
+		break;          /* no script for this profile */
+	}
 }
 
 /* Sidebar label showing the current MUD (borrowed string, so keep it in a
@@ -290,6 +309,33 @@ on_disconnect(bd_id id, void *arg)
 	(void)id;
 	(void)arg;
 	bd_session_disconnect(session);
+}
+
+/* "Session > Reload Script" rebuilds the session for the active profile so the
+ * profile script re-runs on a clean engine (re-running it on the live engine
+ * would additively duplicate triggers and hooks). Only when disconnected. */
+static void
+on_reload_script(bd_id id, void *arg)
+{
+	const bd_profile *p;
+	(void)id;
+	(void)arg;
+	if (!session || !active) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** no session to reload\033[0m\r\n", -1);
+		return;
+	}
+	if (bd_session_state(session) == BD_NET_CONNECTED) {
+		bd_terminal_write(terminal,
+		    "\033[33m*** disconnect before reloading the script\033[0m\r\n",
+		    -1);
+		return;
+	}
+	p = active;
+	bd_session_free(session);
+	session = NULL;
+	active = NULL;
+	rebind_session(p);              /* fresh engine; reports the script result */
 }
 
 /* The input line fires its click handler on Enter, before clearing, so the
@@ -442,6 +488,8 @@ init(void)
 		BD_ON_CLICK_F, on_open_connect, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect",
 		BD_ON_CLICK_F, on_disconnect, BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Reload Script",
+		BD_ON_CLICK_F, on_reload_script, BD_END);
 
 	/* body: a session-context sidebar on the left, the session on the right */
 	bd_id body = bd_create(frame, BD_PANEL,
