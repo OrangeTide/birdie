@@ -16,6 +16,7 @@
 #include "bd_widget_editor.h"
 #include "bd_widget_canvas.h"
 #include "bd_widget_table.h"
+#include "bd_widget_inventory.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,39 @@ static int tbl_sel_changed;
 static void tbl_on_sel(bd_id w, void *c) { (void)w; (void)c; tbl_sel_changed++; }
 static int tbl_activated_row = -1;
 static void tbl_on_activate(bd_id w, int row, void *c) { (void)w; (void)c; tbl_activated_row = row; }
+
+/* ---- inventory grid model + recorded callbacks ---- */
+static struct inv_slot { uint64_t key; const char *label; bd_texture icon;
+    int count; int enabled; } inv_slots[80];
+static void
+inv_get(void *c, int slot, bd_inventory_item *out)
+{
+	(void)c;
+	if (slot < 0 || slot >= 80) return;
+	out->key     = inv_slots[slot].key;
+	out->label   = inv_slots[slot].label;
+	out->icon    = inv_slots[slot].icon;
+	out->count   = inv_slots[slot].count;
+	out->enabled = inv_slots[slot].enabled;
+}
+static int inv_act = -1;
+static void inv_on_act(bd_id w, int s, uint64_t k, void *c)
+{ (void)w; (void)k; (void)c; inv_act = s; }
+static int inv_mfrom = -1, inv_mto = -1;
+static void inv_on_move(bd_id w, int f, int t, void *c)
+{
+	(void)w; (void)c;
+	inv_mfrom = f; inv_mto = t;
+	struct inv_slot tmp = inv_slots[t];   /* app performs the swap */
+	inv_slots[t] = inv_slots[f];
+	inv_slots[f] = tmp;
+}
+static int inv_ctx = -1;
+static void inv_on_ctx(bd_id w, int s, uint64_t k, int sx, int sy, void *c)
+{ (void)w; (void)k; (void)sx; (void)sy; (void)c; inv_ctx = s; }
+static int inv_hov = -2;
+static void inv_on_hover(bd_id w, int s, uint64_t k, void *c)
+{ (void)w; (void)k; (void)c; inv_hov = s; }
 
 static int checks, fails;
 static void
@@ -1228,6 +1262,73 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
 	check("closing the modal re-enables the UI behind", clicked == before + 1);
+
+	bd_gui_cleanup();
+	}
+
+	/* ---- inventory grid: select / activate / drag-move / context / hover / keys ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	memset(inv_slots, 0, sizeof inv_slots);
+	inv_slots[0] = (struct inv_slot){ 100, "Sword",  (bd_texture){1}, 1, 1 };
+	inv_slots[1] = (struct inv_slot){ 101, "Shield", (bd_texture){1}, 1, 1 };
+	inv_slots[2] = (struct inv_slot){ 102, "Potion", (bd_texture){1}, 5, 1 };
+	inv_act = inv_ctx = -1; inv_hov = -2; inv_mfrom = inv_mto = -1;
+
+	bd_inventory_model im = { .get = inv_get };
+	bd_inventory_cb icb = { .activate = inv_on_act, .move = inv_on_move,
+	    .context = inv_on_ctx, .hover = inv_on_hover };
+	bd_id iframe = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id inv = bd_inventory_create(iframe, 4, 20, &im, &icb, BD_GROW_I, 1, BD_END);
+	bd_inventory_set_cell_size(inv, 48);   /* cell 64 wide: row 0 at content x 8,72,136 */
+	bd_gui_layout(800, 600);
+
+	int ix, iy, iw, ih;
+	bd_widget_rect(inv, &ix, &iy, &iw, &ih);
+	check("inventory got geometry", iw > 200 && ih > 200);
+
+	int s0 = ix + 40, s1 = ix + 104, s2 = ix + 168, ry = iy + 20;  /* row-0 centers */
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=s0, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=s0, .y=ry });
+	check("click selects slot 0", bd_inventory_selected(inv) == 0);
+
+	/* Enter activates the focused slot (the stub clock defeats double-click) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter activates the focused slot 0", inv_act == 0);
+
+	/* click slot 1 (anchor), Shift-click slot 2 -> range {1,2} */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=s1, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=s1, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .mods=BD_MOD_SHIFT, .x=s2, .y=ry });
+	check("Shift-range selects two slots", bd_inventory_selection(inv, NULL, 0) == 2);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .mods=BD_MOD_SHIFT, .x=s2, .y=ry });
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_RIGHT, .x=s0, .y=ry });
+	check("right-click fires context on slot 0", inv_ctx == 0);
+
+	/* hover exercises the new wants_hover move delivery */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=s1, .y=ry });
+	check("hover reports slot 1", inv_hov == 1);
+
+	/* drag slot 0 onto slot 1 -> move(0,1) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=s0, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=s0+30, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=s1, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=s1, .y=ry });
+	check("drag-drop fires move(0,1)", inv_mfrom == 0 && inv_mto == 1);
+
+	/* keyboard: focus, Right then Down (cols=4) -> slot 5 */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=s0, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=s0, .y=ry });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
+	check("Right moves selection to slot 1", bd_inventory_selected(inv) == 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	check("Down moves one grid row to slot 5", bd_inventory_selected(inv) == 5);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_SCROLL, .scroll_dy=-3 });
+	bd_gui_render();
+	check("inventory scroll + render does not crash", 1);
 
 	bd_gui_cleanup();
 	}

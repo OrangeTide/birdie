@@ -20,9 +20,11 @@
 #include "bd_widget_editor.h"
 #include "bd_widget_canvas.h"
 #include "bd_widget_table.h"
+#include "bd_widget_inventory.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -257,6 +259,72 @@ on_new_window(bd_id id, void *arg)
 	report("opened a new window");
 }
 
+/* ---- inventory grid: an RPG bag of icon slots ---- */
+
+static bd_texture inv_icons[6];
+static struct game_item { const char *name; int icon; int count; } inv_bag[48];
+
+/* build a 32x32 solid-color icon with a darker border, uploaded as a texture */
+static bd_texture
+make_icon(uint32_t rgba)
+{
+	unsigned char px[32 * 32 * 4];
+	uint32_t edge = ((rgba >> 1) & 0x7F7F7F00u) | 0xFFu;   /* halved, opaque */
+	for (int y = 0; y < 32; y++)
+		for (int x = 0; x < 32; x++) {
+			uint32_t c = (x < 2 || x > 29 || y < 2 || y > 29) ? edge : rgba;
+			unsigned char *p = px + (y * 32 + x) * 4;
+			p[0] = (c >> 24) & 0xFF; p[1] = (c >> 16) & 0xFF;
+			p[2] = (c >> 8) & 0xFF;  p[3] = c & 0xFF;
+		}
+	return bd_backend_get()->make_texture(32, 32, px);
+}
+
+static void
+inv_get(void *ctx, int slot, bd_inventory_item *out)
+{
+	(void)ctx;
+	if (slot < 0 || slot >= 48 || !inv_bag[slot].name)
+		return;   /* empty slot */
+	struct game_item *g = &inv_bag[slot];
+	out->key     = (uint64_t)(slot + 1);
+	out->label   = g->name;
+	out->icon    = inv_icons[g->icon];
+	out->count   = g->count;
+	out->enabled = 1;
+	out->tooltip = g->name;
+}
+
+static bd_id inv_widget;
+static void
+inv_activate(bd_id w, int slot, uint64_t key, void *ctx)
+{
+	(void)w; (void)key; (void)ctx;
+	char b[64];
+	snprintf(b, sizeof b, "inventory: use slot %d (%s)", slot,
+	    inv_bag[slot].name ? inv_bag[slot].name : "?");
+	report(b);
+}
+static void
+inv_context(bd_id w, int slot, uint64_t key, int sx, int sy, void *ctx)
+{
+	(void)w; (void)key; (void)sx; (void)sy; (void)ctx;
+	char b[64];
+	snprintf(b, sizeof b, "inventory: right-click slot %d", slot);
+	report(b);
+}
+static void
+inv_move(bd_id w, int from, int to, void *ctx)
+{
+	(void)w; (void)ctx;
+	struct game_item t = inv_bag[to];   /* swap the two slots */
+	inv_bag[to] = inv_bag[from];
+	inv_bag[from] = t;
+	char b[64];
+	snprintf(b, sizeof b, "inventory: move slot %d -> %d", from, to);
+	report(b);
+}
+
 /* ---- a labeled framing panel for a gallery section ---- */
 
 static bd_id
@@ -348,7 +416,33 @@ build_ui(void)
 	bd_table_create(left, gcols, 3,
 		&(bd_table_model){ gtbl_rows, gtbl_cell, NULL },
 		&(bd_table_cb){ .activate = gtbl_activate },
-		BD_PREF_H_I, 132, BD_END);
+		BD_PREF_H_I, 120, BD_END);
+
+	/* inventory grid: an RPG bag (drag between slots, right-click, wheel to
+	 * scroll, stack-count badges, hover tooltips) */
+	static const uint32_t pal[6] = { 0x9AA4B0FFu, 0xC08A3EFFu, 0xD24B4BFFu,
+	    0xE8C24AFFu, 0x6FB36FFFu, 0x8A6FC0FFu };
+	for (int i = 0; i < 6; i++)
+		inv_icons[i] = make_icon(pal[i]);
+	inv_bag[0]  = (struct game_item){ "Sword",  0, 1  };
+	inv_bag[1]  = (struct game_item){ "Shield", 1, 1  };
+	inv_bag[2]  = (struct game_item){ "Potion", 2, 5  };
+	inv_bag[3]  = (struct game_item){ "Gold",   3, 99 };
+	inv_bag[5]  = (struct game_item){ "Herb",   4, 12 };
+	inv_bag[6]  = (struct game_item){ "Amulet", 5, 1  };
+	inv_bag[8]  = (struct game_item){ "Key",    0, 1  };
+	inv_bag[11] = (struct game_item){ "Old Map",1, 1  };
+	inv_bag[14] = (struct game_item){ "Bow",    5, 1  };
+
+	bd_create(left, BD_LABEL,
+		BD_LABEL_S, "Inventory (BD_INVENTORY -- drag between slots, wheel to scroll):",
+		BD_PREF_H_I, 16, BD_END);
+	inv_widget = bd_inventory_create(left, 6, 8,
+		&(bd_inventory_model){ .get = inv_get },
+		&(bd_inventory_cb){ .activate = inv_activate, .context = inv_context,
+		    .move = inv_move },
+		BD_PREF_H_I, 176, BD_END);
+	bd_inventory_set_cell_size(inv_widget, 40);
 
 	bd_id right = bd_create(body, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 420,

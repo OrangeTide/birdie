@@ -18,7 +18,8 @@ sdl3_example_TOOLKIT := \
     ../../src/birdie/widget.c ../../src/birdie/bd_draw.c \
     ../../src/birdie/bd_widget_vt.c ../../src/birdie/bd_widget_value.c \
     ../../src/birdie/bd_widget_explorer.c ../../src/birdie/bd_widget_editor.c \
-    ../../src/birdie/bd_widget_canvas.c ../../src/birdie/bd_widget_table.c
+    ../../src/birdie/bd_widget_canvas.c ../../src/birdie/bd_widget_table.c \
+    ../../src/birdie/bd_widget_inventory.c
 
 sdl3_example_SRCS  = sdl3_example.c $(sdl3_example_TOOLKIT)
 sdl3_example_LIBS  = bd_vt
