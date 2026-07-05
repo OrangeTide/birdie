@@ -23,6 +23,8 @@ Output: `_out/<triplet>/bin/birdie` (e.g. `_out/x86_64-linux-gnu/bin/birdie`). A
 
 `make widget-test` builds a windowed widget gallery (`src/guitest/`) on a raw X11/EGL/GLES backend, independent of ludica, exhibiting every widget. Linux/X11 only and opt-in; run it from the repo root so the default `BD_ASSET_*` paths resolve. birdie runs on ludica and the gallery on GLES, so both backends stay exercised.
 
+`examples/` is a **separate modular-make project** (it carries its own copy of `GNUmakefile`) so the main build never depends on example-only libraries like SDL3. Build the examples with `cd examples && make`; they pull the toolkit sources from `../src`. The SDL3 example (`examples/sdl3/`) needs SDL3 (`pkg-config sdl3`); run its binary from the repo root so `BD_ASSET_*` paths resolve.
+
 `make dist` stages the full birdie-gui toolkit into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`: public headers (`include/`), the implementation + reference ludica backend (`src/`), the raw X11/EGL/GLES backend + standalone gallery (`backend-gles/`), vendored stb single-headers (`thirdparty/stb/`), and runtime assets (chrome TTF + license, CP437 atlas, pushpins). Override the version with `make dist GUI_VERSION=x.y.z` (default `0.3.1`). The bundle compiles standalone (only external deps: libvt for the terminal widget, and ludica only if using its backend); the README has the gallery build command. Both `dist` and `widget-test` live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
 
 Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each directory has a `module.mk`; the top-level one controls which SUBDIRS are pulled in.
@@ -31,6 +33,7 @@ Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each
 
 - `src/birdie/` — birdie app + the birdie-gui toolkit: `main.c`, the widget core (`widget.{c,h}`, `widget_ext.h`), renderer (`bd_draw.{c,h}`), backend interface (`bd_backend.h`) + ludica backend (`bd_backend_ludica.{c,h}`), theme (`bd_theme.h`), and the extension widgets (`bd_widget_vt.*` terminal, `bd_widget_value.*`, `bd_widget_explorer.*`)
 - `src/guitest/` — standalone widget gallery (`widget_test.c`) + the raw X11/EGL/GLES backend (`window.h`, `x11_window.c`, `bd_backend_gles.*`); built by `make widget-test`
+- `examples/` — separate modular-make project (own `GNUmakefile`) for host examples; `examples/sdl3/` hosts the toolkit on an SDL3 window + GLES3 context (`sdl3_example.c`, self-contained backend + demo UI). Build with `cd examples && make`.
 - `src/birdie/assets/` — chrome TTF (DejaVuSans), CP437 terminal font atlases, pushpin sprites
 - `src/thirdparty/ludica/` — vendored ludica (rendering, input, audio, networking)
 - `src/thirdparty/stb/` — vendored stb_truetype + stb_image

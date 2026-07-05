@@ -324,7 +324,10 @@ your backend to `bd_gui_init`. The toolkit owns the renderer
 glyph atlas), so a backend supplies GPU plumbing, not drawing primitives.
 Shaders are GLES3 (`#version 300 es`); alpha blending is on.
 `bd_backend_ludica.c` is the reference; a raw X11/EGL/GLES backend lives in
-`src/guitest/` (which also has a standalone widget gallery).
+`src/guitest/` (which also has a standalone widget gallery), and a self-contained
+SDL3 backend + demo host is in `examples/sdl3/sdl3_example.c` (built as a
+separate project: `cd examples && make`), a good copy-and-adapt starting point
+for a new windowing library.
 
 **Clipboard (optional).** Provide `clipboard_set(utf8)` / `clipboard_get()`
 and the text fields gain Ctrl-C/X/V; the GLES backend implements them on the
