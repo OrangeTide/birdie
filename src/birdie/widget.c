@@ -110,6 +110,7 @@ static bd_id windows[MAX_WINDOWS];
 static int   window_count;
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
+static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer */
 /* per-finger capture: each active touch id grabs the widget it landed on, so
  * several widgets (e.g. knobs) can be dragged at once */
 #define MAX_TOUCHES 10
@@ -927,6 +928,8 @@ bd_destroy(bd_id id)
 		active_press = BD_NONE;
 	if (pointer_capture == id)
 		pointer_capture = BD_NONE;
+	if (hover_ext == id)
+		hover_ext = BD_NONE;
 	w->alive = 0;
 }
 
@@ -1443,7 +1446,7 @@ render_widget(bd_id id)
 	int leaf = (w->type == BD_MENU || is_text_field(w->type) ||
 	    w->type == BD_LIST || w->type == BD_TAB_BAR ||
 	    w->type == BD_SCROLLBAR ||
-	    (cls && !cls->contains_children));
+	    (cls && !(cls->flags & BD_WC_CONTAINS_CHILDREN)));
 	if (!leaf) {
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
@@ -1522,6 +1525,31 @@ ext_event(bd_id id, const bd_event *ev)
 {
 	const bd_widget_class *cls = class_of(pool[id].type);
 	return (cls && cls->event) ? cls->event(id, pool[id].state, ev) : 0;
+}
+
+static int
+wants_hover(bd_id id)
+{
+	const bd_widget_class *cls = class_of(pool[id].type);
+	return cls && (cls->flags & BD_WC_WANTS_HOVER);
+}
+
+/* Deliver a plain (uncaptured) mouse-move to the wants_hover extension widget
+ * under the pointer, so it can drive hover effects. When the pointer leaves for
+ * a different (or no) widget, the move is also delivered to the one it left, so
+ * that widget sees the coords go outside its rect and can clear its hover. */
+static void
+deliver_hover_move(bd_id frame, const bd_event *ev)
+{
+	bd_id cur = hit_extension(frame, ev->x, ev->y);
+	if (cur != BD_NONE && !wants_hover(cur))
+		cur = BD_NONE;
+	if (hover_ext != BD_NONE && hover_ext != cur &&
+	    pool[hover_ext].alive && wants_hover(hover_ext))
+		ext_event(hover_ext, ev);
+	if (cur != BD_NONE)
+		ext_event(cur, ev);
+	hover_ext = cur;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2286,6 +2314,7 @@ bd_gui_cleanup(void)
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
+	hover_ext = BD_NONE;
 	pen_capture = BD_NONE;
 	drag_menu = BD_NONE;
 	focus_id = BD_NONE;
@@ -3068,6 +3097,7 @@ bd_gui_event(const bd_event *ev)
 			return 1;
 		}
 		update_hover(frame, ev->x, ev->y);
+		deliver_hover_move(frame, ev);
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL: {

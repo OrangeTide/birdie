@@ -16,6 +16,25 @@
  */
 
 /*
+ * Capability flags for a widget class (bd_widget_class.flags). Behavioral
+ * toggles, OR'd together. Keep them additive across versions (assign new bits;
+ * never repurpose an old one) so a class can compose a default set from a macro
+ * and pick up later additions on recompile.
+ */
+typedef uint64_t bd_widget_flags;
+enum {
+	/* core recurses into the widget's children (lays them out / renders /
+	 * routes events); the default (bit clear) treats the widget as a leaf. */
+	BD_WC_CONTAINS_CHILDREN = 1ull << 0,
+
+	/* also deliver BD_EV_MOUSE_MOVE while the widget is merely hovered, not
+	 * only during a captured drag, so it can do hover effects / tooltips. The
+	 * move whose coords leave the widget is delivered too, so it can clear the
+	 * hover. */
+	BD_WC_WANTS_HOVER       = 1ull << 1,
+};
+
+/*
  * Per-type behavior. All hooks are optional (NULL = no-op). `state` points at
  * the per-instance block the core allocates (state_size bytes, zeroed) and
  * frees; reach it later with bd_widget_state().
@@ -37,8 +56,8 @@ typedef struct bd_widget_class {
 	void (*layout) (bd_id id, void *state, int w, int h); /* content size */
 	int  (*event)  (bd_id id, void *state, const bd_event *ev); /* 1=consumed */
 
-	int   contains_children; /* 0 = core does not recurse into children */
-	void *reserved;          /* future: custom-attribute hook */
+	bd_widget_flags flags;   /* BD_WC_* capability bits, OR'd together */
+	void           *reserved;/* future: custom-attribute hook */
 } bd_widget_class;
 
 /* Register a class; returns a fresh type id to pass to bd_create*(). */

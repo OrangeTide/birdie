@@ -253,7 +253,6 @@ static const bd_widget_class vt_class = {
 	.render            = vt_render,
 	.layout            = vt_layout,
 	.event             = vt_event,
-	.contains_children = 0,
 };
 
 /* ------------------------------------------------------------------ */
