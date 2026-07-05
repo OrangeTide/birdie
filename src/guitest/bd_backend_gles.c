@@ -78,12 +78,6 @@ static void
 be_clear(float r, float g, float b, float a)
 {
 	gl_lazy_init();
-	/* establish 2D UI render state each frame: alpha blend, no depth or
-	 * face culling (UI quads come in either winding) */
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
 	glClearColor(r, g, b, a);
 	glClear(GL_COLOR_BUFFER_BIT);
 }
@@ -194,6 +188,14 @@ be_draw_verts(const bd_vertex *verts, int count)
 	if (count <= 0)
 		return;
 	gl_lazy_init();
+	/* establish 2D UI render state for the draw: alpha blend, no depth or
+	 * face culling (UI quads come in either winding). Done here rather than in
+	 * clear so the toolkit renders correctly even when clear is NULL (a
+	 * compositing host owning the frame). */
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
 	glBindVertexArray(gl.vao);
 	glBindBuffer(GL_ARRAY_BUFFER, gl.vbo);
 	if (count > gl.vbo_cap) {

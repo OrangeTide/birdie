@@ -2513,7 +2513,8 @@ static void
 render_frame(bd_id frame, int w, int h)
 {
 	be->viewport(0, 0, w, h);
-	be->clear(0.0f, 0.0f, 0.0f, 1.0f);
+	if (be->clear)   /* optional: a compositing host clears the frame itself */
+		be->clear(0.0f, 0.0f, 0.0f, 1.0f);
 
 	/* layer 1: main widget tree */
 	bd_draw_begin(w, h);

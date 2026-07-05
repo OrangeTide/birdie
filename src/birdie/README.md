@@ -309,11 +309,14 @@ is the reference for a stateful, libvt-backed one.
 
 Implement the `bd_backend` GPU interface in `bd_backend.h`:
 
-- window/frame: `width`, `height`, `time`, `viewport`, `clear`
+- window/frame: `width`, `height`, `time`, `viewport`, `clear` (optional: leave
+  NULL to clear the frame yourself, e.g. to composite the UI over a 3D scene)
 - shaders: `make_shader` / `destroy_shader` / `use_shader` and the
   `set_uniform_*` setters
 - geometry: `draw_verts` (a triangle list of `bd_vertex`, layout
-  `a_pos`/`a_uv`/`a_col` at locations 0/1/2)
+  `a_pos`/`a_uv`/`a_col` at locations 0/1/2); it also sets the 2D render state
+  (blend on, depth/cull off), so the UI renders correctly whether or not
+  `clear` ran
 - textures: `load_texture` / `make_texture` / `update_texture` / `bind_texture`
   / `destroy_texture`
 - clipping: `scissor` / `scissor_off`

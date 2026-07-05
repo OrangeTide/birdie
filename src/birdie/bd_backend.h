@@ -128,7 +128,9 @@ typedef struct {
  *
  * Coordinates are pixels, origin top-left. Shaders consume the bd_vertex
  * attributes by name at locations 0,1,2: a_pos (vec2), a_uv (vec2),
- * a_col (vec4). Alpha blending is enabled by the backend.
+ * a_col (vec4). The backend establishes the 2D UI render state (alpha blend
+ * on, depth test and face culling off) as part of draw_verts, not as a side
+ * effect of clear, so a host that owns the frame can leave clear NULL.
  */
 typedef struct bd_backend {
 	/* frame / window */
@@ -136,6 +138,11 @@ typedef struct bd_backend {
 	int    (*height)(void);
 	double (*time)(void);                       /* monotonic seconds */
 	void   (*viewport)(int x, int y, int w, int h);
+	/* Clear the frame to the given color at the start of each rendered
+	 * window. Optional: leave NULL when the host clears the framebuffer
+	 * itself (e.g. it draws a 3D background first and composites the UI on
+	 * top). draw_verts sets the render state regardless, so a NULL clear
+	 * costs nothing but the buffer clear. */
 	void   (*clear)(float r, float g, float b, float a);
 
 	/* shaders */
@@ -151,7 +158,9 @@ typedef struct bd_backend {
 	void (*set_uniform_mat4) (bd_shader sh, const char *name, const float m[16]);
 
 	/* draw a triangle list of `count` vertices with the bound shader and
-	 * texture unit 0. The backend owns vertex-buffer management. */
+	 * texture unit 0. The backend owns vertex-buffer management and sets the
+	 * 2D UI render state (alpha blend on, depth test and cull off) here, so
+	 * the toolkit renders correctly whether or not clear ran this frame. */
 	void (*draw_verts)(const bd_vertex *verts, int count);
 
 	/* textures */

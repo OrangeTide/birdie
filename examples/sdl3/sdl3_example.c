@@ -12,11 +12,12 @@
  * the raw X11/EGL/GLES gallery (src/guitest/): the toolkit and renderer are
  * untouched, only the bd_backend vtable and the SDL event translation change.
  *
- * Layering trick: the toolkit renders the whole UI in one pass that normally
- * begins by clearing the framebuffer. Here the *host* owns the clear and draws
- * the 3D scene first, so this backend's clear() is a deliberate no-op and the
- * UI composites over the 3D. The toolkit's root frame is transparent (bg alpha
- * 0), so only the opaque subwindow and text land on top of the tetrahedron.
+ * Layering: the toolkit renders the whole UI in one pass that normally begins
+ * by clearing the framebuffer. Here the *host* owns the frame; each iteration
+ * it clears, draws the 3D scene, then lets the toolkit composite the UI. So
+ * this backend leaves clear NULL (the toolkit skips it) and the UI draws over
+ * the 3D. The toolkit's root frame is transparent (bg alpha 0), so only the
+ * opaque subwindow and text land on top of the tetrahedron.
  *
  * The examples are a separate modular-make project (examples/ has its own copy
  * of GNUmakefile) so the main birdie build never depends on SDL3. Build and run
@@ -115,21 +116,10 @@ static double be_time(void) { return SDL_GetTicks() / 1000.0; }
 
 static void be_viewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
 
-/* The host clears the framebuffer and draws the 3D background itself (see
- * main()), so the toolkit's per-frame clear only re-establishes the 2D UI
- * render state and leaves the color/depth buffers intact. That is what lets the
- * UI composite on top of the tetrahedron. The r/g/b/a here are intentionally
- * ignored. */
-static void
-be_clear(float r, float g, float b, float a)
-{
-	(void)r; (void)g; (void)b; (void)a;
-	gl_lazy_init();
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-}
+/* No clear hook: the host clears the framebuffer and draws the 3D background
+ * itself each frame (see main()), so the toolkit's optional clear is left NULL
+ * and the UI composites on top of the tetrahedron. draw_verts establishes the
+ * 2D render state, so the UI still renders correctly. */
 
 /* ------------------------------------------------------------------ */
 /* shaders                                                            */
@@ -237,6 +227,13 @@ be_draw_verts(const bd_vertex *verts, int count)
 	if (count <= 0)
 		return;
 	gl_lazy_init();
+	/* establish 2D UI render state for the draw: alpha blend, no depth or
+	 * cull. The host left depth testing on for the 3D scene, so resetting it
+	 * here (rather than relying on clear) is what lets the UI draw on top. */
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
 	glBindVertexArray(S.vao);
 	glBindBuffer(GL_ARRAY_BUFFER, S.vbo);
 	if (count > S.vbo_cap) {
@@ -375,7 +372,7 @@ static const bd_backend backend = {
 	.height            = be_height,
 	.time              = be_time,
 	.viewport          = be_viewport,
-	.clear             = be_clear,
+	.clear             = NULL,       /* host owns the frame clear (3D bg) */
 	.make_shader       = be_make_shader,
 	.destroy_shader    = be_destroy_shader,
 	.use_shader        = be_use_shader,

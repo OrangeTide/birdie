@@ -29,10 +29,12 @@ host presents the frame itself with `SDL_GL_SwapWindow()`.
 
 The toolkit renders its whole UI in one pass that normally begins by clearing
 the framebuffer. Here the *host* owns the frame instead: each iteration it
-clears, draws the 3D tetrahedron, then calls `bd_gui_render()`. So this
-backend's `clear()` is a deliberate no-op, and the toolkit's root frame is
-transparent (`BD_BG_C` alpha 0) so only the opaque subwindow and text land on
-top of the tetrahedron.
+clears, draws the 3D tetrahedron, then calls `bd_gui_render()`. So this backend
+leaves `clear` NULL, which the toolkit treats as "the host clears the frame
+itself" and skips. The 2D render state (blend on, depth off) is set in
+`draw_verts`, not `clear`, so the UI still draws correctly over the 3D. The
+toolkit's root frame is transparent (`BD_BG_C` alpha 0) so only the opaque
+subwindow and text land on top of the tetrahedron.
 
 The floating subwindow uses toolkit primitives directly: a `BD_LAYOUT_FIXED`
 root positions the subwindow panel by `BD_X_I`/`BD_Y_I`, minimize toggles the
@@ -67,8 +69,9 @@ To host birdie-gui on any other windowing library, copy this file and replace:
 - `translate()` with your library's native-event → `bd_event` mapping.
 
 The GLES3 GPU half is generic and can be kept as-is on any GLES-capable
-context. For a plain UI app with no 3D background, make `clear()` actually
-`glClear()` (and drop the host-side clear + 3D draw). See `src/birdie/README.md`
-("Porting to another backend") for the full `bd_backend` contract.
+context. For a plain UI app with no 3D background, provide a real `clear`
+(`glClearColor` + `glClear`) and drop the host-side clear + 3D draw. See
+`src/birdie/README.md` ("Porting to another backend") for the full `bd_backend`
+contract.
 
 Made by a machine. PUBLIC DOMAIN (CC0-1.0)

@@ -22,11 +22,6 @@ static void be_viewport(int x, int y, int w, int h) { lud_viewport(x, y, w, h); 
 static void
 be_clear(float r, float g, float b, float a)
 {
-	/* establish 2D UI render state each frame: alpha blend, no depth or
-	 * face culling (UI quads are drawn in either winding) */
-	lud_blend(LUD_BLEND_ALPHA);
-	lud_depth_test(0);
-	lud_cull(LUD_CULL_NONE);
 	lud_clear(r, g, b, a);
 }
 
@@ -72,6 +67,13 @@ be_draw_verts(const bd_vertex *verts, int count)
 {
 	if (count <= 0)
 		return;
+	/* establish 2D UI render state for the draw: alpha blend, no depth or
+	 * face culling (UI quads are drawn in either winding). Done here rather
+	 * than in clear so the toolkit renders correctly even when clear is NULL
+	 * (a compositing host owning the frame). */
+	lud_blend(LUD_BLEND_ALPHA);
+	lud_depth_test(0);
+	lud_cull(LUD_CULL_NONE);
 	if (batch_mesh.id == 0) {
 		lud_mesh_desc_t desc = {
 			.vertices = verts,
