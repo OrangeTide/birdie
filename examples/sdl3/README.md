@@ -9,9 +9,18 @@ gallery (`src/guitest/`): the toolkit and renderer are untouched, only the
 
 The window shows a **rotatable 3D tetrahedron** drawn with raw GLES3 as the
 background, and a birdie-gui UI composited on top: a **floating terminal
-subwindow** you can drag by its title bar and **minimize** to just the title
-bar, plus a hint line. Drag anywhere over the 3D background to rotate the
-tetrahedron; the mouse wheel zooms.
+subwindow** you can drag by its title bar and **minimize**, and an **inventory
+grid** (`bd_widget_inventory`) whose "Relic" cell shows the same spinning model.
+Drag anywhere over the 3D background to rotate the tetrahedron; the mouse wheel
+zooms; drag inventory items between slots.
+
+The Relic cell demonstrates the **"host renders to a texture"** path a
+backend-neutral widget relies on: each frame the example renders the spinning
+tetrahedron into an offscreen framebuffer (`relic_init` / `relic_render`) and
+hands that texture to the cell as its icon. The widget only ever blits
+`item.icon`, so it never has to know about 3D; animation is just the host
+updating the texture. (Y is flipped in the offscreen pass so the FBO image,
+sampled top-left-origin by the 2D toolkit, comes out upright.)
 
 Everything the backend needs lives in the single file `sdl3_example.c`:
 

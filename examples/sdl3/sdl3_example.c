@@ -4,9 +4,10 @@
  *
  * The window shows a rotatable 3D tetrahedron drawn with raw GLES3 as the
  * background, and a birdie-gui UI composited on top: a floating "terminal"
- * subwindow you can drag by its title bar and minimize, plus a hint line.
- * Drag anywhere over the 3D background to rotate the tetrahedron; the mouse
- * wheel zooms.
+ * subwindow you can drag by its title bar and minimize, and an inventory grid
+ * whose "Relic" cell shows the same spinning model rendered into an FBO texture
+ * each frame (the "host renders to a texture" path a backend-neutral widget
+ * relies on). Drag anywhere over the background to rotate it; the wheel zooms.
  *
  * It is a third reference backend alongside ludica (bd_backend_ludica.c) and
  * the raw X11/EGL/GLES gallery (src/guitest/): the toolkit and renderer are
@@ -37,6 +38,7 @@
 #include "widget_ext.h"     /* bd_widget_rect */
 #include "bd_backend.h"
 #include "bd_widget_vt.h"
+#include "bd_widget_inventory.h"
 
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
@@ -557,17 +559,12 @@ tet_init(void)
 	glBindVertexArray(0);
 }
 
-/* Draw the tetrahedron into the full window at the given rotation and camera
- * distance. Leaves depth testing on; the toolkit's clear() turns it back off
- * before the UI draws. */
+/* Build the MVP and submit the tetrahedron to whatever framebuffer/viewport is
+ * current. flip_y mirrors clip-space Y, needed when rendering into an FBO
+ * texture that the 2D toolkit samples top-left-origin (see relic_render). */
 static void
-tet_draw(float rot_x, float rot_y, float cam_dist, int w, int h)
+tet_submit(float rot_x, float rot_y, float cam_dist, float aspect, int flip_y)
 {
-	glViewport(0, 0, w, h);
-	glEnable(GL_DEPTH_TEST);
-	glDisable(GL_BLEND);
-	glDisable(GL_CULL_FACE);   /* two-sided lighting; winding-agnostic */
-
 	float rx[16], ry[16], model[16], view[16], proj[16], vm[16], mvp[16];
 	mat4_rot_x(rx, rot_x);
 	mat4_rot_y(ry, rot_y);
@@ -576,8 +573,9 @@ tet_draw(float rot_x, float rot_y, float cam_dist, int w, int h)
 	mat4_identity(view);
 	M(view, 2, 3) = -cam_dist;               /* translate along -Z */
 
-	float aspect = h > 0 ? (float)w / (float)h : 1.0f;
 	mat4_perspective(proj, 0.8f, aspect, 0.1f, 100.0f);
+	if (flip_y)
+		M(proj, 1, 1) = -M(proj, 1, 1);
 
 	mat4_mul(vm, view, model);
 	mat4_mul(mvp, proj, vm);
@@ -589,6 +587,77 @@ tet_draw(float rot_x, float rot_y, float cam_dist, int w, int h)
 	glBindVertexArray(tet.vao);
 	glDrawArrays(GL_TRIANGLES, 0, tet.verts);
 	glBindVertexArray(0);
+}
+
+/* Draw the tetrahedron into the full window at the given rotation and camera
+ * distance. Leaves depth testing on; the toolkit's clear() turns it back off
+ * before the UI draws. */
+static void
+tet_draw(float rot_x, float rot_y, float cam_dist, int w, int h)
+{
+	glViewport(0, 0, w, h);
+	glEnable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);   /* two-sided lighting; winding-agnostic */
+	tet_submit(rot_x, rot_y, cam_dist, h > 0 ? (float)w / (float)h : 1.0f, 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* animated 3D "relic": the tetrahedron rendered into an FBO texture   */
+/* each frame, so an inventory cell can show a live, spinning model.   */
+/* This is the "host renders to a texture" path a backend-neutral      */
+/* widget relies on: bd_widget_inventory only ever blits item.icon.    */
+/* ------------------------------------------------------------------ */
+
+#define RELIC_SZ 128
+
+static struct {
+	GLuint fbo, tex, depth;
+} relic;
+
+static void
+relic_init(void)
+{
+	glGenTextures(1, &relic.tex);
+	glBindTexture(GL_TEXTURE_2D, relic.tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, RELIC_SZ, RELIC_SZ, 0, GL_RGBA,
+	    GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glGenRenderbuffers(1, &relic.depth);
+	glBindRenderbuffer(GL_RENDERBUFFER, relic.depth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
+	    RELIC_SZ, RELIC_SZ);
+
+	glGenFramebuffers(1, &relic.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, relic.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+	    GL_TEXTURE_2D, relic.tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	    GL_RENDERBUFFER, relic.depth);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		fprintf(stderr, "sdl3: relic FBO incomplete\n");
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* Render the spinning tetrahedron into relic.tex. Y is flipped so the result,
+ * sampled by the toolkit as a top-left-origin sprite, appears upright. */
+static void
+relic_render(float angle)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, relic.fbo);
+	glViewport(0, 0, RELIC_SZ, RELIC_SZ);
+	glDisable(GL_SCISSOR_TEST);
+	glEnable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);   /* transparent: cell bg shows through */
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	tet_submit(angle * 0.5f, angle, 3.0f, 1.0f, 1);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -739,6 +808,70 @@ on_submit(bd_id id, void *arg)
 	report(line);
 }
 
+/* ---- inventory grid: an RPG bag, one cell holding the live 3D relic ---- */
+
+static bd_texture inv_icons[3];   /* static item icons */
+static struct bag_slot { const char *name; bd_texture icon; int count; }
+    inv_bag[16];
+
+/* a 32x32 solid-color icon with a darker border, uploaded as a texture */
+static bd_texture
+make_icon(unsigned rgba)
+{
+	unsigned char px[32 * 32 * 4];
+	unsigned edge = ((rgba >> 1) & 0x7F7F7F00u) | 0xFFu;
+	for (int y = 0; y < 32; y++)
+		for (int x = 0; x < 32; x++) {
+			unsigned c = (x < 2 || x > 29 || y < 2 || y > 29) ? edge : rgba;
+			unsigned char *p = px + (y * 32 + x) * 4;
+			p[0] = (c >> 24) & 0xFF; p[1] = (c >> 16) & 0xFF;
+			p[2] = (c >> 8) & 0xFF;  p[3] = c & 0xFF;
+		}
+	return backend.make_texture(32, 32, px);
+}
+
+static void
+inv_get(void *ctx, int slot, bd_inventory_item *out)
+{
+	(void)ctx;
+	if (slot < 0 || slot >= 16 || !inv_bag[slot].name)
+		return;
+	out->key     = (uint64_t)(slot + 1);
+	out->label   = inv_bag[slot].name;
+	out->icon    = inv_bag[slot].icon;
+	out->count   = inv_bag[slot].count;
+	out->enabled = 1;
+	out->tooltip = inv_bag[slot].name;
+}
+static void
+inv_activate(bd_id w, int slot, uint64_t key, void *ctx)
+{
+	(void)w; (void)key; (void)ctx;
+	char b[64];
+	snprintf(b, sizeof b, "use %s (slot %d)",
+	    inv_bag[slot].name ? inv_bag[slot].name : "?", slot);
+	report(b);
+}
+static void
+inv_context(bd_id w, int slot, uint64_t key, int sx, int sy, void *ctx)
+{
+	(void)w; (void)key; (void)sx; (void)sy; (void)ctx;
+	char b[48];
+	snprintf(b, sizeof b, "right-click slot %d", slot);
+	report(b);
+}
+static void
+inv_move(bd_id w, int from, int to, void *ctx)
+{
+	(void)w; (void)ctx;
+	struct bag_slot t = inv_bag[to];   /* swap the two slots */
+	inv_bag[to] = inv_bag[from];
+	inv_bag[from] = t;
+	char b[48];
+	snprintf(b, sizeof b, "moved slot %d -> %d", from, to);
+	report(b);
+}
+
 static void
 build_ui(void)
 {
@@ -752,7 +885,7 @@ build_ui(void)
 
 	bd_create(root, BD_LABEL,
 	    BD_LABEL_S, "Drag the tetrahedron to rotate  -  wheel to zoom  -  "
-	                "drag the title bar to move the terminal, _ to minimize",
+	                "the Relic cell shows the same model rendered to a texture",
 	    BD_X_I, 12, BD_Y_I, 10, BD_PREF_W_I, 900, BD_PREF_H_I, 18,
 	    BD_BG_C, 0x00000000u, BD_FG_C, 0xE8ECF0FFu,
 	    BD_END);
@@ -789,6 +922,36 @@ build_ui(void)
 	term_input = bd_create(subwin, BD_INPUT_LINE,
 	    BD_PREF_H_I, 26, BD_ON_CLICK_F, on_submit,
 	    BD_END);
+
+	/* Inventory subwindow. Slot 0 holds the live 3D relic (its icon is the
+	 * FBO texture updated each frame in the main loop); the rest are static
+	 * items. Drag between slots, right-click, wheel to scroll, hover for a
+	 * tooltip. */
+	inv_icons[0] = make_icon(0xD24B4BFFu);   /* potion  */
+	inv_icons[1] = make_icon(0xE8C24AFFu);   /* gold    */
+	inv_icons[2] = make_icon(0x6FB36FFFu);   /* herb    */
+	inv_bag[0] = (struct bag_slot){ "Relic",  (bd_texture){ relic.tex }, 1  };
+	inv_bag[1] = (struct bag_slot){ "Potion", inv_icons[0], 5  };
+	inv_bag[2] = (struct bag_slot){ "Gold",   inv_icons[1], 99 };
+	inv_bag[4] = (struct bag_slot){ "Herb",   inv_icons[2], 12 };
+
+	bd_id invwin = bd_create(root, BD_PANEL,
+	    BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_X_I, 720, BD_Y_I, 70,
+	    BD_PREF_W_I, 260, BD_PREF_H_I, 250,
+	    BD_PAD_I, 0, BD_GAP_I, 0,
+	    BD_END);
+	bd_id invbar = bd_create(invwin, BD_PANEL,
+	    BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, TITLE_H, BD_PAD_I, 3,
+	    BD_BG_C, 0x2A3340FFu, BD_END);
+	bd_create(invbar, BD_LABEL, BD_LABEL_S, "Inventory", BD_GROW_I, 1,
+	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
+	bd_id inv = bd_inventory_create(invwin, 4, 4,
+	    &(bd_inventory_model){ .get = inv_get },
+	    &(bd_inventory_cb){ .activate = inv_activate, .context = inv_context,
+	        .move = inv_move },
+	    BD_GROW_I, 1, BD_END);
+	bd_inventory_set_cell_size(inv, 44);
 }
 
 /* ------------------------------------------------------------------ */
@@ -838,8 +1001,9 @@ main(void)
 	SDL_GL_SetSwapInterval(1);   /* vsync */
 
 	bd_gui_init(&backend, NULL);   /* NULL theme = defaults */
-	build_ui();
 	tet_init();
+	relic_init();
+	build_ui();
 
 	/* Host-side drag state: the toolkit consumes events over its widgets; an
 	 * unconsumed left-drag either moves the subwindow (started on the title
@@ -919,6 +1083,11 @@ main(void)
 
 		int w = be_width(), h = be_height();
 
+		/* Update the inventory relic's texture: render the spinning model into
+		 * its FBO before the UI draws, so the inventory cell blits a fresh
+		 * frame. */
+		relic_render((float)now);
+
 		/* The host owns the frame: clear, draw the 3D background, then let
 		 * the toolkit composite the UI on top (its clear() is a no-op). */
 		glDisable(GL_SCISSOR_TEST);
@@ -932,6 +1101,9 @@ main(void)
 	}
 
 	bd_gui_cleanup();
+	glDeleteFramebuffers(1, &relic.fbo);
+	glDeleteTextures(1, &relic.tex);
+	glDeleteRenderbuffers(1, &relic.depth);
 	if (S.clip)
 		SDL_free(S.clip);
 	SDL_GL_DestroyContext(S.ctx);
