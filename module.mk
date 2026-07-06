@@ -88,6 +88,7 @@ dist :
 	    $(DIST_SRC)/assets/pushpin/pushpin-in-14.png $(DIST_STAGE)/assets/pushpin/
 	@cp $(DIST_SRC)/README.md $(DIST_STAGE)/
 	@cp $(DIST_SRC)/LICENSE.txt $(DIST_STAGE)/
+	@cp $(DIST_SRC)/dist-module.mk $(DIST_STAGE)/module.mk
 	@cp scripts/get-birdie-gui.sh $(DIST_STAGE)/
 	@printf '%s\n' \
 	    'birdie-gui $(GUI_VERSION)' \
@@ -100,6 +101,7 @@ dist :
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
 	    '  assets/         chrome TTF (+ license), CP437 terminal atlas, pushpins' \
+	    '  module.mk       backend-agnostic modular-make library build' \
 	    '  LICENSE.txt     CC0 dedication + bundled third-party licenses' \
 	    '  get-birdie-gui.sh  vendoring updater (fetch a release into your project)' \
 	    '' \

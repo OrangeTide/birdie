@@ -41,6 +41,42 @@ scripts/get-birdie-gui.sh 0.4.0            # into third_party/birdie-gui by defa
 scripts/get-birdie-gui.sh --help           # options and environment variables
 ```
 
+## Building
+
+The bundle ships a top-level `module.mk` for
+[modular-make](https://github.com/OrangeTide/modular-make). It builds the
+toolkit as a backend-agnostic static library, `birdie_gui`: the widget core,
+the renderer, and the extension widgets, and no backend. Add the vendored
+directory to your project's `SUBDIRS`, then list `birdie_gui` in your
+executable's `LIBS` (along with a backend and, for the terminal widget,
+`libvt`):
+
+```makefile
+SUBDIRS += third_party/birdie-gui
+
+myapp_SRCS = main.c bd_backend_ludica.c   # your host + a backend
+myapp_LIBS = birdie_gui bd_vt             # + ludica/SDL/... for the backend
+```
+
+`module.mk` exports its `include/` path, so `#include "widget.h"` and the rest
+of the public API resolve with no extra `-I`. It builds no backend, so drop
+`bd_backend_ludica.c` (from the bundle's `src/`) or another backend into your
+own target; see "Porting to another backend" below.
+
+The terminal widget (`bd_widget_vt.c`) is the one source that needs `libvt`; it
+is built by default. If your project does not provide `libvt`, build without it
+and leave `bd_vt` out of `LIBS`:
+
+```sh
+make BIRDIE_GUI_VT=0
+```
+
+Not using modular-make? The library is nine `.c` files under `src/` (all but
+`bd_backend_ludica.c`). Compile them with `-Iinclude -Ithirdparty/stb`, adding
+`-I<libvt>` only if you keep `bd_widget_vt.c`. The gallery command under
+"Bundled X11/GLES backend and gallery" shows the full compile of the library
+plus a backend in one line.
+
 ## Usage
 
 A minimal app using the reference ludica backend. The host owns the main loop
