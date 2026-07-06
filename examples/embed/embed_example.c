@@ -1,13 +1,14 @@
 /*
  * embed_example.c -- a self-contained birdie-gui binary with no asset files.
  *
- * The chrome font, pushpin sprites, and terminal atlas are compiled into the
- * executable (see embed_assets.S) and handed to the toolkit through the
- * registry in bd_asset.h. The toolkit asks for each asset by a generic id
- * (BD_ASSET_FONT_REGULAR, BD_ASSET_PUSHPIN_OUT, ...), so a custom font is
- * registered under BD_ASSET_FONT_REGULAR -- not under the stock font's filename.
- * Nothing here impersonates "DejaVuSans.ttf". This is the same trick a
- * distributed game uses to ship one file.
+ * The chrome font, pushpin sprites, terminal atlas, and the monospace family
+ * the body editor renders (regular, bold, italic) are compiled into the
+ * executable (see embed_assets.S) and handed to the toolkit through the registry
+ * in bd_asset.h. The toolkit asks for each asset by a generic id
+ * (BD_ASSET_FONT_REGULAR, BD_ASSET_FONT_MONO_BOLD, BD_ASSET_PUSHPIN_OUT, ...), so
+ * a custom font is registered under BD_ASSET_FONT_REGULAR -- not under the stock
+ * font's filename. Nothing here impersonates "DejaVuSans.ttf". This is the same
+ * trick a distributed game uses to ship one file.
  *
  * Each id can be fed bytes (bd_asset_register_data, as here) or a file path
  * (bd_asset_register_file) -- e.g. to let a user pick their own font at runtime
@@ -38,6 +39,7 @@
 
 #include "widget.h"
 #include "bd_widget_vt.h"
+#include "bd_widget_editor.h"
 #include "bd_asset.h"
 #include "bd_backend_gles.h"
 #include "window.h"
@@ -54,19 +56,27 @@ EMB(emb_font_ui)
 EMB(emb_pin_out)
 EMB(emb_pin_in)
 EMB(emb_term_atlas)
+EMB(emb_font_mono)
+EMB(emb_font_mono_bold)
+EMB(emb_font_mono_italic)
 
 /* Each blob paired with the generic asset id the toolkit requests it by. The id
  * is an identity, not a filename -- the font blob happens to be DejaVu Sans here
- * but is registered as "the regular UI font", so any .ttf/.otf would drop in. */
+ * but is registered as "the regular UI font", so any .ttf/.otf would drop in.
+ * The body editor renders the monospace family, so its three faces are embedded
+ * too, each under its own id -- that is how a real app ships a styled family. */
 static const struct embed {
 	const char          *id;
 	const unsigned char *data;
 	const unsigned char *end;
 } embeds[] = {
-	{ BD_ASSET_FONT_REGULAR, emb_font_ui,    emb_font_ui_end    },
-	{ BD_ASSET_PUSHPIN_OUT,  emb_pin_out,    emb_pin_out_end    },
-	{ BD_ASSET_PUSHPIN_IN,   emb_pin_in,     emb_pin_in_end     },
-	{ BD_ASSET_TERMINAL_FONT, emb_term_atlas, emb_term_atlas_end },
+	{ BD_ASSET_FONT_REGULAR,     emb_font_ui,          emb_font_ui_end          },
+	{ BD_ASSET_PUSHPIN_OUT,      emb_pin_out,          emb_pin_out_end          },
+	{ BD_ASSET_PUSHPIN_IN,       emb_pin_in,           emb_pin_in_end           },
+	{ BD_ASSET_TERMINAL_FONT,    emb_term_atlas,       emb_term_atlas_end       },
+	{ BD_ASSET_FONT_MONO,        emb_font_mono,        emb_font_mono_end        },
+	{ BD_ASSET_FONT_MONO_BOLD,   emb_font_mono_bold,   emb_font_mono_bold_end   },
+	{ BD_ASSET_FONT_MONO_ITALIC, emb_font_mono_italic, emb_font_mono_italic_end },
 };
 
 /* Register every embedded blob before the toolkit initializes, so its first
@@ -139,9 +149,21 @@ build_ui(void)
 	bd_id body = bd_create(frame, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
 		BD_GROW_I, 1, BD_PAD_I, 8, BD_GAP_I, 6, BD_END);
 	bd_create(body, BD_LABEL,
-		BD_LABEL_S, "This text is drawn from a font baked into the "
+		BD_LABEL_S, "This label is drawn from a font baked into the "
 		"executable. No .ttf or .png is read from disk.",
 		BD_PREF_H_I, 20, BD_END);
+
+	/* A rich-text editor renders the embedded monospace family: the regular,
+	 * bold, and italic mono faces each resolve from their own embedded blob,
+	 * which is why the example bakes in three mono faces, not just one. */
+	bd_id ed = bd_editor_create(body, BD_PREF_H_I, 60, BD_END);
+	bd_editor_set_monospace(ed, 1);
+	bd_editor_set_text(ed,
+		"This editor uses the embedded monospace font.\n"
+		"Bold and italic spans use the mono-bold and mono-italic faces.");
+	bd_editor_highlight_span(ed, 1, 0, 4, (bd_rich_style){ .flags = BD_RT_BOLD });
+	bd_editor_highlight_span(ed, 1, 9, 15, (bd_rich_style){ .flags = BD_RT_ITALIC });
+	bd_editor_set_locked(ed, 1);
 
 	bd_id term = bd_terminal_create(body, BD_GROW_I, 1, BD_END);
 	bd_terminal_write(term,

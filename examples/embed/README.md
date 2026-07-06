@@ -1,13 +1,19 @@
 # birdie-gui with assets embedded in the binary
 
-A minimal example host that ships as a **single self-contained executable**: the
-chrome font, the pushpin sprites, and the terminal's CP437 atlas are compiled
-into the binary instead of read from disk at runtime. It is the worked reference
-for `bd_asset.h`, the backend-neutral embedded-asset registry.
+A small example host that ships as a **single self-contained executable**: the
+chrome font, the pushpin sprites, the terminal's CP437 atlas, and the monospace
+family the body editor renders (regular + bold + italic) are all compiled into
+the binary instead of read from disk at runtime. It is the worked reference for
+`bd_asset.h`, the backend-neutral embedded-asset registry.
 
 It runs on the raw X11/EGL/GLES backend (`src/guitest/`), the same one the
 toolkit gallery uses, so it needs no ludica and no SDL3, only X11 + EGL +
 GLESv2.
+
+The window shows a menu bar (the pinnable menu draws the embedded pushpin), a
+label and a terminal (each drawing an embedded font/atlas), and a **rich-text
+editor** whose bold and italic spans pull the embedded `mono-bold` and
+`mono-italic` faces -- so every face the UI touches comes from a baked-in blob.
 
 ## How it works
 
@@ -27,11 +33,16 @@ Three pieces:
    bd_asset_register_data(BD_ASSET_FONT_REGULAR,  emb_font_ui,    emb_font_ui_end    - emb_font_ui);
    bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   emb_pin_out,    emb_pin_out_end    - emb_pin_out);
    bd_asset_register_data(BD_ASSET_TERMINAL_FONT, emb_term_atlas, emb_term_atlas_end - emb_term_atlas);
+   bd_asset_register_data(BD_ASSET_FONT_MONO,      emb_font_mono,      ...);  /* editor body */
+   bd_asset_register_data(BD_ASSET_FONT_MONO_BOLD, emb_font_mono_bold, ...);  /* bold spans   */
+   /* ...and BD_ASSET_FONT_MONO_ITALIC */
    ```
 
-   Note the font is registered as `BD_ASSET_FONT_REGULAR` -- *the regular UI
-   font*, an identity -- not as `"DejaVuSans.ttf"`. Any `.ttf`/`.otf` drops in
-   the same way; the id never ties you to a font family.
+   Note the regular font is registered as `BD_ASSET_FONT_REGULAR` -- *the regular
+   UI font*, an identity -- not as `"DejaVuSans.ttf"`. Any `.ttf`/`.otf` drops in
+   the same way; the id never ties you to a font family. A full styled family is
+   just one `bd_asset_register_data` per face, each under its own id -- the editor
+   here embeds the three mono faces it renders.
 
 3. The toolkit does the rest. It resolves each asset by id: a registered source
    (here, embedded data) wins over the built-in default file. `bd_draw.c`
@@ -40,10 +51,11 @@ Three pieces:
    to a file.
 
 The registered blobs are **borrowed** (a `.rodata` blob satisfies "must outlive
-use"), so there is nothing to free. To embed a full styled family, register the
-seven other `BD_ASSET_FONT_*` faces the same way; unregistered faces fall back to
-the regular one. Each id can equally take a file path
-(`bd_asset_register_file`), e.g. to load a user-chosen font at runtime.
+use"), so there is nothing to free. Register only the faces you draw: the chrome
+uses the regular proportional face, the editor the three mono faces, and the
+terminal its own atlas -- unregistered faces would fall back to the regular one.
+Each id can equally take a file path (`bd_asset_register_file`), e.g. to load a
+user-chosen font at runtime.
 
 ## Build paths and the binary
 

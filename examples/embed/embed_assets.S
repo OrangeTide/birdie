@@ -38,5 +38,27 @@ emb_term_atlas:
 	.incbin EMBED_TERM_ATLAS
 emb_term_atlas_end:
 
+/* The monospace family the body editor renders: regular, bold, italic. */
+	.global emb_font_mono
+	.global emb_font_mono_end
+	.balign 4
+emb_font_mono:
+	.incbin EMBED_FONT_MONO
+emb_font_mono_end:
+
+	.global emb_font_mono_bold
+	.global emb_font_mono_bold_end
+	.balign 4
+emb_font_mono_bold:
+	.incbin EMBED_FONT_MONO_BOLD
+emb_font_mono_bold_end:
+
+	.global emb_font_mono_italic
+	.global emb_font_mono_italic_end
+	.balign 4
+emb_font_mono_italic:
+	.incbin EMBED_FONT_MONO_ITALIC
+emb_font_mono_italic_end:
+
 /* Mark the stack non-executable (silences the GNU ld exec-stack warning). */
 	.section .note.GNU-stack,"",@progbits

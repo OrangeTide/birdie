@@ -23,11 +23,13 @@ embed_example_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 embed_ASSETS := $(embed_example_DIR)../../src/birdie-gui/assets
 
 # Toolkit sources this example actually uses: the widget core, the renderer, the
-# embedded-asset registry (bd_asset.c -- the piece that makes this work), and
-# the terminal widget. The GLES backend + X11 window come from src/guitest.
+# embedded-asset registry (bd_asset.c -- the piece that makes this work), the
+# terminal widget, and the rich-text editor (which renders the embedded
+# monospace family). The GLES backend + X11 window come from src/guitest.
 embed_example_TOOLKIT := \
     ../../src/birdie-gui/widget.c ../../src/birdie-gui/bd_draw.c \
-    ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_widget_vt.c
+    ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_widget_vt.c \
+    ../../src/birdie-gui/bd_widget_editor.c
 embed_example_BACKEND := \
     ../../src/guitest/bd_backend_gles.c ../../src/guitest/x11_window.c
 
@@ -53,5 +55,8 @@ embed_example_CPPFLAGS = \
     -DEMBED_FONT_UI='"$(embed_ASSETS)/fonts/DejaVuSans.ttf"' \
     -DEMBED_PIN_OUT='"$(embed_ASSETS)/pushpin/pushpin-out-14.png"' \
     -DEMBED_PIN_IN='"$(embed_ASSETS)/pushpin/pushpin-in-14.png"' \
-    -DEMBED_TERM_ATLAS='"$(embed_ASSETS)/font8x16.png"'
+    -DEMBED_TERM_ATLAS='"$(embed_ASSETS)/font8x16.png"' \
+    -DEMBED_FONT_MONO='"$(embed_ASSETS)/fonts/DejaVuSansMono.ttf"' \
+    -DEMBED_FONT_MONO_BOLD='"$(embed_ASSETS)/fonts/DejaVuSansMono-Bold.ttf"' \
+    -DEMBED_FONT_MONO_ITALIC='"$(embed_ASSETS)/fonts/DejaVuSansMono-Oblique.ttf"'
 embed_example_LDLIBS = -lX11 -lXi -lEGL -lGLESv2 -lm
