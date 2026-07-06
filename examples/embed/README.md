@@ -15,6 +15,8 @@ label and a terminal (each drawing an embedded font/atlas), and a **rich-text
 editor** whose bold and italic spans pull the embedded `mono-bold` and
 `mono-italic` faces -- so every face the UI touches comes from a baked-in blob.
 
+![The embed example: label and Quit button in the embedded proportional face, an editor showing the embedded mono-regular / mono-bold / mono-italic faces, and a terminal drawing the embedded CP437 atlas](../../doc/images/embed-example.png)
+
 ## How it works
 
 Three pieces:
