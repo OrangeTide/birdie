@@ -30,6 +30,7 @@ birdie_gui_DIR := $(_birdie_gui_DIR)
 birdie_gui_SRCS = \
 	src/widget.c \
 	src/bd_draw.c \
+	src/bd_asset.c \
 	src/bd_widget_value.c \
 	src/bd_widget_explorer.c \
 	src/bd_widget_editor.c \

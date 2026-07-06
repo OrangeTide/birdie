@@ -2,6 +2,13 @@
 #include "ludica.h"
 #include "ludica_gfx.h"
 #include <stddef.h>
+#include <stdio.h>
+
+/* stb_image lives in the ludica library (non-static), so we borrow its
+ * from-memory decoder for embedded PNGs rather than owning a second copy. */
+extern unsigned char *stbi_load_from_memory(const unsigned char *buffer,
+    int len, int *x, int *y, int *comp, int req_comp);
+extern void stbi_image_free(void *retval_from_stbi_load);
 
 /*
  * ludica binding for the widget toolkit's bd_backend GPU interface. The draw
@@ -105,6 +112,29 @@ be_load_texture(const char *path)
 	return (bd_texture){t.id};
 }
 
+/* Decode a PNG from memory and upload it, matching be_load_texture's NEAREST
+ * filtering. lud_load_texture is path-only, so embedded blobs decode here. */
+static bd_texture
+be_load_texture_mem(const unsigned char *data, int len)
+{
+	int w, h, comp;
+	unsigned char *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
+	if (!pixels) {
+		fprintf(stderr, "ludica: cannot decode embedded texture\n");
+		return (bd_texture){0};
+	}
+	lud_texture_desc_t desc = {
+		.width = w, .height = h,
+		.format = LUD_PIXFMT_RGBA8,
+		.min_filter = LUD_FILTER_NEAREST,   /* pixel-art PNGs */
+		.mag_filter = LUD_FILTER_NEAREST,
+		.data = pixels,
+	};
+	lud_texture_t t = lud_make_texture(&desc);
+	stbi_image_free(pixels);
+	return (bd_texture){t.id};
+}
+
 static bd_texture
 be_make_texture(int w, int h, const void *rgba)
 {
@@ -152,6 +182,7 @@ const bd_backend bd_backend_ludica = {
 	.set_uniform_mat4  = be_uni_mat4,
 	.draw_verts       = be_draw_verts,
 	.load_texture     = be_load_texture,
+	.load_texture_mem = be_load_texture_mem,
 	.make_texture     = be_make_texture,
 	.update_texture   = be_update_texture,
 	.bind_texture     = be_bind_texture,

@@ -26,6 +26,7 @@ birdie_gui_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 birdie_gui_SRCS = \
 	widget.c \
 	bd_draw.c \
+	bd_asset.c \
 	bd_widget_vt.c \
 	bd_widget_value.c \
 	bd_widget_explorer.c \

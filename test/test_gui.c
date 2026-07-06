@@ -101,6 +101,7 @@ static void be_uni_m(bd_shader s,const char *n,const float m[16]){ (void)s;(void
 static void be_draw_verts(const bd_vertex *v, int n){ (void)v; (void)n; n_drawverts++; }
 
 static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
+static bd_texture be_load_tex_mem(const unsigned char *d, int n){ (void)d; (void)n; return (bd_texture){next_texid++}; }
 static bd_texture be_make_tex(int w, int h, const void *px)
 { (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){next_texid++}; }
 static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
@@ -126,7 +127,8 @@ static const bd_backend stub = {
 	.use_shader=be_use_shader, .set_uniform_int=be_uni_i, .set_uniform_float=be_uni_f,
 	.set_uniform_vec2=be_uni_2, .set_uniform_vec3=be_uni_3, .set_uniform_vec4=be_uni_4,
 	.set_uniform_mat4=be_uni_m, .draw_verts=be_draw_verts,
-	.load_texture=be_load_tex, .make_texture=be_make_tex, .update_texture=be_update_tex,
+	.load_texture=be_load_tex, .load_texture_mem=be_load_tex_mem,
+	.make_texture=be_make_tex, .update_texture=be_update_tex,
 	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
 	.clipboard_set=be_clip_set, .clipboard_get=be_clip_get,
@@ -150,7 +152,8 @@ static const bd_backend mwstub = {
 	.use_shader=be_use_shader, .set_uniform_int=be_uni_i, .set_uniform_float=be_uni_f,
 	.set_uniform_vec2=be_uni_2, .set_uniform_vec3=be_uni_3, .set_uniform_vec4=be_uni_4,
 	.set_uniform_mat4=be_uni_m, .draw_verts=be_draw_verts,
-	.load_texture=be_load_tex, .make_texture=be_make_tex, .update_texture=be_update_tex,
+	.load_texture=be_load_tex, .load_texture_mem=be_load_tex_mem,
+	.make_texture=be_make_tex, .update_texture=be_update_tex,
 	.bind_texture=be_bind_tex, .destroy_texture=be_destroy_tex,
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
 	.multi_window=1, .window_open=mw_open, .window_close=mw_close,

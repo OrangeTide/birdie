@@ -165,6 +165,10 @@ typedef struct bd_backend {
 
 	/* textures */
 	bd_texture (*load_texture)(const char *path);
+	/* Decode an image (PNG) from an in-memory buffer, same filtering as
+	 * load_texture. Optional (may be NULL): needed only to serve textures
+	 * registered as embedded data through bd_asset. */
+	bd_texture (*load_texture_mem)(const unsigned char *data, int len);
 	bd_texture (*make_texture)(int w, int h, const void *rgba); /* rgba NULL = blank */
 	void       (*update_texture)(bd_texture t, int x, int y, int w, int h,
 	                             const void *rgba);

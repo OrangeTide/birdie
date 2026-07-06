@@ -51,11 +51,12 @@ DIST_STB    := src/thirdparty/stb
 
 # public API headers
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
+                bd_asset.h \
                 bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_canvas.h bd_widget_table.h \
                 bd_widget_inventory.h
 # toolkit implementation + reference ludica and SDL3 backends
-DIST_SOURCES := widget.c bd_draw.c bd_widget_vt.c bd_widget_value.c \
+DIST_SOURCES := widget.c bd_draw.c bd_asset.c bd_widget_vt.c bd_widget_value.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_canvas.c \
                 bd_widget_table.c bd_widget_inventory.c \
                 bd_backend_ludica.c bd_backend_ludica.h \
@@ -136,7 +137,8 @@ test : bd_vt
 	@mkdir -p $(BUILDDIR)
 	cc -Wall -W -Isrc/birdie-gui -Isrc/libvt -Isrc/thirdparty/stb \
 	    test/test_gui.c src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
-	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_widget_value.c \
+	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_asset.c \
+	    src/birdie-gui/bd_widget_value.c \
 	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
 	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
 	    src/birdie-gui/bd_widget_inventory.c \
@@ -161,7 +163,8 @@ widget-test : bd_vt
 	    src/guitest/widget_test.c src/guitest/x11_window.c \
 	    src/guitest/bd_backend_gles.c \
 	    src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
-	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_widget_value.c \
+	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_asset.c \
+	    src/birdie-gui/bd_widget_value.c \
 	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
 	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
 	    src/birdie-gui/bd_widget_inventory.c \

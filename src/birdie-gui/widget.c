@@ -2,6 +2,7 @@
 #include "widget_ext.h"
 #include "bd_backend.h"
 #include "bd_draw.h"
+#include "bd_asset.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2274,14 +2275,12 @@ bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
 	if (th)
 		theme = *th;
 
-	if (fonts) {
-		if (!bd_draw_init_fonts(be, fonts, theme.font_size))
-			fprintf(stderr, "bd: renderer init failed\n");
-	} else if (!bd_draw_init(be, BD_ASSET_GUI_FONT, theme.font_size)) {
+	/* fonts may be NULL; bd_draw_init_fonts then resolves every face from the
+	 * bd_asset registry (by id) or the built-in defaults. */
+	if (!bd_draw_init_fonts(be, fonts, theme.font_size))
 		fprintf(stderr, "bd: renderer init failed\n");
-	}
-	pin_out_tex = be->load_texture(BD_ASSET_PIN_OUT);
-	pin_in_tex = be->load_texture(BD_ASSET_PIN_IN);
+	pin_out_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_OUT, BD_ASSET_PIN_OUT);
+	pin_in_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_IN, BD_ASSET_PIN_IN);
 }
 
 void

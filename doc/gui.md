@@ -285,6 +285,50 @@ through the backend, then resumes batching.
 A dirty-region list driving per-frame redraws (idle to 0 Hz) is still planned;
 the loop currently redraws each frame.
 
+### Custom and embedded assets (`bd_asset`)
+
+The toolkit requests each runtime asset (the chrome font faces, the CP437
+terminal atlas, the pushpin PNGs) by a **generic identifier**, not a filename:
+`BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces,
+`BD_ASSET_TERMINAL_FONT`, `BD_ASSET_PUSHPIN_OUT`/`_IN` (in **`bd_asset.h`**).
+Register a source under an id to override its built-in default. A source is
+**either a file path or in-memory data**, so one mechanism covers both "use a
+different font" and "ship a self-contained binary":
+
+```c
+/* redirect an asset to another file (loaded on demand) */
+bd_asset_register_file(BD_ASSET_FONT_REGULAR, "/home/me/.fonts/Inter.otf");
+
+/* or serve it from bytes compiled in (an .incbin / xxd -i blob) */
+bd_asset_register_data(BD_ASSET_TERMINAL_FONT, atlas, atlas_len);
+```
+
+Register before `bd_gui_init*`. The key is the asset's identity, so a custom
+font is registered as `BD_ASSET_FONT_REGULAR` -- no need to name it after the
+stock font or override a build macro. Anything unregistered falls back to that
+asset's default file, so the default build is unchanged. Registered data and
+path strings are **borrowed** and must outlive use (a `.rodata` blob fits).
+
+Resolution lives in the toolkit, not the backends: `bd_draw.c` resolves each of
+the eight faces (explicit `bd_font_set` face, else registry id, else default
+file), and `bd_asset_texture` resolves the pushpins and atlas -- decoding
+registered data through the backend's optional `load_texture_mem` hook, or
+loading a file via `load_texture`. Fonts can still be supplied wholesale as a
+`bd_font_set` (`bd_gui_init_fonts`); the registry is the lighter route and the
+only one for the texture assets. `bd_draw_set_font_reader` remains as a
+lower-level per-path hook for a host with its own resolver.
+
+**Keeping build paths out of the binary.** The registry keys are the fixed
+`BD_ASSET_*` id strings (short, generic) and expose nothing. The only paths that
+get baked in are the toolkit's **default fallback** file paths (the
+`BD_ASSET_GUI_FONT*` / `BD_ASSET_TERM_FONT` / `BD_ASSET_PIN_*` macros, compiled
+in as literals). Never set one (or an `.incbin` source path) to an
+`$(abspath ...)`: that bakes the build machine's directory layout and username
+into every copy, and once every asset is registered by id nothing reads those
+paths. When embedding everything, override them to short strings to drop the
+`src/birdie-gui/assets/...` literals entirely. The `examples/embed/` example
+demonstrates the id-based embedding and this caveat.
+
 ## Pinnable menus (olvwm-style pushpins)
 
 Popup menus — both the menu-bar pull-downs and context menus — carry a
@@ -611,13 +655,15 @@ BD_FONT_MONO)` picks one (a missing variant TTF falls back to regular). The
 editor uses the **fixed-width family by default** so code and ABC columns line
 up (`bd_editor_set_monospace`); chrome stays proportional.
 
-**Custom fonts.** The eight faces are the `BD_ASSET_GUI_FONT_*` defaults, but an
-app can replace the whole family in one call: fill a `bd_font_set` (each face a
-path *or* an in-memory TTF/OTF buffer) and pass it to `bd_gui_init_fonts` (or
-`bd_draw_init_fonts` at the renderer layer). In-memory faces let a binary embed
-its fonts and read no files; `bd_draw_set_font_reader` instead routes
-path-based faces through a host asset resolver (fopen fallback), matching the
-backend's `load_texture`. See README "Using your own fonts".
+**Custom fonts.** An app can replace the whole family in one call: fill a
+`bd_font_set` (each face a path *or* an in-memory TTF/OTF buffer) and pass it to
+`bd_gui_init_fonts` (or `bd_draw_init_fonts` at the renderer layer). Or replace
+individual faces without threading a set through, by registering a source under
+the face's generic id -- `bd_asset_register_file(BD_ASSET_FONT_REGULAR, "MyFont.otf")`
+or `bd_asset_register_data(...)` (see Rendering, "Custom and embedded assets").
+Either way the face is named by identity, not by the stock filename.
+`bd_draw_set_font_reader` remains the lower-level per-path hook. See README
+"Embedding assets (fonts and images), and custom fonts".
 
 **Status.** Implemented: the row API (`bd_editor_set_text` / `text` /
 `row_count` / `row_text` / `insert_row` / `replace_row` / `delete_row`), lock

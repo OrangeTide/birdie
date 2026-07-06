@@ -66,7 +66,9 @@ _out/x86_64-linux-gnu/bin/birdie
 
 `examples/` is a separate build (it carries its own `GNUmakefile`) so the main
 build never depends on example-only libraries; `examples/sdl3/` hosts the
-toolkit on an SDL3 window. Build it with `cd examples && make`.
+toolkit on an SDL3 window, and `examples/embed/` is a self-contained binary that
+bakes its fonts and textures in with `.incbin` and the `bd_asset` registry.
+Build them with `cd examples && make`.
 
 The build system is [modular-make](https://github.com/OrangeTide/modular-make):
 each directory has a `module.mk`, and the top-level one selects which are built.

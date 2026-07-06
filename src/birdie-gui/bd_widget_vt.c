@@ -1,6 +1,7 @@
 #include "bd_widget_vt.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
+#include "bd_asset.h"
 #include "vt_state.h"
 #include "vt_parse.h"
 #include "vt_ops.h"
@@ -108,7 +109,8 @@ vt_init(bd_id id, void *state)
 	struct vt_widget *t = state;
 
 	if (vt_live++ == 0) {
-		vt_font = bd_backend_get()->load_texture(BD_ASSET_TERM_FONT);
+		vt_font = bd_asset_texture(bd_backend_get(),
+		    BD_ASSET_TERMINAL_FONT, BD_ASSET_TERM_FONT);
 		if (vt_font.id == 0)
 			fprintf(stderr, "bd: failed to load terminal font atlas\n");
 	}

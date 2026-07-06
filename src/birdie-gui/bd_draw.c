@@ -1,4 +1,5 @@
 #include "bd_draw.h"
+#include "bd_asset.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -70,7 +71,11 @@ static struct face faces[FONT_FACES];
 static float        font_ascent;   /* regular proportional face (back-compat) */
 static float        font_line_h;
 
-/* default variant paths; override with -DBD_ASSET_GUI_FONT_* at build time */
+/* default face paths; override with -DBD_ASSET_GUI_FONT_* at build time, or
+ * replace a face at runtime by id (BD_ASSET_FONT_*) via bd_asset_register_*. */
+#ifndef BD_ASSET_GUI_FONT
+#define BD_ASSET_GUI_FONT            "src/birdie-gui/assets/fonts/DejaVuSans.ttf"
+#endif
 #ifndef BD_ASSET_GUI_FONT_BOLD
 #define BD_ASSET_GUI_FONT_BOLD       "src/birdie-gui/assets/fonts/DejaVuSans-Bold.ttf"
 #endif
@@ -92,6 +97,40 @@ static float        font_line_h;
 #ifndef BD_ASSET_GUI_FONT_MONO_BOLDITALIC
 #define BD_ASSET_GUI_FONT_MONO_BOLDITALIC "src/birdie-gui/assets/fonts/DejaVuSansMono-BoldOblique.ttf"
 #endif
+
+/* Per-face parallel arrays, indexed by BD_FONT_BOLD|ITALIC|MONO. Each face is
+ * resolved as: an explicit bd_font_face from the caller, else a source
+ * registered under its generic id, else its default file. */
+static const char *const font_asset_id[FONT_FACES] = {
+	BD_ASSET_FONT_REGULAR,   BD_ASSET_FONT_BOLD,
+	BD_ASSET_FONT_ITALIC,    BD_ASSET_FONT_BOLD_ITALIC,
+	BD_ASSET_FONT_MONO,      BD_ASSET_FONT_MONO_BOLD,
+	BD_ASSET_FONT_MONO_ITALIC, BD_ASSET_FONT_MONO_BOLD_ITALIC,
+};
+static const char *const font_default_path[FONT_FACES] = {
+	BD_ASSET_GUI_FONT,       BD_ASSET_GUI_FONT_BOLD,
+	BD_ASSET_GUI_FONT_ITALIC, BD_ASSET_GUI_FONT_BOLDITALIC,
+	BD_ASSET_GUI_FONT_MONO,  BD_ASSET_GUI_FONT_MONO_BOLD,
+	BD_ASSET_GUI_FONT_MONO_ITALIC, BD_ASSET_GUI_FONT_MONO_BOLDITALIC,
+};
+
+/* Resolve one face: an explicit caller face wins, else a registered source for
+ * `id`, else the default file path. */
+static bd_font_face
+resolve_face(const bd_font_face *given, const char *id, const char *default_path)
+{
+	if (given && (given->data || given->path))
+		return *given;
+
+	bd_asset a;
+	if (bd_asset_lookup(id, &a)) {
+		if (a.data)
+			return (bd_font_face){ .data = a.data, .len = (long)a.len };
+		if (a.path)
+			return (bd_font_face){ .path = a.path };
+	}
+	return (bd_font_face){ .path = default_path };
+}
 
 static inline void
 unpack(uint32_t c, float *r, float *g, float *b, float *a)
@@ -270,16 +309,20 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 	white = be->make_texture(1, 1, &wpix);
 	cur_tex = white;
 
+	/* face order matches the BD_FONT_BOLD|ITALIC|MONO style index. Each face
+	 * resolves from the caller's set (if any), then the bd_asset registry by
+	 * id, then its default file. A NULL set means "all defaults". */
+	const bd_font_face *f[FONT_FACES] = {0};
 	if (fonts) {
-		/* face order matches the BD_FONT_BOLD|ITALIC|MONO style index */
-		const bd_font_face *f[FONT_FACES] = {
-			&fonts->regular, &fonts->bold,
-			&fonts->italic,  &fonts->bold_italic,
-			&fonts->mono,    &fonts->mono_bold,
-			&fonts->mono_italic, &fonts->mono_bold_italic,
-		};
-		for (int i = 0; i < FONT_FACES; i++)
-			bake_font(f[i], font_px, i, i == 0); /* regular sets metrics */
+		f[0] = &fonts->regular;          f[1] = &fonts->bold;
+		f[2] = &fonts->italic;           f[3] = &fonts->bold_italic;
+		f[4] = &fonts->mono;             f[5] = &fonts->mono_bold;
+		f[6] = &fonts->mono_italic;      f[7] = &fonts->mono_bold_italic;
+	}
+	for (int i = 0; i < FONT_FACES; i++) {
+		bd_font_face face = resolve_face(f[i], font_asset_id[i],
+		    font_default_path[i]);
+		bake_font(&face, font_px, i, i == 0); /* regular sets metrics */
 	}
 	return 1;
 }
@@ -287,20 +330,13 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 int
 bd_draw_init(const bd_backend *backend, const char *font_path, float font_px)
 {
+	/* legacy entry: font_path is the regular face; the seven variants resolve
+	 * by id/default like bd_draw_init_fonts. NULL font_path = all defaults. */
 	if (!font_path)
 		return bd_draw_init_fonts(backend, NULL, font_px);
 
-	/* the regular face comes from font_path; variants from the build-time
-	 * macros, preserving the legacy behavior of this entry point */
 	bd_font_set fs = {0};
-	fs.regular.path          = font_path;
-	fs.bold.path             = BD_ASSET_GUI_FONT_BOLD;
-	fs.italic.path           = BD_ASSET_GUI_FONT_ITALIC;
-	fs.bold_italic.path      = BD_ASSET_GUI_FONT_BOLDITALIC;
-	fs.mono.path             = BD_ASSET_GUI_FONT_MONO;
-	fs.mono_bold.path        = BD_ASSET_GUI_FONT_MONO_BOLD;
-	fs.mono_italic.path      = BD_ASSET_GUI_FONT_MONO_ITALIC;
-	fs.mono_bold_italic.path = BD_ASSET_GUI_FONT_MONO_BOLDITALIC;
+	fs.regular.path = font_path;
 	return bd_draw_init_fonts(backend, &fs, font_px);
 }
 

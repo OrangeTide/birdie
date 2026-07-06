@@ -483,7 +483,9 @@ The assets the toolkit loads (`assets/` — the chrome TTFs, the terminal's CP43
 atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
 `bd_draw.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*` (the eight font faces are
 `BD_ASSET_GUI_FONT`[`_BOLD`/`_ITALIC`/`_BOLDITALIC`] and the same with a
-`_MONO` prefix on the suffix, e.g. `BD_ASSET_GUI_FONT_MONO_BOLD`).
+`_MONO` prefix on the suffix, e.g. `BD_ASSET_GUI_FONT_MONO_BOLD`). Or compile
+them into the binary and register them so no files are read at all -- see
+"Embedding assets" below.
 
 ## Using your own fonts
 
@@ -535,6 +537,84 @@ The lower-level renderer entry points (`bd_draw_init_fonts`,
 layer. `bd_draw_init(be, path, px)` remains and is unchanged: it bakes `path`
 as the regular face and the seven variants from the `BD_ASSET_GUI_FONT_*`
 macros.
+
+## Embedding assets (fonts and images), and custom fonts
+
+The toolkit requests each runtime asset by a **generic identifier**, not a
+filename: `BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces,
+`BD_ASSET_TERMINAL_FONT`, and `BD_ASSET_PUSHPIN_OUT` / `_IN` (all in
+`bd_asset.h`). Register a source under an id and the toolkit uses it instead of
+the built-in default. A source is **either a file path or in-memory data**, so
+the same mechanism covers "use a different font on disk" and "ship a
+self-contained binary".
+
+Point an id at a file (no recompiling, no embedding) -- e.g. a user-chosen font:
+
+```c
+#include "bd_asset.h"
+bd_asset_register_file(BD_ASSET_FONT_REGULAR, "/home/me/.fonts/Inter.otf");
+bd_asset_register_file(BD_ASSET_FONT_BOLD,    "/home/me/.fonts/Inter-Bold.otf");
+bd_gui_init(backend, theme);   /* the rest fall back to the built-in faces */
+```
+
+Or embed blobs for a **single self-contained binary** -- fonts *and* the PNG
+textures (terminal atlas, pushpins), all through one registry:
+
+```c
+extern const unsigned char font_ui[];    extern const unsigned char font_ui_end[];
+extern const unsigned char pin_out[];    extern const unsigned char pin_out_end[];
+extern const unsigned char term_atlas[]; extern const unsigned char term_atlas_end[];
+
+/* register BEFORE bd_gui_init*; keyed by identity, not by any filename */
+bd_asset_register_data(BD_ASSET_FONT_REGULAR,  font_ui,    font_ui_end    - font_ui);
+bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   pin_out,    pin_out_end    - pin_out);
+bd_asset_register_data(BD_ASSET_TERMINAL_FONT, term_atlas, term_atlas_end - term_atlas);
+
+bd_gui_init(backend, theme);
+```
+
+There is no need to name your font "DejaVuSans.ttf" or override any build macro;
+you register it as *the regular UI font*. Anything left unregistered falls back
+to the default file, so partial embedding is fine (embed the fonts, load PNGs
+from disk, or vice versa). Registered data and path strings are **borrowed**:
+they must outlive every use, which a `.rodata` blob satisfies. (For fonts you can
+still pass a whole `bd_font_set` to `bd_gui_init_fonts` instead; the registry is
+the lighter route and also covers the textures.) Serving embedded PNG data needs
+the backend's optional `load_texture_mem` hook -- the three bundled backends
+implement it.
+
+A minimal way to produce the blobs with GNU `as` (no codegen tool needed):
+
+```asm
+    .section .rodata
+    .global font_ui
+    .global font_ui_end
+    .balign 4
+font_ui:     .incbin "assets/fonts/MyFont.otf"
+font_ui_end:
+```
+
+### Keeping build paths out of the binary
+
+The registry keys are the fixed `BD_ASSET_*` id strings (short, generic), so
+they expose nothing. The only paths that get baked in are the **default file
+paths** the toolkit falls back to (the `BD_ASSET_GUI_FONT*`, `BD_ASSET_TERM_FONT`,
+`BD_ASSET_PIN_*` macros -- string literals compiled in). Two rules keep those
+clean:
+
+- **Never set a default path (or an `.incbin` source path) to an `$(abspath ...)`.**
+  That bakes the build machine's directory layout and username into every
+  shipped copy. It is also pointless: those paths are only a fallback, and once
+  you register every asset by id nothing reads them.
+- **When embedding everything, override the default paths to short strings** (or
+  drop them): `-DBD_ASSET_GUI_FONT='"font.ttf"'` and the like. Then the binary
+  carries no `src/birdie-gui/assets/...` at all.
+
+The default relative paths are otherwise harmless -- identical in every build,
+nothing machine-specific. The bundled `examples/embed/` demonstrates the
+id-based embedding; because it shares compiled toolkit objects with the SDL3
+example it keeps the default fallback paths, but a standalone build overrides
+them as above.
 
 ## License
 

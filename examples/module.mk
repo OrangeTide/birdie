@@ -17,6 +17,6 @@
 PROJECT_CFLAGS   := -Wall -W
 PROJECT_CXXFLAGS := -Wall -W
 
-# ../src/libvt supplies the terminal widget's backing library (bd_vt); sdl3 is
-# the SDL3 example itself.
-SUBDIRS = ../src/libvt sdl3
+# ../src/libvt supplies the terminal widget's backing library (bd_vt); sdl3 and
+# embed are the examples themselves.
+SUBDIRS = ../src/libvt sdl3 embed

@@ -248,6 +248,21 @@ be_load_texture(const char *path)
 	return (bd_texture){id};
 }
 
+/* Decode a PNG from memory, matching be_load_texture's NEAREST filtering. */
+static bd_texture
+be_load_texture_mem(const unsigned char *data, int len)
+{
+	int w, h, comp;
+	unsigned char *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
+	if (!pixels) {
+		fprintf(stderr, "bd_gles: cannot decode embedded texture\n");
+		return (bd_texture){0};
+	}
+	GLuint id = make_gl_texture(w, h, pixels, GL_NEAREST); /* pixel-art PNGs */
+	stbi_image_free(pixels);
+	return (bd_texture){id};
+}
+
 static bd_texture
 be_make_texture(int w, int h, const void *rgba)
 {
@@ -341,6 +356,7 @@ const bd_backend bd_backend_gles = {
 	.set_uniform_mat4  = be_uni_mat4,
 	.draw_verts        = be_draw_verts,
 	.load_texture      = be_load_texture,
+	.load_texture_mem  = be_load_texture_mem,
 	.make_texture      = be_make_texture,
 	.update_texture    = be_update_texture,
 	.bind_texture      = be_bind_texture,
