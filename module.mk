@@ -41,7 +41,7 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 # under $(OUTDIR). Override the version with `make dist GUI_VERSION=x.y.z`.
 # Each backend still needs its own host library (ludica / SDL3 / X11+EGL).
 # ----------------------------------------------------------------------
-GUI_VERSION ?= 0.4.1
+GUI_VERSION ?= 0.4.2
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip
