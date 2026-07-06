@@ -6,9 +6,9 @@ backend is [ludica](https://github.com/OrangeTide/ludica) (rendering, input,
 audio, networking); a second backend runs on raw X11/EGL/GLES.
 
 The toolkit is reusable on its own. See
-[`src/birdie/README.md`](src/birdie/README.md) for the birdie-gui library, and
-"[Reusing birdie-gui](#reusing-birdie-gui)" below to vendor it into another
-project.
+[`src/birdie-gui/README.md`](src/birdie-gui/README.md) for the birdie-gui
+library, and "[Reusing birdie-gui](#reusing-birdie-gui)" below to vendor it into
+another project.
 
 ## Build
 
@@ -27,8 +27,8 @@ sudo apt-get install -y libx11-dev libegl-dev libgles-dev   # Debian / Ubuntu
 
 The binary lands at `_out/<triplet>/bin/birdie`, e.g.
 `_out/x86_64-linux-gnu/bin/birdie`. Fonts and the terminal atlas are loaded
-from `src/birdie/assets/` relative to the working directory, so run it from the
-repository root:
+from `src/birdie-gui/assets/` relative to the working directory, so run it from
+the repository root:
 
 ```sh
 _out/x86_64-linux-gnu/bin/birdie
@@ -80,9 +80,11 @@ and the library README for the build recipe.
 
 ## Source layout
 
-- `src/birdie/` — the birdie app and the birdie-gui toolkit (widget core,
-  renderer, backend interface, ludica backend, extension widgets, networking,
-  triggers).
+- `src/birdie-gui/` — the birdie-gui toolkit (widget core, renderer, backend
+  interface, the ludica and SDL3 backends, extension widgets, assets), built as
+  the `birdie_gui` library.
+- `src/birdie/` — the MUD-client app (`main.c`, networking, telnet, triggers,
+  profiles, scripting VM); links the toolkit.
 - `src/guitest/` — standalone widget gallery and the raw X11/EGL/GLES backend.
 - `src/thirdparty/` — vendored dependencies (ludica, lua, lpeg, mbedtls, miniz,
   stb).

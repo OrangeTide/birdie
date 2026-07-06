@@ -25,16 +25,17 @@ Output: `_out/<triplet>/bin/birdie` (e.g. `_out/x86_64-linux-gnu/bin/birdie`). A
 
 `examples/` is a **separate modular-make project** (it carries its own copy of `GNUmakefile`) so the main build never depends on example-only libraries like SDL3. Build the examples with `cd examples && make`; they pull the toolkit sources from `../src`. The SDL3 example (`examples/sdl3/`) needs SDL3 (`pkg-config sdl3`); run its binary from the repo root so `BD_ASSET_*` paths resolve.
 
-`make dist` stages the full birdie-gui toolkit into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`: public headers (`include/`), the implementation + reference ludica backend (`src/`), the raw X11/EGL/GLES backend + standalone gallery (`backend-gles/`), vendored stb single-headers (`thirdparty/stb/`), and runtime assets (chrome TTF + license, CP437 atlas, pushpins). Override the version with `make dist GUI_VERSION=x.y.z` (default `0.4.0`). The bundle compiles standalone (only external deps: libvt for the terminal widget, and ludica only if using its backend); the README has the gallery build command. Both `dist` and `widget-test` live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
+`make dist` stages the full birdie-gui toolkit into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`: public headers (`include/`), the implementation + reference ludica and SDL3 backends (`src/`), the raw X11/EGL/GLES backend + standalone gallery (`backend-gles/`), vendored libvt (`libvt/`, so the terminal widget compiles out of the box), vendored stb single-headers (`thirdparty/stb/`), a self-contained `module.mk` (declares the `birdie_gui` + `bd_vt` libraries), and runtime assets (chrome TTF + license, CP437 atlas, pushpins). Override the version with `make dist GUI_VERSION=x.y.z` (default `0.4.0`). The bundle compiles standalone; each backend still needs its own host (ludica / SDL3 / X11+EGL), and the README has the gallery build command. The dist file list lives in the top-level `module.mk`; the bundle's own `module.mk` is `src/birdie-gui/dist-module.mk`. Both `dist` and `widget-test` live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
 
 Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each directory has a `module.mk`; the top-level one controls which SUBDIRS are pulled in.
 
 ## Source layout
 
-- `src/birdie/` — birdie app + the birdie-gui toolkit: `main.c`, the widget core (`widget.{c,h}`, `widget_ext.h`), renderer (`bd_draw.{c,h}`), backend interface (`bd_backend.h`) + ludica backend (`bd_backend_ludica.{c,h}`), theme (`bd_theme.h`), and the extension widgets (`bd_widget_vt.*` terminal, `bd_widget_value.*`, `bd_widget_explorer.*`)
+- `src/birdie-gui/` — the birdie-gui toolkit (its own directory, built as the `birdie_gui` library): the widget core (`widget.{c,h}`, `widget_ext.h`), renderer (`bd_draw.{c,h}`), backend interface (`bd_backend.h`), theme (`bd_theme.h`), the extension widgets (`bd_widget_vt.*` terminal, `bd_widget_value.*`, `bd_widget_explorer.*`, ...), the reference backends (`bd_backend_ludica.*` as `birdie_gui_ludica`, `bd_backend_sdl3.*`), assets, and the `dist-module.mk` / README / LICENSE that ship in the bundle
+- `src/birdie/` — the MUD-client app only: `main.c` plus networking, telnet, triggers, profiles, and the scripting VM (`bd_net.*`, `bd_session.*`, `bd_vm.*`, ...); links the toolkit via `birdie_gui_ludica`
 - `src/guitest/` — standalone widget gallery (`widget_test.c`) + the raw X11/EGL/GLES backend (`window.h`, `x11_window.c`, `bd_backend_gles.*`); built by `make widget-test`
 - `examples/` — separate modular-make project (own `GNUmakefile`) for host examples; `examples/sdl3/` hosts the toolkit on an SDL3 window + GLES3 context (`sdl3_example.c`, self-contained backend + demo UI). Build with `cd examples && make`.
-- `src/birdie/assets/` — chrome TTF (DejaVuSans), CP437 terminal font atlases, pushpin sprites
+- `src/birdie-gui/assets/` — chrome TTF (DejaVuSans), CP437 terminal font atlases, pushpin sprites
 - `src/thirdparty/ludica/` — vendored ludica (rendering, input, audio, networking)
 - `src/thirdparty/stb/` — vendored stb_truetype + stb_image
 - `test/test_gui.c` — headless toolkit test (recording stub backend); `make test`
@@ -70,7 +71,7 @@ See `.claude/skills/ludica-mcp/SKILL.md` for the full tool reference.
 
 ## Current state
 
-The GUI toolkit (now packaged as **birdie-gui**) is the most developed part of the repo. It is a retained-mode widget layer drawn through a backend-neutral GPU interface (`bd_backend`), with two backends: the reference ludica binding (`bd_backend_ludica.c`) and a raw X11/EGL/GLES binding (`src/guitest/`). The renderer is `bd_draw.c` (shader + dynamic quad batch + stb_truetype text). See `doc/gui.md` for the design and an Implementation status section.
+The GUI toolkit (now packaged as **birdie-gui**, in its own `src/birdie-gui/` directory) is the most developed part of the repo. It is a retained-mode widget layer drawn through a backend-neutral GPU interface (`bd_backend`), with three backends: the reference ludica binding (`bd_backend_ludica.c`), an SDL3 binding (`bd_backend_sdl3.c`), and a raw X11/EGL/GLES binding (`src/guitest/`). The renderer is `bd_draw.c` (shader + dynamic quad batch + stb_truetype text). See `doc/gui.md` for the design and an Implementation status section.
 
 `src/birdie/main.c` is a thin MUD-client shell built on the toolkit: a frame with a menu bar, a `BD_TERMINAL` output pane, a `BD_INPUT_LINE`, buttons, and a status bar, running on ludica. Networking, triggers, and the real MUD logic are not wired up yet.
 

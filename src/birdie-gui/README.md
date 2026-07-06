@@ -44,38 +44,39 @@ scripts/get-birdie-gui.sh --help           # options and environment variables
 ## Building
 
 The bundle ships a top-level `module.mk` for
-[modular-make](https://github.com/OrangeTide/modular-make). It builds the
-toolkit as a backend-agnostic static library, `birdie_gui`: the widget core,
-the renderer, and the extension widgets, and no backend. Add the vendored
-directory to your project's `SUBDIRS`, then list `birdie_gui` in your
-executable's `LIBS` (along with a backend and, for the terminal widget,
-`libvt`):
+[modular-make](https://github.com/OrangeTide/modular-make). It declares two
+libraries: `birdie_gui`, the backend-agnostic toolkit (widget core, renderer,
+extension widgets, no backend), and `bd_vt`, the bundled `libvt` the terminal
+widget builds on. Add the vendored directory to your project's `SUBDIRS` as a
+single entry, then list `birdie_gui` in your executable's `LIBS` (it pulls in
+`bd_vt` transitively) plus a backend of your own:
 
 ```makefile
 SUBDIRS += third_party/birdie-gui
 
 myapp_SRCS = main.c bd_backend_ludica.c   # your host + a backend
-myapp_LIBS = birdie_gui bd_vt             # + ludica/SDL/... for the backend
+myapp_LIBS = birdie_gui                   # + ludica/SDL3/... for the backend
 ```
 
 `module.mk` exports its `include/` path, so `#include "widget.h"` and the rest
-of the public API resolve with no extra `-I`. It builds no backend, so drop
-`bd_backend_ludica.c` (from the bundle's `src/`) or another backend into your
-own target; see "Porting to another backend" below.
+of the public API resolve with no extra `-I`. It builds no backend, so compile
+a backend of your own into your target: the bundle ships `bd_backend_ludica.c`
+and `bd_backend_sdl3.c` (both in `src/`) and the raw X11/EGL/GLES one in
+`backend-gles/`; see "Porting to another backend" below.
 
-The terminal widget (`bd_widget_vt.c`) is the one source that needs `libvt`; it
-is built by default. If your project does not provide `libvt`, build without it
-and leave `bd_vt` out of `LIBS`:
+The terminal widget (`bd_widget_vt.c`) is the one source that needs `libvt`,
+which the bundle vendors under `libvt/` and builds as `bd_vt` by default. To
+drop the terminal widget and skip building `libvt` entirely:
 
 ```sh
 make BIRDIE_GUI_VT=0
 ```
 
-Not using modular-make? The library is nine `.c` files under `src/` (all but
-`bd_backend_ludica.c`). Compile them with `-Iinclude -Ithirdparty/stb`, adding
-`-I<libvt>` only if you keep `bd_widget_vt.c`. The gallery command under
-"Bundled X11/GLES backend and gallery" shows the full compile of the library
-plus a backend in one line.
+Not using modular-make? The library is nine `.c` files under `src/` (the
+toolkit, no `bd_backend_*`). Compile them with `-Iinclude -Ithirdparty/stb`,
+adding `-Ilibvt` (and libvt's own `.c` files) only if you keep
+`bd_widget_vt.c`. The gallery command under "Bundled X11/GLES backend and
+gallery" shows the full compile of the library plus a backend in one line.
 
 ## Usage
 
@@ -389,11 +390,11 @@ your backend to `bd_gui_init`. The toolkit owns the renderer
 (`bd_draw.c`: one default shader, a dynamic quad batch, and an stb_truetype
 glyph atlas), so a backend supplies GPU plumbing, not drawing primitives.
 Shaders are GLES3 (`#version 300 es`); alpha blending is on.
-`bd_backend_ludica.c` is the reference; a raw X11/EGL/GLES backend lives in
-`src/guitest/` (which also has a standalone widget gallery), and a self-contained
-SDL3 backend + demo host is in `examples/sdl3/sdl3_example.c` (built as a
-separate project: `cd examples && make`), a good copy-and-adapt starting point
-for a new windowing library.
+The bundle ships three reference backends to read or reuse: `src/bd_backend_ludica.c`
+(ludica), `src/bd_backend_sdl3.c` (SDL3 + GLES3, a good copy-and-adapt starting
+point for a new windowing library; its demo host is `sdl3_example.c` in the
+birdie repo), and the raw X11/EGL/GLES one in `backend-gles/`, which also drives
+the standalone widget gallery.
 
 **Clipboard (optional).** Provide `clipboard_set(utf8)` / `clipboard_get()`
 and the text fields gain Ctrl-C/X/V; the GLES backend implements them on the
@@ -437,12 +438,12 @@ Tab / Shift-Tab; `bd_focused()` reports it.
 `backend-gles/` is a ready-to-use raw X11 + EGL + OpenGL ES 3 backend
 (`window.h`, `x11_window.c`, `bd_backend_gles.{c,h}`) plus a standalone widget
 gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
-example. Build it (Linux; needs libvt for the terminal widget) with the asset paths
-pointed at the bundle's `assets/` (the compiled-in defaults assume birdie's
-source tree):
+example. Build it (Linux) with the bundled `libvt/` on the include path and the
+asset paths pointed at the bundle's `assets/` (the compiled-in defaults assume
+birdie's source tree):
 
 ```sh
-cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
+cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ilibvt \
    -DBD_ASSET_GUI_FONT='"assets/fonts/DejaVuSans.ttf"' \
    -DBD_ASSET_GUI_FONT_BOLD='"assets/fonts/DejaVuSans-Bold.ttf"' \
    -DBD_ASSET_GUI_FONT_ITALIC='"assets/fonts/DejaVuSans-Oblique.ttf"' \
@@ -457,7 +458,8 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -I<libvt> \
    backend-gles/widget_test.c backend-gles/x11_window.c \
    backend-gles/bd_backend_gles.c \
    src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
-   src/bd_widget_explorer.c src/bd_widget_editor.c <libvt.a> \
+   src/bd_widget_explorer.c src/bd_widget_editor.c src/bd_widget_canvas.c \
+   src/bd_widget_table.c src/bd_widget_inventory.c libvt/*.c \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o gallery
 ```
 
@@ -465,9 +467,11 @@ Run `./gallery` from the bundle root so those relative asset paths resolve.
 
 ## Dependencies
 
-- A **GLES-capable backend**. ludica (the reference, `bd_backend_ludica.c`)
-  provides the window and GLES context; SDL, raylib, GLFW, or ANGLE can too.
-- **libvt** is required by the terminal widget (`bd_widget_vt.c`).
+- A **GLES-capable backend**. The bundle ships three: ludica
+  (`src/bd_backend_ludica.c`), SDL3 (`src/bd_backend_sdl3.c`), and raw
+  X11/EGL/GLES (`backend-gles/`). SDL, raylib, GLFW, or ANGLE can host it too.
+- **libvt** backs the terminal widget (`bd_widget_vt.c`) and is bundled under
+  `libvt/` (built as `bd_vt`); no need to supply it yourself.
 - Vendored: **stb_truetype** (text rasterization) and eight chrome TTFs the
   toolkit bakes — a proportional family (DejaVu Sans) and a fixed-width family
   (DejaVu Sans Mono), each in regular / bold / oblique / bold-oblique.

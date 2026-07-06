@@ -2,10 +2,13 @@
 
 A standalone example host that runs the **birdie-gui** toolkit on an
 [SDL3](https://libsdl.org) window with an OpenGL ES 3 context, mixing the
-toolkit's 2D UI with a hand-written 3D scene. It is a third reference backend
-alongside ludica (`src/birdie/bd_backend_ludica.c`) and the raw X11/EGL/GLES
-gallery (`src/guitest/`): the toolkit and renderer are untouched, only the
-`bd_backend` GPU vtable and the native-event translation change.
+toolkit's 2D UI with a hand-written 3D scene. It is the **demo host** for the
+SDL3 backend, which lives in `src/birdie-gui/bd_backend_sdl3.c` alongside the
+ludica backend (`bd_backend_ludica.c`) and next to the raw X11/EGL/GLES gallery
+(`src/guitest/`): the toolkit and renderer are untouched, only the `bd_backend`
+GPU vtable and the native-event translation change. This file owns the window,
+the frame loop, and the 3D scene, and drives the toolkit through
+`&bd_backend_sdl3` + `bd_event_from_sdl()`.
 
 The window shows a **rotatable 3D tetrahedron** drawn with raw GLES3 as the
 background, and a birdie-gui UI composited on top: a **floating terminal
@@ -22,17 +25,18 @@ hands that texture to the cell as its icon. The widget only ever blits
 updating the texture. (Y is flipped in the offscreen pass so the FBO image,
 sampled top-left-origin by the 2D toolkit, comes out upright.)
 
-Everything the backend needs lives in the single file `sdl3_example.c`:
+The backend (`src/birdie-gui/bd_backend_sdl3.c`) has two halves:
 
 - **GPU half** — raw GLES3 (shaders, a streaming VBO, textures, scissor). The
-  toolkit's shaders are `#version 300 es`, so the example asks SDL for an
-  OpenGL ES 3.0 context.
-- **Window half** — SDL3 supplies the window, GL context, event pump, monotonic
-  clock, clipboard, and IME. `SDL_Event`s are translated into the neutral
-  `bd_event` the toolkit consumes.
+  toolkit's shaders are `#version 300 es`, so `bd_backend_sdl3_open()` asks SDL
+  for an OpenGL ES 3.0 context.
+- **Window half** — SDL3 supplies the window, GL context, monotonic clock,
+  clipboard, and IME. `bd_event_from_sdl()` translates an `SDL_Event` into the
+  neutral `bd_event` the toolkit consumes.
 
 A single window is enough, so the backend leaves `multi_window` at 0 and the
-host presents the frame itself with `SDL_GL_SwapWindow()`.
+host (this file) pumps `SDL_PollEvent` and presents the frame itself with
+`SDL_GL_SwapWindow()`.
 
 ## Compositing 2D over 3D
 
@@ -56,7 +60,7 @@ toolkit does not consume (over the 3D background) rotate the tetrahedron.
 The examples are a **separate modular-make project** (this directory has its own
 copy of `GNUmakefile`), so the main birdie build never depends on SDL3. Build
 from `examples/`, then run the binary **from the repo root** so the compiled-in
-`BD_ASSET_*` font and atlas paths resolve against `src/birdie/assets/`:
+`BD_ASSET_*` font and atlas paths resolve against `src/birdie-gui/assets/`:
 
 ```sh
 cd examples && make                             # builds under examples/_out/
@@ -65,22 +69,23 @@ examples/_out/x86_64-linux-gnu/bin/sdl3_example
 ```
 
 Requires **SDL3** (found via `pkg-config sdl3`) and an OpenGL ES 3 loader
-(`-lGLESv2`). The toolkit sources are pulled straight from `../src/birdie`, and
-**libvt** (for the terminal widget) is built from `../src/libvt` by the same
-project. Nothing is vendored twice.
+(`-lGLESv2`). The toolkit sources and the SDL3 backend are pulled straight from
+`../src/birdie-gui`, and **libvt** (for the terminal widget) is built from
+`../src/libvt` by the same project. Nothing is vendored twice.
 
 ## Porting notes
 
-To host birdie-gui on any other windowing library, copy this file and replace:
+To host birdie-gui on any other windowing library, copy
+`src/birdie-gui/bd_backend_sdl3.c` to a new `bd_backend_<lib>.c` and replace:
 
-- the `bd_backend` window functions (`be_width`/`be_height`/`be_time`) and the
-  `SDL_GL_*` setup in `main()` with your library's equivalents, and
-- `translate()` with your library's native-event → `bd_event` mapping.
+- the window functions (`be_width`/`be_height`/`be_time`) and the `SDL_GL_*`
+  setup in `bd_backend_sdl3_open()` with your library's equivalents, and
+- `bd_event_from_sdl()` with your library's native-event → `bd_event` mapping.
 
 The GLES3 GPU half is generic and can be kept as-is on any GLES-capable
 context. For a plain UI app with no 3D background, provide a real `clear`
 (`glClearColor` + `glClear`) and drop the host-side clear + 3D draw. See
-`src/birdie/README.md` ("Porting to another backend") for the full `bd_backend`
-contract.
+`src/birdie-gui/README.md` ("Porting to another backend") for the full
+`bd_backend` contract.
 
 Made by a machine. PUBLIC DOMAIN (CC0-1.0)

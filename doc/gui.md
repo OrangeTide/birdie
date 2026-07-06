@@ -151,10 +151,11 @@ focus traversal have landed; the remaining v0.3 items are noted below).
 What is built:
 
 - **Backend abstraction** — the `bd_backend` GPU vtable + neutral `bd_event`;
-  the toolkit never touches a windowing/render library directly. Two backends:
-  the reference **ludica** binding (`bd_backend_ludica.c`, what birdie runs on)
-  and a raw **OpenGL ES 3 / X11** binding (`src/guitest/`, what the gallery
-  runs on). Runtime-verified on both.
+  the toolkit never touches a windowing/render library directly. Three backends:
+  the reference **ludica** binding (`bd_backend_ludica.c`, what birdie runs on),
+  a raw **OpenGL ES 3 / X11** binding (`src/guitest/`, what the gallery runs on),
+  and an **SDL3** binding (`bd_backend_sdl3.c`, the examples/sdl3 demo host).
+  Runtime-verified on ludica and GLES.
 - **Renderer** — `bd_draw.c` builds rects, textured sprites, and stb_truetype
   text on the GPU interface; widgets can also drop to a custom fragment shader.
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
@@ -421,7 +422,7 @@ icons with persistent positional state. It is
 collection (a MUD client's server list, a DAW's known-plugin list), so the
 view refreshes from live data without the app rebuilding it.
 
-In `src/birdie/bd_widget_explorer.{c,h}`. Working: model query, grid/free
+In `src/birdie-gui/bd_widget_explorer.{c,h}`. Working: model query, grid/free
 layout, rendering, click selection (replace / Ctrl-toggle / **Shift-range**,
 the latter additive with Ctrl), double-click activate, right-click context,
 wheel scroll, **drag-move** (commit via `set_pos` + `moved()`),
@@ -568,7 +569,7 @@ base the rich-text editor widget composes over.
 
 ### Editor widget (rich-text, row-oriented) — implemented
 
-`src/birdie/bd_widget_editor.{c,h}`. A higher-level text editor with the same
+`src/birdie-gui/bd_widget_editor.{c,h}`. A higher-level text editor with the same
 multi-line editing model as `BD_MULTILINE` plus a rich-text styling layer. An
 extension (`widget_ext`), not a core widget. (It reimplements the editing
 model rather than embedding a `BD_MULTILINE`, since the multiline renders one

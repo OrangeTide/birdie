@@ -26,13 +26,13 @@
  * tree layout.
  */
 #ifndef BD_ASSET_GUI_FONT
-#define BD_ASSET_GUI_FONT    "src/birdie/assets/fonts/DejaVuSans.ttf"
+#define BD_ASSET_GUI_FONT    "src/birdie-gui/assets/fonts/DejaVuSans.ttf"
 #endif
 #ifndef BD_ASSET_PIN_OUT
-#define BD_ASSET_PIN_OUT     "src/birdie/assets/pushpin/pushpin-out-14.png"
+#define BD_ASSET_PIN_OUT     "src/birdie-gui/assets/pushpin/pushpin-out-14.png"
 #endif
 #ifndef BD_ASSET_PIN_IN
-#define BD_ASSET_PIN_IN      "src/birdie/assets/pushpin/pushpin-in-14.png"
+#define BD_ASSET_PIN_IN      "src/birdie-gui/assets/pushpin/pushpin-in-14.png"
 #endif
 
 /* fallback intrinsic size for a child with no preferred dimension */

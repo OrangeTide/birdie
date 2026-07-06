@@ -72,25 +72,25 @@ static float        font_line_h;
 
 /* default variant paths; override with -DBD_ASSET_GUI_FONT_* at build time */
 #ifndef BD_ASSET_GUI_FONT_BOLD
-#define BD_ASSET_GUI_FONT_BOLD       "src/birdie/assets/fonts/DejaVuSans-Bold.ttf"
+#define BD_ASSET_GUI_FONT_BOLD       "src/birdie-gui/assets/fonts/DejaVuSans-Bold.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_ITALIC
-#define BD_ASSET_GUI_FONT_ITALIC     "src/birdie/assets/fonts/DejaVuSans-Oblique.ttf"
+#define BD_ASSET_GUI_FONT_ITALIC     "src/birdie-gui/assets/fonts/DejaVuSans-Oblique.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_BOLDITALIC
-#define BD_ASSET_GUI_FONT_BOLDITALIC "src/birdie/assets/fonts/DejaVuSans-BoldOblique.ttf"
+#define BD_ASSET_GUI_FONT_BOLDITALIC "src/birdie-gui/assets/fonts/DejaVuSans-BoldOblique.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_MONO
-#define BD_ASSET_GUI_FONT_MONO           "src/birdie/assets/fonts/DejaVuSansMono.ttf"
+#define BD_ASSET_GUI_FONT_MONO           "src/birdie-gui/assets/fonts/DejaVuSansMono.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_MONO_BOLD
-#define BD_ASSET_GUI_FONT_MONO_BOLD      "src/birdie/assets/fonts/DejaVuSansMono-Bold.ttf"
+#define BD_ASSET_GUI_FONT_MONO_BOLD      "src/birdie-gui/assets/fonts/DejaVuSansMono-Bold.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_MONO_ITALIC
-#define BD_ASSET_GUI_FONT_MONO_ITALIC    "src/birdie/assets/fonts/DejaVuSansMono-Oblique.ttf"
+#define BD_ASSET_GUI_FONT_MONO_ITALIC    "src/birdie-gui/assets/fonts/DejaVuSansMono-Oblique.ttf"
 #endif
 #ifndef BD_ASSET_GUI_FONT_MONO_BOLDITALIC
-#define BD_ASSET_GUI_FONT_MONO_BOLDITALIC "src/birdie/assets/fonts/DejaVuSansMono-BoldOblique.ttf"
+#define BD_ASSET_GUI_FONT_MONO_BOLDITALIC "src/birdie-gui/assets/fonts/DejaVuSansMono-BoldOblique.ttf"
 #endif
 
 static inline void

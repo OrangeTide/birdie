@@ -141,11 +141,11 @@ jobs:
           BIN=_out/${{ matrix.triplet }}/bin/birdie
           test -x "$BIN"
           ${{ matrix.strip }} "$BIN"
-          mkdir -p "dist/$PKG/src/birdie"
+          mkdir -p "dist/$PKG/src/birdie-gui"
           cp "$BIN" "dist/$PKG/"
           # Assets are compiled-in as paths relative to the working directory,
-          # so keep them at src/birdie/assets/ verbatim; birdie.sh cd's here.
-          cp -r src/birdie/assets "dist/$PKG/src/birdie/"
+          # so keep them at src/birdie-gui/assets/ verbatim; birdie.sh cd's here.
+          cp -r src/birdie-gui/assets "dist/$PKG/src/birdie-gui/"
           printf '%s\n' \
             '#!/bin/sh' \
             '# Launch birdie from its own directory so bundled assets resolve.' \
@@ -157,7 +157,7 @@ jobs:
             '' \
             'Run:  ./birdie.sh      (or: cd into this folder, then ./birdie)' \
             '' \
-            'birdie loads its fonts and terminal atlas from src/birdie/assets' \
+            'birdie loads its fonts and terminal atlas from src/birdie-gui/assets' \
             'relative to the working directory, so start it from this folder;' \
             'birdie.sh does that for you.' \
             '' \

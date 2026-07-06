@@ -27,7 +27,7 @@
 #define TERM_SCROLLBACK 2000
 
 #ifndef BD_ASSET_TERM_FONT
-#define BD_ASSET_TERM_FONT "src/birdie/assets/font8x16.png"
+#define BD_ASSET_TERM_FONT "src/birdie-gui/assets/font8x16.png"
 #endif
 
 struct vt_widget {

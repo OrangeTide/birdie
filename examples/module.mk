@@ -9,8 +9,8 @@
 #   cd examples && make          # builds every example under _out/
 #
 # Each example pulls the birdie-gui toolkit sources straight from the parent
-# tree (../src/birdie) and the terminal library from ../src/libvt, so nothing
-# is vendored twice. Build outputs land in examples/_build and examples/_out,
+# tree (../src/birdie-gui) and the terminal library from ../src/libvt, so
+# nothing is vendored twice. Build outputs land in examples/_build and _out,
 # isolated from the main project's.
 #
 

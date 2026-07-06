@@ -24,6 +24,7 @@ SUBDIRS = \
 	src/thirdparty/lua \
 	src/thirdparty/lpeg \
 	src/libvt \
+	src/birdie-gui \
 	src/birdie
 
 # Shader-to-C generation using the vendored glsl2h.
@@ -33,18 +34,18 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 # ----------------------------------------------------------------------
 # Source distribution of the GUI toolkit (birdie-gui).
 #
-# `make dist` bundles the toolkit's public API, implementation, both reference
-# backends (ludica and raw X11/EGL/GLES), all extension widgets, the standalone
-# widget gallery, the vendored stb single-headers, and runtime assets into a
-# versioned ZIP under $(OUTDIR). Override the version with
-# `make dist GUI_VERSION=x.y.z`. Still external: libvt (terminal widget) and,
-# for the ludica backend, ludica itself.
+# `make dist` bundles the toolkit's public API, implementation, three reference
+# backends (ludica, SDL3, and raw X11/EGL/GLES), all extension widgets, the
+# standalone widget gallery, vendored libvt (so the terminal widget compiles),
+# the vendored stb single-headers, and runtime assets into a versioned ZIP
+# under $(OUTDIR). Override the version with `make dist GUI_VERSION=x.y.z`.
+# Each backend still needs its own host library (ludica / SDL3 / X11+EGL).
 # ----------------------------------------------------------------------
 GUI_VERSION ?= 0.4.0
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip
-DIST_SRC    := src/birdie
+DIST_SRC    := src/birdie-gui
 DIST_GLES   := src/guitest
 DIST_STB    := src/thirdparty/stb
 
@@ -53,27 +54,32 @@ DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
                 bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_canvas.h bd_widget_table.h \
                 bd_widget_inventory.h
-# toolkit implementation + reference ludica backend
+# toolkit implementation + reference ludica and SDL3 backends
 DIST_SOURCES := widget.c bd_draw.c bd_widget_vt.c bd_widget_value.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_canvas.c \
                 bd_widget_table.c bd_widget_inventory.c \
-                bd_backend_ludica.c bd_backend_ludica.h
+                bd_backend_ludica.c bd_backend_ludica.h \
+                bd_backend_sdl3.c bd_backend_sdl3.h
 # raw X11/EGL/GLES reference backend + widget gallery (Linux)
 DIST_GLES_FILES := window.h x11_window.c bd_backend_gles.c bd_backend_gles.h \
                    widget_test.c
 # vendored single-file libraries the toolkit includes
 DIST_STB_FILES := stb_truetype.h stb_image.h
+# libvt (terminal escape-sequence engine) — bundled so the VT widget compiles
+DIST_LIBVT  := src/libvt
 
 .PHONY : dist
 dist :
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
 	@mkdir -p $(DIST_STAGE)/include $(DIST_STAGE)/src \
-	    $(DIST_STAGE)/backend-gles $(DIST_STAGE)/thirdparty/stb \
+	    $(DIST_STAGE)/backend-gles $(DIST_STAGE)/libvt \
+	    $(DIST_STAGE)/thirdparty/stb \
 	    $(DIST_STAGE)/assets/fonts $(DIST_STAGE)/assets/pushpin
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_HEADERS)) $(DIST_STAGE)/include/
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_SOURCES)) $(DIST_STAGE)/src/
 	@cp $(addprefix $(DIST_GLES)/,$(DIST_GLES_FILES)) $(DIST_STAGE)/backend-gles/
 	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
+	@cp $(DIST_LIBVT)/*.c $(DIST_LIBVT)/*.h $(DIST_STAGE)/libvt/
 	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
 	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans-Bold.ttf \
@@ -97,19 +103,20 @@ dist :
 	    'See README.md for usage.' \
 	    '' \
 	    '  include/        public API headers' \
-	    '  src/            toolkit implementation + reference ludica backend' \
+	    '  src/            toolkit implementation + reference ludica/SDL3 backends' \
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
+	    '  libvt/          terminal escape-sequence engine (backs the VT widget)' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
 	    '  assets/         chrome TTF (+ license), CP437 terminal atlas, pushpins' \
 	    '  module.mk       backend-agnostic modular-make library build' \
 	    '  LICENSE.txt     CC0 dedication + bundled third-party licenses' \
 	    '  get-birdie-gui.sh  vendoring updater (fetch a release into your project)' \
 	    '' \
-	    'External dependencies (provide these yourself):' \
-	    '  libvt   required by the terminal widget (src/bd_widget_vt.c).' \
-	    '  ludica  only for the ludica backend (src/bd_backend_ludica.c). The' \
-	    '          backend-gles/ backend needs X11 + EGL + GLESv2 instead, and' \
-	    '          no ludica. For another host, implement bd_backend.' \
+	    'Backends (compile one into your own target; the library builds none):' \
+	    '  src/bd_backend_ludica.c  needs ludica.' \
+	    '  src/bd_backend_sdl3.c    needs SDL3 (pkg-config sdl3) + an ES3 loader.' \
+	    '  backend-gles/            needs X11 + EGL + GLESv2, no ludica.' \
+	    '  For another host, implement bd_backend (see include/bd_backend.h).' \
 	    '' \
 	    'Made by a machine. PUBLIC DOMAIN (CC0-1.0)' \
 	    > $(DIST_STAGE)/MANIFEST.txt
@@ -127,12 +134,12 @@ TEST_BIN := $(BUILDDIR)/test_gui
 .PHONY : test
 test : bd_vt
 	@mkdir -p $(BUILDDIR)
-	cc -Wall -W -Isrc/birdie -Isrc/libvt -Isrc/thirdparty/stb \
-	    test/test_gui.c src/birdie/widget.c src/birdie/bd_widget_vt.c \
-	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
-	    src/birdie/bd_widget_explorer.c src/birdie/bd_widget_editor.c \
-	    src/birdie/bd_widget_canvas.c src/birdie/bd_widget_table.c \
-	    src/birdie/bd_widget_inventory.c \
+	cc -Wall -W -Isrc/birdie-gui -Isrc/libvt -Isrc/thirdparty/stb \
+	    test/test_gui.c src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
+	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_widget_value.c \
+	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
+	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
+	    src/birdie-gui/bd_widget_inventory.c \
 	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
 	@echo "running headless GUI test:"
 	@$(TEST_BIN)
@@ -150,14 +157,14 @@ GALLERY_BIN := $(BUILDDIR)/birdie-gui-gallery
 .PHONY : widget-test
 widget-test : bd_vt
 	@mkdir -p $(BUILDDIR)
-	cc -Wall -W -Isrc/birdie -Isrc/guitest -Isrc/libvt -Isrc/thirdparty/stb \
+	cc -Wall -W -Isrc/birdie-gui -Isrc/guitest -Isrc/libvt -Isrc/thirdparty/stb \
 	    src/guitest/widget_test.c src/guitest/x11_window.c \
 	    src/guitest/bd_backend_gles.c \
-	    src/birdie/widget.c src/birdie/bd_widget_vt.c \
-	    src/birdie/bd_draw.c src/birdie/bd_widget_value.c \
-	    src/birdie/bd_widget_explorer.c src/birdie/bd_widget_editor.c \
-	    src/birdie/bd_widget_canvas.c src/birdie/bd_widget_table.c \
-	    src/birdie/bd_widget_inventory.c \
+	    src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
+	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_widget_value.c \
+	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
+	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
+	    src/birdie-gui/bd_widget_inventory.c \
 	    $(BUILDDIR)/bd_vt.a \
 	    -lX11 -lXi -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
 	@echo "built widget gallery: $(GALLERY_BIN)"
