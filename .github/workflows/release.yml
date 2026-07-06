@@ -1,0 +1,208 @@
+name: Release
+
+# Produces the release artifacts for a tag:
+#   * birdie-gui-<version>.zip  -- the birdie-gui widget-library source bundle
+#                                  (what get-birdie-gui.sh fetches).
+#   * birdie-<version>-linux-<arch>.tar.gz -- the birdie MUD client binary,
+#                                  cross-built for x86_64, aarch64, and arm32.
+# and attaches them to a GitHub Release for the tag.
+#
+# Tags are of the form vX.Y.Z; the version is the tag without the leading v.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, e.g. v0.4.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Resolve the tag and version once, for every downstream job to reuse.
+  setup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          set -eu
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          case "$TAG" in
+          v*) : ;;
+          *)  echo "::error::tag '$TAG' does not start with 'v'"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  # birdie-gui source bundle. No apt deps: `make test` links only libvt and
+  # `make dist` is a pure file copy. Gating the bundle on the headless test
+  # keeps a broken toolkit from being published.
+  source:
+    needs: setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Headless GUI test
+        run: make test
+      - name: Build birdie-gui source bundle
+        run: make dist GUI_VERSION=${{ needs.setup.outputs.version }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: birdie-gui-source
+          path: _out/*/birdie-gui-${{ needs.setup.outputs.version }}.zip
+          if-no-files-found: error
+
+  # birdie MUD client binaries. x86_64 builds natively; aarch64/arm32 are
+  # cross-compiled with the GNU cross toolchains plus the target-arch X11/GL
+  # dev libraries pulled from the Ubuntu ports mirror via dpkg multiarch. The
+  # build itself needs no host-run codegen (glsl2h is a shell script), so only
+  # the final link needs the target libraries.
+  binaries:
+    needs: setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            triplet: x86_64-linux-gnu
+            cc: cc
+            strip: strip
+            march: x86-64
+            debarch: amd64
+          - arch: aarch64
+            triplet: aarch64-linux-gnu
+            cc: aarch64-linux-gnu-gcc
+            strip: aarch64-linux-gnu-strip
+            march: armv8-a
+            debarch: arm64
+            xpkg: gcc-aarch64-linux-gnu
+          - arch: arm32
+            triplet: arm-linux-gnueabihf
+            cc: arm-linux-gnueabihf-gcc
+            strip: arm-linux-gnueabihf-strip
+            march: armv7-a+fp
+            debarch: armhf
+            xpkg: gcc-arm-linux-gnueabihf
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          set -eux
+          if [ "${{ matrix.debarch }}" != "amd64" ]; then
+            CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+            sudo dpkg --add-architecture ${{ matrix.debarch }}
+            # Constrain the default mirror to amd64 (it has no arm packages)...
+            sudo sed -i 's/^Signed-By:/Architectures: amd64\nSigned-By:/' \
+                /etc/apt/sources.list.d/ubuntu.sources
+            # ...and add the ports mirror that carries arm64/armhf.
+            printf '%s\n' \
+              'Types: deb' \
+              'URIs: http://ports.ubuntu.com/ubuntu-ports/' \
+              "Suites: $CODENAME $CODENAME-updates $CODENAME-backports" \
+              'Components: main restricted universe multiverse' \
+              'Architectures: arm64 armhf' \
+              'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+              | sudo tee /etc/apt/sources.list.d/ports.sources >/dev/null
+          fi
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.xpkg }} \
+              libx11-dev:${{ matrix.debarch }} \
+              libegl-dev:${{ matrix.debarch }} \
+              libgles-dev:${{ matrix.debarch }}
+
+      # RELEASE_MARCH is pinned per arch: the Makefile defaults it to `native`,
+      # which is invalid when cross-compiling for ARM and would bake host-CPU
+      # features into a binary meant to be portable. These are the standard
+      # Ubuntu baselines for each arch.
+      - name: Build (RELEASE)
+        run: make CC=${{ matrix.cc }} RELEASE=1 RELEASE_MARCH=${{ matrix.march }}
+
+      - name: Package
+        run: |
+          set -eux
+          VERSION=${{ needs.setup.outputs.version }}
+          PKG=birdie-$VERSION-linux-${{ matrix.arch }}
+          BIN=_out/${{ matrix.triplet }}/bin/birdie
+          test -x "$BIN"
+          ${{ matrix.strip }} "$BIN"
+          mkdir -p "dist/$PKG/src/birdie"
+          cp "$BIN" "dist/$PKG/"
+          # Assets are compiled-in as paths relative to the working directory,
+          # so keep them at src/birdie/assets/ verbatim; birdie.sh cd's here.
+          cp -r src/birdie/assets "dist/$PKG/src/birdie/"
+          printf '%s\n' \
+            '#!/bin/sh' \
+            '# Launch birdie from its own directory so bundled assets resolve.' \
+            'cd "$(dirname "$0")" && exec ./birdie "$@"' \
+            > "dist/$PKG/birdie.sh"
+          chmod +x "dist/$PKG/birdie.sh"
+          printf '%s\n' \
+            "birdie $VERSION -- MUD client (Linux ${{ matrix.arch }})" \
+            '' \
+            'Run:  ./birdie.sh      (or: cd into this folder, then ./birdie)' \
+            '' \
+            'birdie loads its fonts and terminal atlas from src/birdie/assets' \
+            'relative to the working directory, so start it from this folder;' \
+            'birdie.sh does that for you.' \
+            '' \
+            'Needs the X11 + EGL + OpenGL ES runtime libraries (libX11, libEGL,' \
+            'libGLESv2), present on most Linux desktops.' \
+            '' \
+            'Made by a machine. PUBLIC DOMAIN (CC0-1.0)' \
+            > "dist/$PKG/README.txt"
+          tar -C dist -czf "dist/$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: birdie-${{ matrix.arch }}
+          path: dist/birdie-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  # Collect every artifact and attach it to the tag's GitHub Release.
+  publish:
+    needs: [setup, source, binaries]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eux
+          TAG=${{ needs.setup.outputs.tag }}
+          VERSION=${{ needs.setup.outputs.version }}
+          mkdir -p out
+          find artifacts -type f \
+              \( -name '*.tar.gz' -o -name "birdie-gui-$VERSION.zip" \) \
+              -exec cp -t out {} +
+          ( cd out && sha256sum ./* > SHA256SUMS )
+          PRE=
+          case "$VERSION" in *-*) PRE=--prerelease ;; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" --title "birdie $VERSION" \
+                --generate-notes $PRE out/*
+          fi
