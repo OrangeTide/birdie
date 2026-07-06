@@ -10,6 +10,28 @@ The toolkit is reusable on its own. See
 library, and "[Reusing birdie-gui](#reusing-birdie-gui)" below to vendor it into
 another project.
 
+## The MUD client
+
+`birdie` is the desktop client: a menu bar, a session side panel, a terminal
+output pane, and a command line, running on the ludica backend. The Session
+menu opens a connect dialog backed by a sortable MUD-list table (add / edit /
+import from CSV). Networking, triggers, and the scripting VM are wired in;
+`main.c` is the shell that ties them to the UI.
+
+![The birdie MUD client, showing the connect dialog with its MUD-list table](doc/images/birdie-client.png)
+
+## birdie-gui
+
+**birdie-gui** is the retained-mode widget toolkit birdie is built on, reusable
+as a standalone library. It draws through a small backend-neutral GPU interface,
+so the same widget code runs on ludica, SDL3, or raw X11/EGL/GLES. The gallery
+below (`make widget-test`) exercises the full widget set on the GLES backend:
+menu + folder tabs, a libvt terminal, a data table, an inventory grid, rotary
+knobs and dials, switches and wheels, X-Y pads, sliders, and a pressure/tilt
+drawing canvas.
+
+![The birdie-gui widget gallery on the GLES backend, showing the full widget set](doc/images/birdie-gui-gallery.png)
+
 ## Build
 
 ```sh
