@@ -14,6 +14,33 @@ It has two API tiers:
   explorer/icon browser (`bd_widget_explorer.h`), and the rich-text editor
   (`bd_widget_editor.h`) are built on it; `bd_widget_vt.c` is the reference.
 
+## Vendoring into your project
+
+birdie-gui is distributed as a source ZIP, one per tagged release. The
+`get-birdie-gui.sh` script (shipped in this bundle) downloads a release and
+drops it into a vendor directory in your project, so you only ever vendor a
+tagged, CI-built version. It pulls the widget library only, not the birdie MUD
+client it lives in.
+
+To add it to a project, run the script straight from the repo (it defaults to
+the canonical GitHub release assets, so no configuration is needed):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OrangeTide/birdie/main/scripts/get-birdie-gui.sh \
+    | sh -s -- 0.4.0 third_party/birdie-gui
+```
+
+That vendors birdie-gui 0.4.0 into `third_party/birdie-gui/`. Re-run it with a
+newer version to update in place; it refuses to overwrite a directory that is
+not a prior birdie-gui checkout unless you pass `--force`. To pull from a fork
+or mirror, set `BIRDIE_GUI_REPO`. Commit the script to your repo so updates are
+a one-liner:
+
+```sh
+scripts/get-birdie-gui.sh 0.4.0            # into third_party/birdie-gui by default
+scripts/get-birdie-gui.sh --help           # options and environment variables
+```
+
 ## Usage
 
 A minimal app using the reference ludica backend. The host owns the main loop
