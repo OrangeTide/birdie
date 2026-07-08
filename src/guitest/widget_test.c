@@ -504,6 +504,51 @@ build_ui(void)
 	bd_create(ccol, BD_BUTTON, BD_LABEL_S, "Clear", BD_PREF_H_I, 24,
 		BD_ON_CLICK_F, on_canvas_clear, BD_END);
 
+	/* ---- layout: anchor (cell alignment) and packing (main-axis) ---- */
+	bd_id lrow = section(right, "Anchor & packing "
+		"(BD_ANCHOR_I / BD_PACK_I)", BD_LAYOUT_ROW, 150);
+
+	/* cross-axis anchor: fixed-width buttons align L / center / R in a column */
+	bd_id acol = bd_create(lrow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_GROW_I, 1, BD_GAP_I, 4, BD_PAD_I, 4, BD_BG_C, 0x232629FFu, BD_END);
+	bd_create(acol, BD_BUTTON, BD_LABEL_S, "W", BD_PREF_W_I, 64,
+		BD_PREF_H_I, 22, BD_ANCHOR_I, BD_ANCHOR_W, BD_END);
+	bd_create(acol, BD_BUTTON, BD_LABEL_S, "center", BD_PREF_W_I, 64,
+		BD_PREF_H_I, 22, BD_ANCHOR_I, BD_ANCHOR_CENTER, BD_END);
+	bd_create(acol, BD_BUTTON, BD_LABEL_S, "E", BD_PREF_W_I, 64,
+		BD_PREF_H_I, 22, BD_ANCHOR_I, BD_ANCHOR_E, BD_END);
+
+	/* packing: each row justifies its two chips differently */
+	static const struct { const char *name; int pack; } packs[] = {
+		{ "start",   BD_PACK_START },
+		{ "center",  BD_PACK_CENTER },
+		{ "end",     BD_PACK_END },
+		{ "between", BD_PACK_SPACE_BETWEEN },
+	};
+	bd_id pcol = bd_create(lrow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_GROW_I, 1, BD_GAP_I, 4, BD_PAD_I, 4, BD_BG_C, 0x232629FFu, BD_END);
+	for (int i = 0; i < (int)(sizeof packs / sizeof packs[0]); i++) {
+		bd_id pr = bd_create(pcol, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+			BD_GROW_I, 1, BD_GAP_I, 3, BD_PACK_I, packs[i].pack, BD_END);
+		bd_create(pr, BD_BUTTON, BD_LABEL_S, packs[i].name,
+			BD_PREF_W_I, 58, BD_END);
+		bd_create(pr, BD_BUTTON, BD_LABEL_S, "+", BD_PREF_W_I, 20, BD_END);
+	}
+
+	/* FIXED anchoring: pills pinned to the corners and centre, tracking resize */
+	bd_id fbox = bd_create(lrow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+		BD_GROW_I, 1, BD_BG_C, 0x232629FFu, BD_END);
+	static const struct { const char *name; int anchor; } pins[] = {
+		{ "NW", BD_ANCHOR_NW }, { "NE", BD_ANCHOR_NE },
+		{ "SW", BD_ANCHOR_SW }, { "SE", BD_ANCHOR_SE },
+		{ "mid", BD_ANCHOR_CENTER },
+	};
+	for (int i = 0; i < (int)(sizeof pins / sizeof pins[0]); i++)
+		bd_create(fbox, BD_LABEL, BD_LABEL_S, pins[i].name,
+			BD_PREF_W_I, 30, BD_PREF_H_I, 16, BD_ANCHOR_I, pins[i].anchor,
+			BD_X_I, 4, BD_Y_I, 4,
+			BD_BG_C, 0x3C6E8FFFu, BD_FG_C, 0xEAF0F4FFu, BD_END);
+
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
@@ -524,7 +569,7 @@ build_ui(void)
 int
 main(void)
 {
-	if (win_open("birdie-gui widget gallery", 1024, 720) != 0) {
+	if (win_open("birdie-gui widget gallery", 1024, 928) != 0) {
 		fprintf(stderr, "widget_test: cannot open window\n");
 		return 1;
 	}
