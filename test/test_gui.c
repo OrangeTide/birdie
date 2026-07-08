@@ -172,6 +172,11 @@ static int click_w1, click_w2;
 static void on_click_w1(bd_id id, void *a){ (void)id; (void)a; click_w1++; }
 static void on_click_w2(bd_id id, void *a){ (void)id; (void)a; click_w2++; }
 
+/* in-surface WM: which floating window's content got a click */
+static int wm_click_a, wm_click_b;
+static void on_wm_a(bd_id id, void *a){ (void)id; (void)a; wm_click_a++; }
+static void on_wm_b(bd_id id, void *a){ (void)id; (void)a; wm_click_b++; }
+
 /* ---- in-memory explorer model (3 auto-placed icons) ---- */
 static struct exp_item { uint64_t key; const char *label; int x, y; } exp_items[] = {
 	{ 100, "a", -1, -1 }, { 101, "b", -1, -1 }, { 102, "c", -1, -1 },
@@ -536,6 +541,120 @@ main(void)
 	bd_destroy(f2);
 	check("destroying frame-2 frees window 2", bd_frame_for_window(2) == BD_NONE);
 	(void)b2;
+
+	bd_gui_cleanup();
+
+	/* ---- in-surface window manager: gravity, snapping, docking, lock ----
+	 * The stub backend is single-surface (multi_window == 0), so the toolkit
+	 * runs its own WM: windows[0] is the full-surface desktop and later frames
+	 * float, decorated with a title bar the user drags/snaps/docks/locks. */
+	bd_gui_init(&stub, NULL);              /* surface is be_width x be_height = 800x500 */
+
+	bd_id desk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id fa = bd_create(BD_NONE, BD_FRAME,
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 100, BD_Y_I, 100, BD_END);
+	bd_create(fa, BD_BUTTON, BD_LABEL_S, "A", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_wm_a, BD_END);
+
+	bd_gui_layout(800, 500);
+
+	int wrx, wry, wrw, wrh;
+	bd_widget_rect(desk, &wrx, &wry, &wrw, &wrh);
+	check("desktop root fills the surface",
+	    wrx == 0 && wry == 0 && wrw == 800 && wrh == 500);
+
+	int wax, way, waw, wah;
+	bd_widget_rect(fa, &wax, &way, &waw, &wah);
+	check("floating window laid out at its X/Y and preferred size",
+	    wax == 100 && way == 100 && waw == 200 && wah == 150);
+
+	/* drag the title bar: press at (150,110) [title spans y 100..122], move
+	 * to (300,210); the window follows by the same delta and stays floating */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 150, .y = 110,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 300, .y = 210 });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 300, .y = 210,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_layout(800, 500);
+	bd_widget_rect(fa, &wax, &way, &waw, &wah);
+	check("title-bar drag moves the window", wax == 250 && way == 200);
+	check("dragging away from edges leaves it floating",
+	    bd_window_gravity(fa) == BD_GRAVITY_NONE);
+
+	/* drag the window's left edge into the snap zone: it docks LEFT, becoming
+	 * a full-height strip at the preferred width */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 300, .y = 210,
+	    .button = BD_MOUSE_LEFT });   /* grab title, offset (50,10) */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 55, .y = 260 });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 55, .y = 260,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_layout(800, 500);
+	bd_widget_rect(fa, &wax, &way, &waw, &wah);
+	check("snapping to the left edge docks the window",
+	    bd_window_gravity(fa) == BD_GRAVITY_LEFT);
+	check("a LEFT dock is a full-height strip at the preferred width",
+	    wax == 0 && way == 0 && waw == 200 && wah == 500);
+
+	/* lock the dock: it can no longer be dragged, but keeps its gravity */
+	bd_window_set_locked(fa, 1);
+	check("window reports locked", bd_window_locked(fa) == 1);
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 100, .y = 10,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 400, .y = 300 });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 400, .y = 300,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_layout(800, 500);
+	bd_widget_rect(fa, &wax, &way, &waw, &wah);
+	check("a locked window ignores title-bar drags",
+	    bd_window_gravity(fa) == BD_GRAVITY_LEFT && wax == 0 && waw == 200);
+
+	/* a docked window re-snaps to its edge when the surface resizes */
+	bd_gui_layout(1000, 600);
+	bd_widget_rect(fa, &wax, &way, &waw, &wah);
+	check("docked window re-snaps to its edge on resize",
+	    wax == 0 && way == 0 && waw == 200 && wah == 600);
+
+	bd_gui_cleanup();
+
+	/* ---- in-surface WM: raising brings a window to the front ---- */
+	wm_click_a = wm_click_b = 0;
+	bd_gui_init(&stub, NULL);
+	bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END); /* desktop */
+	bd_id wa = bd_create(BD_NONE, BD_FRAME,
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 100, BD_Y_I, 100, BD_END);
+	bd_create(wa, BD_BUTTON, BD_LABEL_S, "A", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_wm_a, BD_END);
+	bd_id wb = bd_create(BD_NONE, BD_FRAME,
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 150, BD_Y_I, 120, BD_END);
+	bd_create(wb, BD_BUTTON, BD_LABEL_S, "B", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_wm_b, BD_END);
+	bd_gui_layout(800, 500);
+
+	/* wb was created last, so it is in front; a click in the overlap (200,200)
+	 * reaches wb's content */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 200, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 200, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	check("front window receives clicks in the overlap",
+	    wm_click_b == 1 && wm_click_a == 0);
+
+	/* click wa's exposed title strip (120,110) to raise it above wb */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 120, .y = 110,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 120, .y = 110,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 200, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 200, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	check("clicking a window's title raises it to the front",
+	    wm_click_a == 1 && wm_click_b == 1);
+
+	/* rendering the WM (desktop + decorated floating windows) does not crash */
+	n_drawverts = 0;
+	bd_gui_render();
+	check("WM render issued GPU draws", n_drawverts > 0);
 
 	bd_gui_cleanup();
 

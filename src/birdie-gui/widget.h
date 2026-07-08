@@ -35,6 +35,26 @@ enum {
 };
 
 /*
+ * Window gravity. A secondary top-level BD_FRAME rendered by the in-surface
+ * window manager (single-surface backends, see bd_window_dock) sticks to the
+ * named edge or corner of the surface and re-snaps there on resize. An edge
+ * value stretches the window into a full-length dock strip along that edge; a
+ * corner value pins the corner and keeps the window's preferred size.
+ * BD_GRAVITY_NONE floats freely at its X/Y position.
+ */
+enum bd_gravity {
+	BD_GRAVITY_NONE = 0,
+	BD_GRAVITY_LEFT,
+	BD_GRAVITY_RIGHT,
+	BD_GRAVITY_TOP,
+	BD_GRAVITY_BOTTOM,
+	BD_GRAVITY_TOP_LEFT,
+	BD_GRAVITY_TOP_RIGHT,
+	BD_GRAVITY_BOTTOM_LEFT,
+	BD_GRAVITY_BOTTOM_RIGHT,
+};
+
+/*
  * Attribute IDs — low 4 bits encode the value type so the varargs
  * reader knows which va_arg width to pull:
  *   0=end  1=int  2=string  3=pointer  4=callback  5=color  6=bool
@@ -53,6 +73,7 @@ enum {
 	BD_ROLE_I     = 0x091,
 	BD_PAD_I      = 0x0A1,
 	BD_GAP_I      = 0x0B1,
+	BD_GRAVITY_I  = 0x0C1,   /* top-level frame: enum bd_gravity */
 
 	BD_LABEL_S    = 0x012,
 	BD_NAME_S     = 0x022,
@@ -70,6 +91,7 @@ enum {
 	BD_ENABLED_B  = 0x026,
 	BD_MENU_PIN_B = 0x036,
 	BD_PASSWORD_B = 0x046,   /* text field: mask input (password entry) */
+	BD_LOCKED_B   = 0x056,   /* top-level frame: pin position, keep gravity */
 };
 
 /* tagged-union attribute for bd_create_v / bd_set_v */
@@ -175,5 +197,31 @@ bd_id bd_modal_active(void);   /* the open dialog, or BD_NONE */
  * backend window id back to its frame so a host can, e.g., destroy the right
  * frame on a window-close event. Returns BD_NONE if no frame owns that id. */
 bd_id bd_frame_for_window(int window_id);
+
+/*
+ * In-surface window manager. On a single-surface backend (multi_window == 0,
+ * e.g. ludica or SDL) the first top-level BD_FRAME is the full-surface desktop
+ * and every later top-level BD_FRAME is a floating window the toolkit draws,
+ * decorates with a title bar, and lets the user drag, raise, snap, and dock.
+ * (On a native multi-window backend each frame is a real OS window instead and
+ * these calls set the same gravity/lock state, ignored until such a backend
+ * grows client-side move support.)
+ *
+ * Gravity/snap/lock semantics:
+ *   - Dragging a window's title bar moves it. Released near a surface edge or
+ *     corner it snaps and docks there (gravity is set); dragged away it floats.
+ *   - A docked window re-snaps to its edge/corner whenever the surface resizes.
+ *   - Locking pins the window: it can no longer be dragged but keeps its
+ *     gravity and still re-snaps on resize (a fixed dock). Unlock to move again.
+ *
+ * These are thin wrappers over bd_set/bd_get_i with BD_GRAVITY_I / BD_LOCKED_B;
+ * position a floating window with BD_X_I / BD_Y_I and size it with
+ * BD_PREF_W_I / BD_PREF_H_I.
+ */
+void bd_window_dock(bd_id frame, int gravity);      /* enum bd_gravity */
+void bd_window_move(bd_id frame, int x, int y);     /* float to (x,y), undock */
+void bd_window_set_locked(bd_id frame, int locked);
+int  bd_window_locked(bd_id frame);
+int  bd_window_gravity(bd_id frame);
 
 #endif

@@ -447,15 +447,50 @@ What landed:
   multi-window recording stub); two independent native windows verified on a
   real display.
 
+**In-surface window manager (single-surface backends).** When `multi_window`
+is 0 (ludica, SDL, the headless stub) the toolkit runs its own window manager
+so secondary frames are usable, not just the primary one:
+
+- `windows[0]` (the first top-level `BD_FRAME`) is the full-surface **desktop**
+  and is drawn exactly as before, so existing single-frame hosts (birdie on
+  ludica, `make test`) are unaffected.
+- Every later top-level `BD_FRAME` is a **floating window** the toolkit lays
+  out at its own rectangle, decorates with a title bar (label + a lock and a
+  close button), and composites over the desktop. The `windows[]` array order
+  is the z-order; a press raises a window to the front and routes input to the
+  topmost window under the pointer (`wm_dispatch` / `wm_frame_at` in
+  `widget.c`).
+
+**Window gravity, snapping, and docking.** A floating window carries a
+`BD_GRAVITY_I` (`enum bd_gravity`) and a `BD_LOCKED_B` flag:
+
+- Dragging the title bar moves the window (`BD_X_I`/`BD_Y_I`). Released within
+  `WM_SNAP_DIST` of a surface edge or corner it **snaps and docks** there
+  (gravity is set); an edge dock becomes a full-length strip at the window's
+  preferred width/height, a corner dock keeps the preferred size. Dragging away
+  clears gravity and the window floats again. A translucent preview shows the
+  snap target during the drag.
+- A docked window **re-snaps to its edge/corner on every layout**, so it stays
+  glued when the surface resizes (a stable dock/palette).
+- **Locking** pins the window: it can no longer be dragged but keeps its
+  gravity and still re-snaps on resize. The title-bar padlock toggles it; the
+  host can also call `bd_window_set_locked()` / `bd_window_dock()` /
+  `bd_window_move()`.
+
+The `examples/sdl3` demo carries a real floating "Palette" frame exercising
+this; `test/test_gui.c` covers desktop-fills-surface, drag, snap/dock, lock,
+resize re-snap, and raise on the single-surface stub.
+
 Still to do:
 
-- **ludica / single-surface compositing.** `multi_window` is 0 on ludica,
-  so only the primary frame shows; secondary frames need an in-surface
-  window manager (the "backend composites frames itself" path). Deferred.
-- Window decorations/raise/move/focus policy, and per-window hover-leave
-  (moving in one window leaves stale hover in others).
-- Popups still use global menu state; one open menu at a time across all
-  windows.
+- **ludica / single-surface compositing** for genuinely separate render
+  targets. The in-surface WM above draws floating frames into the one surface;
+  a backend that composites frames as independent targets is still deferred.
+- Native (`multi_window == 1`) client-side move/snap: gravity/lock state is
+  stored but not yet applied to real OS windows (the OS manages those).
+- Per-window hover-leave (moving off a floating window can leave stale hover),
+  window resize handles, and per-window menu state (one open menu at a time
+  across all windows).
 
 ### Explorer / icon-browser widget
 

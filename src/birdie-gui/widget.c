@@ -92,6 +92,8 @@ struct widget {
 	float scroll_y;         /* BD_MULTILINE vertical scroll */
 
 	int win_id;             /* backend window id for a top-level frame; 0 = none */
+	int gravity;            /* enum bd_gravity: floating frame edge/corner dock */
+	int locked;             /* floating frame: pinned (not draggable), keeps gravity */
 
 	void *state;            /* per-instance data for extension widget types */
 };
@@ -109,6 +111,16 @@ static bd_id root = BD_NONE;
  * a multi_window backend each maps to a native window (pool[].win_id). */
 static bd_id windows[MAX_WINDOWS];
 static int   window_count;
+/* In-surface window manager (single-surface backends): windows[0] is the
+ * desktop, windows[1..] are floating frames drawn/decorated by the toolkit.
+ * The array order is the z-order (back to front). */
+#define WM_TITLEBAR_H 22        /* height of a floating window's title bar */
+#define WM_SNAP_DIST  16        /* proximity (px) that snaps a window to an edge */
+#define WM_BTN_SZ     16        /* title-bar glyph button width */
+static bd_id wm_active_frame = BD_NONE; /* focused floating window (BD_NONE=desktop) */
+static bd_id wm_drag_frame = BD_NONE;   /* window being dragged by its title bar */
+static int   wm_grab_dx, wm_grab_dy;    /* pointer offset within the dragged window */
+static int   wm_snap_cand = BD_GRAVITY_NONE; /* pending dock target during a drag */
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer */
@@ -535,6 +547,7 @@ apply_i(struct widget *w, int attr, int val)
 	case BD_ROLE_I:   w->role = val; break;
 	case BD_PAD_I:    w->pad = val; break;
 	case BD_GAP_I:    w->gap = val; break;
+	case BD_GRAVITY_I: w->gravity = val; break;
 	}
 }
 
@@ -602,6 +615,7 @@ apply_b(struct widget *w, int attr, int val)
 	case BD_ENABLED_B:  w->enabled = val; break;
 	case BD_MENU_PIN_B: w->menu_pinned = val; break;
 	case BD_PASSWORD_B: w->password = val; break;
+	case BD_LOCKED_B:   w->locked = val; break;
 	}
 }
 
@@ -785,8 +799,17 @@ register_window(bd_id id)
 		windows[window_count] = id;
 	window_count++;
 
-	if (!be || !be->multi_window)
+	if (!be || !be->multi_window) {
+		/* in-surface WM: cascade floating windows that gave no X/Y so they
+		 * don't all stack on the top-left corner */
+		if (window_count > 1 && w->user_x == 0 && w->user_y == 0 &&
+		    w->gravity == BD_GRAVITY_NONE) {
+			int step = 28 * (window_count - 1);
+			w->user_x = 40 + step;
+			w->user_y = 40 + step;
+		}
 		return;
+	}
 	if (window_count == 1) {
 		w->win_id = 1;                  /* adopt the host's primary window */
 		if (be->window_set_title && w->label)
@@ -839,6 +862,45 @@ bd_frame_for_window(int window_id)
 			return f;
 	}
 	return BD_NONE;
+}
+
+void
+bd_window_dock(bd_id frame, int gravity)
+{
+	if (frame == BD_NONE || !pool[frame].alive)
+		return;
+	pool[frame].gravity = gravity;
+}
+
+void
+bd_window_move(bd_id frame, int x, int y)
+{
+	if (frame == BD_NONE || !pool[frame].alive)
+		return;
+	pool[frame].gravity = BD_GRAVITY_NONE;
+	pool[frame].user_x = x;
+	pool[frame].user_y = y;
+}
+
+void
+bd_window_set_locked(bd_id frame, int locked)
+{
+	if (frame == BD_NONE || !pool[frame].alive)
+		return;
+	pool[frame].locked = locked ? 1 : 0;
+}
+
+int
+bd_window_locked(bd_id frame)
+{
+	return (frame != BD_NONE && pool[frame].alive) ? pool[frame].locked : 0;
+}
+
+int
+bd_window_gravity(bd_id frame)
+{
+	return (frame != BD_NONE && pool[frame].alive) ? pool[frame].gravity
+	    : BD_GRAVITY_NONE;
 }
 
 bd_id
@@ -931,6 +993,10 @@ bd_destroy(bd_id id)
 		pointer_capture = BD_NONE;
 	if (hover_ext == id)
 		hover_ext = BD_NONE;
+	if (wm_active_frame == id)
+		wm_active_frame = BD_NONE;
+	if (wm_drag_frame == id)
+		wm_drag_frame = BD_NONE;
 	w->alive = 0;
 }
 
@@ -973,10 +1039,12 @@ bd_get_i(bd_id id, int attr)
 	case BD_ROLE_I:   return w->role;
 	case BD_PAD_I:    return w->pad;
 	case BD_GAP_I:    return w->gap;
+	case BD_GRAVITY_I:  return w->gravity;
 	case BD_VISIBLE_B:  return w->visible;
 	case BD_ENABLED_B:  return w->enabled;
 	case BD_MENU_PIN_B: return w->menu_pinned;
 	case BD_PASSWORD_B: return w->password;
+	case BD_LOCKED_B:   return w->locked;
 	}
 	return 0;
 }
@@ -1018,17 +1086,19 @@ bd_next_sibling(bd_id id)
 /* layout engine                                                      */
 /* ------------------------------------------------------------------ */
 
+static void layout_children(bd_id id);
+
 static void
-layout_children(bd_id id)
+layout_children_rect(bd_id id, int rx, int ry, int rw, int rh)
 {
 	struct widget *w = &pool[id];
 	if (w->first_child == BD_NONE)
 		return;
 
-	int ax = w->x + w->pad;
-	int ay = w->y + w->pad;
-	int aw = w->w - 2 * w->pad;
-	int ah = w->h - 2 * w->pad;
+	int ax = rx + w->pad;
+	int ay = ry + w->pad;
+	int aw = rw - 2 * w->pad;
+	int ah = rh - 2 * w->pad;
 	if (aw < 0) aw = 0;
 	if (ah < 0) ah = 0;
 
@@ -1091,6 +1161,14 @@ layout_children(bd_id id)
 		if (ch->type != BD_MENU)
 			layout_children(c);
 	}
+}
+
+/* Lay a widget's children into its own box. */
+static void
+layout_children(bd_id id)
+{
+	struct widget *w = &pool[id];
+	layout_children_rect(id, w->x, w->y, w->w, w->h);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2310,6 +2388,9 @@ bd_gui_cleanup(void)
 	pool_next = 1;
 	root = BD_NONE;
 	window_count = 0;
+	wm_active_frame = BD_NONE;
+	wm_drag_frame = BD_NONE;
+	wm_snap_cand = BD_GRAVITY_NONE;
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
@@ -2323,16 +2404,130 @@ bd_gui_cleanup(void)
 	memset(touches, 0, sizeof touches);
 }
 
+/* ------------------------------------------------------------------ */
+/* in-surface window manager                                          */
+/* ------------------------------------------------------------------ */
+
+/* The toolkit runs its own window manager only when the backend cannot open
+ * native windows: floating frames are drawn and decorated inside the one
+ * surface. On a multi_window backend the OS manages each frame's window. */
+static int
+wm_enabled(void)
+{
+	return be && !be->multi_window;
+}
+
+/* The on-surface rectangle for a floating frame, derived from its gravity: an
+ * edge gravity stretches it into a full-length dock strip, a corner pins the
+ * corner at the preferred size, and BD_GRAVITY_NONE floats at X/Y (clamped so
+ * the title bar stays on-surface). */
+static void
+frame_wm_rect(bd_id f, int W, int H, int *ox, int *oy, int *ow, int *oh)
+{
+	struct widget *w = &pool[f];
+	int pw = w->pref_w > 0 ? w->pref_w : 240;
+	int ph = w->pref_h > 0 ? w->pref_h : 160;
+	if (pw > W) pw = W;
+	if (ph > H) ph = H;
+	int x = w->user_x, y = w->user_y, ww = pw, hh = ph;
+
+	switch (w->gravity) {
+	case BD_GRAVITY_LEFT:   x = 0;      y = 0;      ww = pw; hh = H;  break;
+	case BD_GRAVITY_RIGHT:  x = W - pw; y = 0;      ww = pw; hh = H;  break;
+	case BD_GRAVITY_TOP:    x = 0;      y = 0;      ww = W;  hh = ph; break;
+	case BD_GRAVITY_BOTTOM: x = 0;      y = H - ph; ww = W;  hh = ph; break;
+	case BD_GRAVITY_TOP_LEFT:     x = 0;      y = 0;      break;
+	case BD_GRAVITY_TOP_RIGHT:    x = W - pw; y = 0;      break;
+	case BD_GRAVITY_BOTTOM_LEFT:  x = 0;      y = H - ph; break;
+	case BD_GRAVITY_BOTTOM_RIGHT: x = W - pw; y = H - ph; break;
+	default:  /* NONE: keep the title bar reachable */
+		if (x + ww > W) x = W - ww;
+		if (y + hh > H) y = H - hh;
+		if (x < 0) x = 0;
+		if (y < 0) y = 0;
+		break;
+	}
+	*ox = x; *oy = y; *ow = ww; *oh = hh;
+}
+
+/* The edge/corner a dragged floating frame would snap to, or BD_GRAVITY_NONE
+ * when no edge is within WM_SNAP_DIST. Measured against the frame's laid-out
+ * rectangle (pool[f].x/y/w/h). */
+static int
+wm_snap_candidate(bd_id f, int W, int H)
+{
+	struct widget *w = &pool[f];
+	int nearL = w->x <= WM_SNAP_DIST;
+	int nearT = w->y <= WM_SNAP_DIST;
+	int nearR = (W - (w->x + w->w)) <= WM_SNAP_DIST;
+	int nearB = (H - (w->y + w->h)) <= WM_SNAP_DIST;
+
+	if (nearL && nearT) return BD_GRAVITY_TOP_LEFT;
+	if (nearR && nearT) return BD_GRAVITY_TOP_RIGHT;
+	if (nearL && nearB) return BD_GRAVITY_BOTTOM_LEFT;
+	if (nearR && nearB) return BD_GRAVITY_BOTTOM_RIGHT;
+	if (nearL) return BD_GRAVITY_LEFT;
+	if (nearR) return BD_GRAVITY_RIGHT;
+	if (nearT) return BD_GRAVITY_TOP;
+	if (nearB) return BD_GRAVITY_BOTTOM;
+	return BD_GRAVITY_NONE;
+}
+
+/* Topmost floating frame containing (x,y), or BD_NONE for the desktop. */
+static bd_id
+wm_frame_at(int x, int y)
+{
+	for (int i = window_count - 1; i >= 1; i--) {
+		bd_id f = windows[i];
+		if (pool[f].alive && pool[f].visible &&
+		    in_rect(x, y, pool[f].x, pool[f].y, pool[f].w, pool[f].h))
+			return f;
+	}
+	return BD_NONE;
+}
+
+/* Raise a floating frame to the front of the z-order (end of windows[]). */
+static void
+wm_raise(bd_id f)
+{
+	int idx = -1;
+	for (int i = 1; i < window_count; i++)
+		if (windows[i] == f) { idx = i; break; }
+	if (idx < 0 || idx == window_count - 1)
+		return;
+	for (int i = idx; i < window_count - 1; i++)
+		windows[i] = windows[i + 1];
+	windows[window_count - 1] = f;
+}
+
+/* Title-bar glyph buttons: close (rightmost) and lock (left of it). */
+static void
+wm_btn_rects(bd_id f, int *close_x, int *lock_x, int *btn_w)
+{
+	struct widget *w = &pool[f];
+	*btn_w = WM_BTN_SZ;
+	*close_x = w->x + w->w - WM_BTN_SZ - 4;
+	*lock_x = *close_x - WM_BTN_SZ - 2;
+}
+
+/* Place one top-level frame's tree into a rectangle, reserving inset_top pixels
+ * at the top for a WM title bar (0 for the desktop / native windows). */
+static void
+layout_frame_at(bd_id frame, int x, int y, int w, int h, int inset_top)
+{
+	struct widget *r = &pool[frame];
+	r->x = x;
+	r->y = y;
+	r->w = w;
+	r->h = h;
+	layout_children_rect(frame, x, y + inset_top, w, h - inset_top);
+}
+
 /* Place one top-level frame and its tree at the origin of the given size. */
 static void
 layout_frame(bd_id frame, int w, int h)
 {
-	struct widget *r = &pool[frame];
-	r->x = 0;
-	r->y = 0;
-	r->w = w;
-	r->h = h;
-	layout_children(frame);
+	layout_frame_at(frame, 0, 0, w, h, 0);
 }
 
 void
@@ -2351,6 +2546,15 @@ bd_gui_layout(int win_w, int win_h)
 		}
 	} else {
 		layout_frame(root, win_w, win_h);
+		/* floating frames: dock/snap per gravity, reserving a title bar */
+		for (int wi = 1; wi < window_count; wi++) {
+			bd_id f = windows[wi];
+			if (!pool[f].alive)
+				continue;
+			int fx, fy, fw, fh;
+			frame_wm_rect(f, win_w, win_h, &fx, &fy, &fw, &fh);
+			layout_frame_at(f, fx, fy, fw, fh, WM_TITLEBAR_H);
+		}
 	}
 
 	/* an open modal dialog is laid out centered at its preferred size, so
@@ -2555,6 +2759,101 @@ render_frame(bd_id frame, int w, int h)
 	bd_draw_end();
 }
 
+/* A padlock glyph inside an WM_BTN_SZ box at (bx,by), drawn over the title-bar
+ * `face` color: a solid body with a keyhole and a 2px inverted-U shackle. When
+ * locked the shackle is closed onto the body; when unlocked it is raised and
+ * hinged aside so it reads as an open hasp. */
+static void
+draw_padlock(int bx, int by, int locked, uint32_t color, uint32_t face)
+{
+	int bw = 9, bh = 6;
+	int body_x = bx + (WM_BTN_SZ - bw) / 2;
+	int body_y = by + WM_BTN_SZ - bh - 2;
+
+	/* shackle as a 2px ring: fill the outer arch, then punch the interior
+	 * (and its open bottom) back to the face color */
+	int sw = bw - 3;                       /* arch outer width */
+	int sh = 6;                            /* arch height */
+	int sx = body_x + (bw - sw) / 2;
+	int sy = body_y - sh + (locked ? 2 : 0);
+	if (!locked)
+		sx += sw - 2;                  /* pivot to one leg: unlatched */
+	fill_rect(sx, sy, sw, sh, color);
+	fill_rect(sx + 2, sy + 2, sw - 4 > 0 ? sw - 4 : 1, sh, face);
+
+	/* body, then a keyhole notched out of it */
+	fill_rect(body_x, body_y, bw, bh, color);
+	fill_rect(body_x + bw / 2 - 1, body_y + 2, 2, 2, face);
+}
+
+/* An "x" close glyph inside an WM_BTN_SZ box at (bx,by). */
+static void
+draw_close_glyph(int bx, int by, uint32_t color)
+{
+	float x0 = (float)(bx + 4), y0 = (float)(by + 4);
+	float x1 = (float)(bx + WM_BTN_SZ - 4), y1 = (float)(by + WM_BTN_SZ - 4);
+	float t = 1.4f;
+	/* two diagonal bars */
+	bd_draw_quad(x0, y0, x0 + t, y0, x1 + t, y1, x1, y1, color);
+	bd_draw_quad(x1, y0, x1 - t, y0, x0 - t, y1, x0, y1, color);
+}
+
+/* Title bar of a floating window: face, label, lock + close buttons. */
+static void
+render_wm_titlebar(bd_id f, int active)
+{
+	struct widget *w = &pool[f];
+	int bx = w->x, by = w->y, bw = w->w;
+	uint32_t face = active ? theme.widget : theme.press;
+	fill_rect(bx, by, bw, WM_TITLEBAR_H, face);
+	fill_rect(bx, by, bw, 2, active ? theme.focus : theme.hover); /* top hi */
+	fill_rect(bx, by + WM_TITLEBAR_H - 1, bw, 1, theme.border);   /* bottom */
+
+	if (w->label) {
+		float ty = chrome_baseline_y(by, WM_TITLEBAR_H);
+		queue_text(w->label, (float)(bx + 6), ty,
+		    active ? theme.text_hi : theme.text);
+	}
+
+	int close_x, lock_x, btn_w;
+	wm_btn_rects(f, &close_x, &lock_x, &btn_w);
+	draw_padlock(lock_x, by + (WM_TITLEBAR_H - WM_BTN_SZ) / 2, w->locked,
+	    w->locked ? theme.focus : theme.text, face);
+	draw_close_glyph(close_x, by + (WM_TITLEBAR_H - WM_BTN_SZ) / 2, theme.text);
+}
+
+/* Render a floating window into the shared surface (no clear): body, title bar,
+ * a raised border, then its popups. */
+static void
+render_wm_frame(bd_id f)
+{
+	struct widget *w = &pool[f];
+	int W = be->width(), H = be->height();
+	int active = (f == wm_active_frame);
+
+	bd_draw_begin(W, H);
+	render_widget(f);                 /* frame bg + widget tree */
+	render_wm_titlebar(f, active);
+	stroke_rect(w->x, w->y, w->w, w->h, theme.border);
+	bd_draw_end();
+
+	/* snap-zone preview while this window is being dragged near an edge */
+	if (f == wm_drag_frame && wm_snap_cand != BD_GRAVITY_NONE) {
+		int sx, sy, sw, sh, sav = w->gravity;
+		w->gravity = wm_snap_cand;
+		frame_wm_rect(f, W, H, &sx, &sy, &sw, &sh);
+		w->gravity = sav;
+		bd_draw_begin(W, H);
+		fill_rect(sx, sy, sw, sh, (theme.focus & 0xFFFFFF00) | 0x40);
+		stroke_rect(sx, sy, sw, sh, theme.focus);
+		bd_draw_end();
+	}
+
+	bd_draw_begin(W, H);
+	render_popups(f);
+	bd_draw_end();
+}
+
 void
 bd_gui_render(void)
 {
@@ -2580,6 +2879,12 @@ bd_gui_render(void)
 		}
 	} else {
 		render_frame(root, be->width(), be->height());
+		/* floating windows over the desktop, back to front */
+		for (int i = 1; i < window_count; i++) {
+			bd_id f = windows[i];
+			if (pool[f].alive && pool[f].visible)
+				render_wm_frame(f);
+		}
 		render_modal(be->width(), be->height());
 		render_notice(be->width(), be->height());
 	}
@@ -2911,6 +3216,92 @@ handle_pen(const bd_event *ev, bd_id frame)
 	return 1;
 }
 
+/*
+ * In-surface window manager input. Handles raising, title-bar dragging,
+ * edge/corner snapping and docking, and the lock/close title buttons for
+ * floating windows. Returns 1 when the WM consumes the event; otherwise sets
+ * *route to the frame whose content should receive it (root == desktop).
+ */
+static int
+wm_dispatch(const bd_event *ev, bd_id *route)
+{
+	int W = be->width(), H = be->height();
+	*route = root;
+
+	switch (ev->type) {
+	case BD_EV_MOUSE_DOWN: {
+		bd_id f = wm_frame_at(ev->x, ev->y);
+		if (ev->button != BD_MOUSE_LEFT) {
+			if (f != BD_NONE) { wm_raise(f); wm_active_frame = f; *route = f; }
+			return 0;
+		}
+		if (f == BD_NONE) { wm_active_frame = BD_NONE; return 0; }
+		wm_raise(f);
+		wm_active_frame = f;
+		struct widget *w = &pool[f];
+		if (ev->y < w->y + WM_TITLEBAR_H) {
+			int close_x, lock_x, btn_w;
+			wm_btn_rects(f, &close_x, &lock_x, &btn_w);
+			int ty = w->y + (WM_TITLEBAR_H - WM_BTN_SZ) / 2;
+			if (in_rect(ev->x, ev->y, close_x, ty, WM_BTN_SZ, WM_BTN_SZ)) {
+				wm_active_frame = BD_NONE;
+				bd_destroy(f);
+				return 1;
+			}
+			if (in_rect(ev->x, ev->y, lock_x, ty, WM_BTN_SZ, WM_BTN_SZ)) {
+				w->locked = !w->locked;
+				return 1;
+			}
+			if (!w->locked) {
+				wm_drag_frame = f;
+				wm_grab_dx = ev->x - w->x;
+				wm_grab_dy = ev->y - w->y;
+				wm_snap_cand = BD_GRAVITY_NONE;
+			}
+			return 1;  /* title bar press never reaches the content */
+		}
+		*route = f;        /* body press routes into this window */
+		return 0;
+	}
+
+	case BD_EV_MOUSE_MOVE:
+		if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive) {
+			struct widget *w = &pool[wm_drag_frame];
+			w->gravity = BD_GRAVITY_NONE;
+			w->user_x = ev->x - wm_grab_dx;
+			w->user_y = ev->y - wm_grab_dy;
+			int fx, fy, fw, fh;   /* live rect for the snap test/preview */
+			frame_wm_rect(wm_drag_frame, W, H, &fx, &fy, &fw, &fh);
+			w->x = fx; w->y = fy; w->w = fw; w->h = fh;
+			wm_snap_cand = wm_snap_candidate(wm_drag_frame, W, H);
+			return 1;
+		}
+		{ bd_id f = wm_frame_at(ev->x, ev->y); if (f != BD_NONE) *route = f; }
+		return 0;
+
+	case BD_EV_MOUSE_UP:
+		if (wm_drag_frame != BD_NONE && ev->button == BD_MOUSE_LEFT) {
+			if (pool[wm_drag_frame].alive)
+				pool[wm_drag_frame].gravity = wm_snap_cand;
+			wm_drag_frame = BD_NONE;
+			wm_snap_cand = BD_GRAVITY_NONE;
+			return 1;
+		}
+		{ bd_id f = wm_frame_at(ev->x, ev->y); if (f != BD_NONE) *route = f; }
+		return 0;
+
+	case BD_EV_MOUSE_SCROLL:
+		{ bd_id f = wm_frame_at(mouse_x, mouse_y); if (f != BD_NONE) *route = f; }
+		return 0;
+
+	default:
+		/* keyboard / text / touch / pen go to the focused window */
+		if (wm_active_frame != BD_NONE && pool[wm_active_frame].alive)
+			*route = wm_active_frame;
+		return 0;
+	}
+}
+
 int
 bd_gui_event(const bd_event *ev)
 {
@@ -2970,8 +3361,18 @@ bd_gui_event(const bd_event *ev)
 	}
 
 	/* the top-level frame this event is destined for (its own window) */
-	bd_id frame = (active_modal != BD_NONE && pool[active_modal].alive)
-	    ? active_modal : frame_for_window(ev->window);
+	int modal_active = (active_modal != BD_NONE && pool[active_modal].alive);
+	bd_id frame;
+	if (wm_enabled() && !modal_active) {
+		/* the toolkit's own window manager runs the floating frames and
+		 * decides which one (or the desktop) the event routes to */
+		bd_id route;
+		if (wm_dispatch(ev, &route))
+			return 1;
+		frame = route;
+	} else {
+		frame = modal_active ? active_modal : frame_for_window(ev->window);
+	}
 	if (frame == BD_NONE || !pool[frame].alive)
 		return 0;
 

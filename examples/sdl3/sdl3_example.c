@@ -326,6 +326,7 @@ static bd_id titlebar;   /* its drag handle */
 static bd_id min_btn;    /* minimize / restore button */
 static bd_id term;       /* terminal body */
 static bd_id term_input; /* command line */
+static bd_id palette;    /* a real top-level window run by the in-surface WM */
 static int   minimized;
 
 static void
@@ -346,6 +347,22 @@ on_minimize(bd_id id, void *arg)
 	bd_set(term_input, BD_VISIBLE_B, !minimized, BD_END);
 	bd_set(subwin, BD_PREF_H_I, minimized ? TITLE_H : SUBWIN_FULL_H, BD_END);
 	bd_set(min_btn, BD_LABEL_S, minimized ? "+" : "_", BD_END);
+}
+
+static void
+on_dock_left(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	bd_window_dock(palette, BD_GRAVITY_LEFT);
+	report("palette docked to the left edge");
+}
+
+static void
+on_palette_float(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	bd_window_move(palette, 360, 320);
+	report("palette floating");
 }
 
 /* The input line fires its click handler on Enter, before it clears, so the
@@ -506,6 +523,30 @@ build_ui(void)
 	        .move = inv_move },
 	    BD_GROW_I, 1, BD_END);
 	bd_inventory_set_cell_size(inv, 44);
+
+	/* A genuine second top-level frame (parent BD_NONE). Because the SDL3
+	 * backend is single-surface, the toolkit's in-surface window manager
+	 * draws and decorates it: drag the title bar to move it, drag it against
+	 * a screen edge to dock it, and click the padlock to pin it in place.
+	 * (subwin above is only a panel faking a window; this one is the real
+	 * thing the WM manages.) */
+	palette = bd_create(BD_NONE, BD_FRAME,
+	    BD_LABEL_S, "Palette",
+	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 8, BD_GAP_I, 6,
+	    BD_X_I, 360, BD_Y_I, 320,
+	    BD_PREF_W_I, 190, BD_PREF_H_I, 150,
+	    BD_BG_C, 0x222A33FFu,
+	    BD_END);
+	bd_create(palette, BD_LABEL,
+	    BD_LABEL_S, "Drag my title bar;", BD_PREF_H_I, 18,
+	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
+	bd_create(palette, BD_LABEL,
+	    BD_LABEL_S, "snap me to an edge.", BD_PREF_H_I, 18,
+	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
+	bd_create(palette, BD_BUTTON, BD_LABEL_S, "Dock left", BD_PREF_H_I, 26,
+	    BD_ON_CLICK_F, on_dock_left, BD_END);
+	bd_create(palette, BD_BUTTON, BD_LABEL_S, "Float", BD_PREF_H_I, 26,
+	    BD_ON_CLICK_F, on_palette_float, BD_END);
 }
 
 /* ------------------------------------------------------------------ */
