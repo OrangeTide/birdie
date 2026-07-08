@@ -97,6 +97,7 @@ struct widget {
 	int gravity;            /* enum bd_gravity: floating frame edge/corner dock */
 	int locked;             /* floating frame: pinned (not draggable), keeps gravity */
 	int minimized;          /* floating frame: hidden from the surface, shown as a dock tile */
+	int focused;            /* top-level frame: window holds OS input focus */
 
 	void *state;            /* per-instance data for extension widget types */
 };
@@ -147,6 +148,8 @@ static const bd_backend *be;    /* renderer/window backend, set by bd_gui_init *
 static bd_texture pin_out_tex;
 static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
+static int   motion_mode = BD_MOTION_AUTO; /* BD_MOTION_* */
+static int   motion_hint;                  /* external contribution to AUTO */
 static float cursor_blink;
 /* BD_LIST double-click tracking */
 static bd_id list_last_id = BD_NONE;
@@ -867,6 +870,7 @@ register_window(bd_id id)
 	if (window_count < MAX_WINDOWS)
 		windows[window_count] = id;
 	window_count++;
+	w->focused = 1;                 /* assume focused until a FOCUS_OUT arrives */
 
 	if (!be || !be->multi_window) {
 		/* in-surface WM: cascade floating windows that gave no X/Y so they
@@ -1521,10 +1525,10 @@ render_widget(bd_id id)
 			caret_x += input_text_px(preedit_buf, preedit_caret);
 		}
 
-		/* blinking cursor */
+		/* blinking cursor (steady under reduced motion) */
 		if (focused) {
 			double t = bd_time() - (double)cursor_blink;
-			if (((int)(t * 2.0)) % 2 == 0)
+			if (bd_reduced_motion() || ((int)(t * 2.0)) % 2 == 0)
 				fill_rect((int)caret_x, w->y + 2, 2, w->h - 4, w->fg);
 		}
 		break;
@@ -1587,7 +1591,7 @@ render_widget(bd_id id)
 
 		if (focused) {
 			double t = bd_time() - (double)cursor_blink;
-			if (((int)(t * 2.0)) % 2 == 0) {
+			if (bd_reduced_motion() || ((int)(t * 2.0)) % 2 == 0) {
 				int cx = ix + (int)(caret_px - w->scroll_x);
 				int cy = iy + caret_top - (int)w->scroll_y;
 				fill_rect(cx, cy, 2, lh, w->fg);
@@ -2599,6 +2603,8 @@ bd_gui_cleanup(void)
 	pen_capture = BD_NONE;
 	drag_menu = BD_NONE;
 	focus_id = BD_NONE;
+	motion_mode = BD_MOTION_AUTO;
+	motion_hint = 0;
 	active_notice = BD_NONE;
 	notice_cb = NULL;
 	notice_arg = NULL;
@@ -3192,6 +3198,45 @@ bd_focused(void)
 	return focus_id;
 }
 
+int
+bd_window_focused(bd_id frame)
+{
+	if (frame == BD_NONE || !pool[frame].alive)
+		return 0;
+	return pool[frame].focused;
+}
+
+int
+bd_gui_focused(void)
+{
+	for (int i = 0; i < window_count; i++)
+		if (pool[windows[i]].alive && pool[windows[i]].focused)
+			return 1;
+	return 0;
+}
+
+void
+bd_set_reduced_motion(int mode)
+{
+	motion_mode = mode;
+}
+
+void
+bd_reduced_motion_hint(int reduce)
+{
+	motion_hint = reduce ? 1 : 0;
+}
+
+int
+bd_reduced_motion(void)
+{
+	switch (motion_mode) {
+	case BD_MOTION_FULL:    return 0;
+	case BD_MOTION_REDUCED: return 1;
+	default:                return motion_hint || !bd_gui_focused();
+	}
+}
+
 void
 bd_list_set_items(bd_id id, const char *items)
 {
@@ -3551,6 +3596,16 @@ bd_gui_event(const bd_event *ev)
 {
 	if (root == BD_NONE)
 		return 0;
+
+	/* Window focus is window-scoped, not routed to a widget, and must reach
+	 * the toolkit even while a modal is up: record it and stop. On a
+	 * single-surface backend ev->window is 0 and maps to the root. */
+	if (ev->type == BD_EV_FOCUS_IN || ev->type == BD_EV_FOCUS_OUT) {
+		bd_id f = frame_for_window(ev->window);
+		if (f != BD_NONE && pool[f].alive)
+			pool[f].focused = (ev->type == BD_EV_FOCUS_IN);
+		return 1;
+	}
 
 	/* a modal notice swallows all input except its own buttons */
 	if (active_notice != BD_NONE && pool[active_notice].alive) {

@@ -187,6 +187,12 @@ bd_event_from_win(const win_event *ev, bd_event *out)
 		e.tilt_y = ev->tilt_y;
 		e.pen_flags = ev->pen_flags;
 		break;
+	case WIN_EV_FOCUS_IN:
+		e.type = BD_EV_FOCUS_IN;
+		break;
+	case WIN_EV_FOCUS_OUT:
+		e.type = BD_EV_FOCUS_OUT;
+		break;
 	default:
 		return 0;       /* close, resize: no bd_event */
 	}

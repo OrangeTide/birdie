@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
 
 static bd_id status;
 static bd_id term;
@@ -628,10 +629,19 @@ main(void)
 				bd_gui_event(&bev);
 		}
 
+		int focused = bd_gui_focused();
+
 		/* the GLES backend is multi_window, so bd_gui_render() makes each
 		 * window current and presents it; no win_swap() here */
 		bd_gui_layout(win_width(), win_height());
 		bd_gui_render();
+
+		/* When no window holds focus, back off to ~15 fps: the gallery has
+		 * nothing to animate in the background, so this frees the CPU/GPU.
+		 * A real app would also pause idle animation and drop quality here. */
+		if (!focused)
+			nanosleep(&(struct timespec){ .tv_nsec = 66 * 1000 * 1000 },
+			    NULL);
 	}
 
 	bd_gui_cleanup();

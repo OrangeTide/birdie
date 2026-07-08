@@ -220,7 +220,8 @@ window_create(const char *title, int width, int height)
 
     XSetWindowAttributes wattr = {
         .event_mask = StructureNotifyMask | KeyPressMask | KeyReleaseMask
-            | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+            | ButtonPressMask | ButtonReleaseMask | PointerMotionMask
+            | FocusChangeMask,
         .background_pixel = black,
         .border_pixel = black,
     };
@@ -540,6 +541,17 @@ translate(XEvent *xev, win_event *ev)
             return 1;
         }
         return 0;
+
+    case FocusIn:
+    case FocusOut:
+        /* Ignore the transient focus shuffles a grab causes (keyboard grabs,
+         * pointer grabs during a drag); report only real focus changes. */
+        if (xev->xfocus.mode == NotifyGrab
+            || xev->xfocus.mode == NotifyUngrab)
+            return 0;
+        ev->type = (xev->type == FocusIn) ? WIN_EV_FOCUS_IN
+            : WIN_EV_FOCUS_OUT;
+        return 1;
 
     case MotionNotify:
         ev->type = WIN_EV_MOUSE_MOVE;

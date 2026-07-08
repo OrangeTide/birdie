@@ -37,6 +37,8 @@ enum win_ev_type {
     WIN_EV_PEN_DOWN,      /* stylus tip contact */
     WIN_EV_PEN_MOVE,      /* stylus moving while in contact */
     WIN_EV_PEN_UP,        /* stylus tip lift */
+    WIN_EV_FOCUS_IN,      /* window `window` gained OS input focus */
+    WIN_EV_FOCUS_OUT,     /* window `window` lost OS input focus */
 };
 
 /* Pen flag bitmask (win_event.pen_flags). */

@@ -278,6 +278,12 @@ bd_event_from_lud(const lud_event_t *ev, bd_event *out)
 		e.type = BD_EV_CHAR;
 		e.codepoint = ev->ch.codepoint;
 		break;
+	case LUD_EV_FOCUS:
+		e.type = BD_EV_FOCUS_IN;
+		break;
+	case LUD_EV_UNFOCUS:
+		e.type = BD_EV_FOCUS_OUT;
+		break;
 	default:
 		return 0;
 	}

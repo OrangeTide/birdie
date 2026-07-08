@@ -51,6 +51,10 @@ enum bd_ev_type {
 	                       over this widget; read the payload with bd_dnd_get().
 	                       Not injected by the host; the toolkit delivers it to an
 	                       extension widget's event() at `x`,`y` on mouse-up. */
+	BD_EV_FOCUS_IN,     /* the window `window` gained OS input focus */
+	BD_EV_FOCUS_OUT,    /* the window `window` lost OS input focus. The toolkit
+	                       tracks these so an app can throttle its render loop
+	                       when unfocused (bd_gui_focused / bd_window_focused). */
 };
 
 /* Pen flag bitmask (bd_event.pen_flags), valid for the BD_EV_PEN_* events. */

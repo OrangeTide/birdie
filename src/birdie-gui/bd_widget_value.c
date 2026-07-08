@@ -669,11 +669,15 @@ toggle_render(bd_id id, void *state)
 	float fx = (float)px, fy = (float)py;
 	float fw = (float)pw, fh = (float)ph;
 
-	/* ease the thumb toward the target each frame */
+	/* ease the thumb toward the target each frame; snap under reduced motion */
 	float target = t->on ? 1.0f : 0.0f;
-	t->pos += (target - t->pos) * 0.25f;
-	if (fabsf(target - t->pos) < 0.002f)
+	if (bd_reduced_motion()) {
 		t->pos = target;
+	} else {
+		t->pos += (target - t->pos) * 0.25f;
+		if (fabsf(target - t->pos) < 0.002f)
+			t->pos = target;
+	}
 
 	bd_vertex q[6] = {
 		{ fx,      fy,      0, 0, 1, 1, 1, 1 },

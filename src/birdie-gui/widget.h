@@ -184,6 +184,38 @@ const bd_theme *bd_gui_theme(void);
  * click and on Tab / Shift-Tab traversal. */
 bd_id bd_focused(void);
 
+/* Window (OS input) focus. The host translates its native focus/blur events
+ * into BD_EV_FOCUS_IN / BD_EV_FOCUS_OUT and feeds them to bd_gui_event; the
+ * toolkit records which top-level windows currently hold focus. Applications
+ * poll this to throttle their render loop while unfocused, e.g. pause idle
+ * animation, drop the framerate, or lower drawing quality when the window is
+ * in the background. bd_gui_focused() is nonzero while any toolkit window has
+ * focus; bd_window_focused(frame) queries one top-level frame's window. A
+ * window is assumed focused when it opens until a BD_EV_FOCUS_OUT says
+ * otherwise, so an app never wrongly throttles a foreground window. */
+int bd_gui_focused(void);
+int bd_window_focused(bd_id frame);
+
+/*
+ * Reduced motion. A single toolkit-wide flag that widgets consult to skip
+ * animation (cursor blink, the toggle's sliding thumb, an indicator's flicker,
+ * ...). It suppresses *motion*, not the state the motion converges on: a
+ * reduced toggle still shows its final position, a lamp still glows, only the
+ * transition is dropped.
+ *
+ * Mechanism is split from policy. Widgets read bd_reduced_motion(); what drives
+ * it is set separately:
+ *   - bd_set_reduced_motion(mode) forces it or leaves it on AUTO (the default).
+ *   - In AUTO the flag is on when the app has no focused window, OR when an
+ *     external policy raised bd_reduced_motion_hint() (e.g. an accessibility
+ *     "reduce motion" preference or a future low-framerate watchdog). The hint
+ *     lets such policies feed AUTO without the widgets knowing about them.
+ */
+enum { BD_MOTION_AUTO = 0, BD_MOTION_FULL, BD_MOTION_REDUCED };
+void bd_set_reduced_motion(int mode);    /* BD_MOTION_* */
+void bd_reduced_motion_hint(int reduce); /* external AUTO contribution */
+int  bd_reduced_motion(void);            /* effective flag; widgets read this */
+
 /* BD_LIST: a scrolling, selectable list of newline-separated items. Set the
  * items with BD_LABEL_S (or bd_list_set_items); the selection callback runs on
  * activation (double-click or Enter) via BD_ON_CLICK_F. The host reads the

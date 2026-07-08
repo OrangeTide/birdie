@@ -273,6 +273,12 @@ bd_event_from_sdl(const SDL_Event *ev, bd_event *out)
 		e.type = BD_EV_TEXT_COMMIT;
 		e.text = ev->text.text;
 		break;
+	case SDL_EVENT_WINDOW_FOCUS_GAINED:
+		e.type = BD_EV_FOCUS_IN;
+		break;
+	case SDL_EVENT_WINDOW_FOCUS_LOST:
+		e.type = BD_EV_FOCUS_OUT;
+		break;
 	default:
 		return 0;
 	}

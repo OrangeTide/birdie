@@ -187,6 +187,17 @@ What is built:
 - **Pen / tablet** — `BD_EV_PEN_HOVER/DOWN/MOVE/UP` with pressure/tilt/flags +
   a `bd_widget_canvas` drawing surface; X11 XInput2 valuators on the GLES
   backend.
+- **Window focus** — `BD_EV_FOCUS_IN`/`BD_EV_FOCUS_OUT` (X11 `FocusIn`/`FocusOut`
+  on the GLES backend, `LUD_EV_FOCUS`/`UNFOCUS` on ludica, SDL window
+  focus-gained/lost on SDL3). The toolkit tracks focus per top-level window;
+  `bd_gui_focused()` / `bd_window_focused(frame)` let an app throttle its render
+  loop (pause animation, drop framerate, lower quality) while in the background.
+- **Reduced motion** — a toolkit-wide flag widgets read (`bd_reduced_motion()`)
+  to skip animation while still drawing the final state: the cursor stops
+  blinking and the toggle thumb snaps instead of sliding. Policy is
+  split from the widgets: `bd_set_reduced_motion(mode)` forces or leaves it on
+  AUTO, and in AUTO it is on when unfocused or when `bd_reduced_motion_hint()`
+  is raised (an accessibility preference or a future low-framerate watchdog).
 
 The v0.3 input roadmap (multi-window, explorer, rich text, the full v1.0
 widget set, clipboard, key-up/repeat, IME, multitouch, pen) is complete on the

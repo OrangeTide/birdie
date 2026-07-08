@@ -562,6 +562,40 @@ main(void)
 	bd_gui_render();
 	check("render drew both windows", n_drawverts > 0);
 
+	/* ---- window focus: BD_EV_FOCUS_IN / OUT tracked per window ---- */
+	check("new windows start focused", bd_window_focused(f1) &&
+	    bd_window_focused(f2) && bd_gui_focused());
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_OUT, .window = 1 });
+	check("FOCUS_OUT clears only the tagged window",
+	    !bd_window_focused(f1) && bd_window_focused(f2));
+	check("app still focused while any window is focused", bd_gui_focused());
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_OUT, .window = 2 });
+	check("app unfocused once every window loses focus", !bd_gui_focused());
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_IN, .window = 1 });
+	check("FOCUS_IN restores the tagged window",
+	    bd_window_focused(f1) && !bd_window_focused(f2) && bd_gui_focused());
+
+	/* ---- reduced motion: mechanism (bd_reduced_motion) vs policy ---- */
+	check("AUTO: motion is full while focused", !bd_reduced_motion());
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_OUT, .window = 1 });
+	check("AUTO: motion reduces when unfocused", bd_reduced_motion());
+	bd_reduced_motion_hint(1);
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_IN, .window = 1 });
+	check("AUTO: an external hint reduces even while focused",
+	    bd_reduced_motion());
+	bd_reduced_motion_hint(0);
+	check("AUTO: clearing the hint restores full motion", !bd_reduced_motion());
+	bd_set_reduced_motion(BD_MOTION_REDUCED);
+	check("REDUCED forces reduced regardless of focus", bd_reduced_motion());
+	bd_set_reduced_motion(BD_MOTION_FULL);
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_OUT, .window = 1 });
+	bd_reduced_motion_hint(1);
+	check("FULL forces full motion regardless of focus/hint",
+	    !bd_reduced_motion());
+	bd_set_reduced_motion(BD_MOTION_AUTO);
+	bd_reduced_motion_hint(0);
+	bd_gui_event(&(bd_event){ .type = BD_EV_FOCUS_IN, .window = 1 });
+
 	/* native minimize/restore delegate to the backend (OS iconify, option A):
 	 * bd_window_minimize/restore call window_minimize/restore with the win id */
 	mw_min_id = mw_restore_id = -1;
