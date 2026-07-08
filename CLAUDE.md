@@ -10,6 +10,7 @@ Birdie is a desktop MUD client written in C. Its GUI is **birdie-gui**, a self-c
 
 - license files created by AI with: Made by a machine. PUBLIC DOMAIN (CC0-1.0)
 - don't offer to `git push`, I can do that myself.
+- some files are local and not committed, this is noted in `.git/info/exclude`
 
 ## Build
 
@@ -30,7 +31,7 @@ Output: `_out/<triplet>/bin/birdie` (e.g. `_out/x86_64-linux-gnu/bin/birdie`). A
 
 `examples/` is a **separate modular-make project** (it carries its own copy of `GNUmakefile`) so the main build never depends on example-only libraries like SDL3. Build the examples with `cd examples && make`; they pull the toolkit sources from `../src`. The SDL3 example (`examples/sdl3/`) needs SDL3 (`pkg-config sdl3`); run its binary from the repo root so `BD_ASSET_*` paths resolve. The embed example (`examples/embed/`) bakes the fonts/PNGs into the binary via `.incbin` + `bd_asset_register`, needs only X11/EGL/GLES, and runs from any directory (`embed_example --check` verifies the embedding headless).
 
-`make dist` stages the full birdie-gui toolkit into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`: public headers (`include/`), the implementation + reference ludica and SDL3 backends (`src/`), the raw X11/EGL/GLES backend + standalone gallery (`backend-gles/`), vendored libvt (`libvt/`, so the terminal widget compiles out of the box), vendored stb single-headers (`thirdparty/stb/`), a self-contained `module.mk` (declares the `birdie_gui` + `bd_vt` libraries), and runtime assets (chrome TTF + license, CP437 atlas, pushpins). Override the version with `make dist GUI_VERSION=x.y.z` (default `0.4.2`). The bundle compiles standalone; each backend still needs its own host (ludica / SDL3 / X11+EGL), and the README has the gallery build command. The dist file list lives in the top-level `module.mk`; the bundle's own `module.mk` is `src/birdie-gui/dist-module.mk`. Both `dist` and `widget-test` live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
+`make dist` stages the full birdie-gui toolkit into `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`: public headers (`include/`), the implementation + reference ludica and SDL3 backends (`src/`), the raw X11/EGL/GLES backend + standalone gallery (`backend-gles/`), vendored libvt (`libvt/`, so the terminal widget compiles out of the box), vendored stb single-headers (`thirdparty/stb/`), a self-contained `module.mk` (declares the `birdie_gui` + `bd_vt` libraries), and runtime assets (chrome TTF + license, CP437 atlas, pushpins). Override the version with `make dist GUI_VERSION=x.y.z` (default `0.5.0`). The bundle compiles standalone; each backend still needs its own host (ludica / SDL3 / X11+EGL), and the README has the gallery build command. The dist file list lives in the top-level `module.mk`; the bundle's own `module.mk` is `src/birdie-gui/dist-module.mk`. Both `dist` and `widget-test` live in the top-level `module.mk`, so `scripts/update-gnumakefile.sh` won't clobber them.
 
 Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each directory has a `module.mk`; the top-level one controls which SUBDIRS are pulled in.
 
