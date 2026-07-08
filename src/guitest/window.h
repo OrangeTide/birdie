@@ -138,6 +138,8 @@ void win_window_swap(int id);
 int  win_window_width(int id);
 int  win_window_height(int id);
 void win_window_set_title(int id, const char *title);
+void win_window_minimize(int id);   /* iconify (XIconifyWindow) */
+void win_window_restore(int id);    /* de-iconify + raise */
 
 /* system clipboard (X11 CLIPBOARD). get returns a pointer valid until the next
  * clipboard call, or NULL if empty. */

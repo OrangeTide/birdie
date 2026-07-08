@@ -327,6 +327,8 @@ static void be_window_swap(int id)              { win_window_swap(id); }
 static int  be_window_width(int id)             { return win_window_width(id); }
 static int  be_window_height(int id)            { return win_window_height(id); }
 static void be_window_set_title(int id, const char *t) { win_window_set_title(id, t); }
+static void be_window_minimize(int id)          { win_window_minimize(id); }
+static void be_window_restore(int id)           { win_window_restore(id); }
 
 static void        be_clipboard_set(const char *s) { win_clipboard_set(s); }
 static const char *be_clipboard_get(void)          { return win_clipboard_get(); }
@@ -371,6 +373,8 @@ const bd_backend bd_backend_gles = {
 	.window_width      = be_window_width,
 	.window_height     = be_window_height,
 	.window_set_title  = be_window_set_title,
+	.window_minimize   = be_window_minimize,
+	.window_restore    = be_window_restore,
 	.clipboard_set     = be_clipboard_set,
 	.clipboard_get     = be_clipboard_get,
 	.ime_set_enabled     = be_ime_set_enabled,

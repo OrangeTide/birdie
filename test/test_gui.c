@@ -145,6 +145,9 @@ static void mw_swap(int id){ (void)id; }
 static int  mw_w(int id){ (void)id; return 400; }
 static int  mw_h(int id){ (void)id; return 300; }
 static void mw_title(int id, const char *t){ (void)id; (void)t; }
+static int mw_min_id = -1, mw_restore_id = -1;
+static void mw_minimize(int id){ mw_min_id = id; }
+static void mw_restore(int id){ mw_restore_id = id; }
 
 static const bd_backend mwstub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
@@ -160,6 +163,7 @@ static const bd_backend mwstub = {
 	.multi_window=1, .window_open=mw_open, .window_close=mw_close,
 	.window_begin=mw_begin, .window_swap=mw_swap,
 	.window_width=mw_w, .window_height=mw_h, .window_set_title=mw_title,
+	.window_minimize=mw_minimize, .window_restore=mw_restore,
 };
 
 static int text_committed;
@@ -537,6 +541,14 @@ main(void)
 	n_drawverts = 0;
 	bd_gui_render();
 	check("render drew both windows", n_drawverts > 0);
+
+	/* native minimize/restore delegate to the backend (OS iconify, option A):
+	 * bd_window_minimize/restore call window_minimize/restore with the win id */
+	mw_min_id = mw_restore_id = -1;
+	bd_window_minimize(f2);
+	check("native minimize iconifies the OS window (win 2)", mw_min_id == 2);
+	bd_window_restore(f2);
+	check("native restore de-iconifies the OS window (win 2)", mw_restore_id == 2);
 
 	/* closing the second frame releases its window and unregisters it */
 	bd_destroy(f2);

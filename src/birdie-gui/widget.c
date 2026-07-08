@@ -915,7 +915,11 @@ bd_window_minimize(bd_id frame)
 	if (frame == BD_NONE || !pool[frame].alive)
 		return;
 	pool[frame].minimized = 1;
-	/* a minimized window can't be the drag target or the focused window */
+	/* native backend: iconify the OS window (option A, OS-delegated). The
+	 * in-surface WM instead just hides the frame via the flag above. */
+	if (be && be->multi_window && be->window_minimize && pool[frame].win_id)
+		be->window_minimize(pool[frame].win_id);
+	/* a minimized window can't be the in-surface drag target or focus */
 	if (wm_drag_frame == frame)
 		wm_drag_frame = BD_NONE;
 	if (wm_active_frame == frame)
@@ -928,8 +932,15 @@ bd_window_restore(bd_id frame)
 	if (frame == BD_NONE || !pool[frame].alive)
 		return;
 	pool[frame].minimized = 0;
-	wm_raise(frame);
-	wm_active_frame = frame;
+	if (be && be->multi_window) {
+		/* native backend: de-iconify + raise through the OS WM */
+		if (be->window_restore && pool[frame].win_id)
+			be->window_restore(pool[frame].win_id);
+	} else {
+		/* in-surface WM: raise in our own z-order and focus it */
+		wm_raise(frame);
+		wm_active_frame = frame;
+	}
 }
 
 int

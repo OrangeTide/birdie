@@ -440,6 +440,26 @@ win_window_set_title(int id, const char *title)
         XStoreName(g.xdisplay, s->xwindow, title);
 }
 
+void
+win_window_minimize(int id)
+{
+    struct win_slot *s = slot_by_id(id);
+    if (s) {
+        XIconifyWindow(g.xdisplay, s->xwindow, DefaultScreen(g.xdisplay));
+        XFlush(g.xdisplay);
+    }
+}
+
+void
+win_window_restore(int id)
+{
+    struct win_slot *s = slot_by_id(id);
+    if (s) {
+        XMapRaised(g.xdisplay, s->xwindow);   /* de-iconify + raise */
+        XFlush(g.xdisplay);
+    }
+}
+
 /* primary-window (id 1) conveniences */
 int    win_width(void)  { return win_window_width(1); }
 int    win_height(void) { return win_window_height(1); }

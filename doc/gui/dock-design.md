@@ -349,16 +349,24 @@ just flipping the in-surface render skip.
   panel program" case, orthogonal to the minimized-window dock. Only worth it if
   we want a persistent always-visible strip, not just a minimized-window tray.
 
-### Decision
+### Decision — Option A (implemented)
 
-**Option A.** On native multi-window backends, window management is the host
-WM's job: minimize should map to OS iconify (a future `window_minimize`/
-`window_restore` backend hook over `XIconifyWindow` + `_NET_WM_STATE` and the
-Win32/Wayland/macOS equivalents), and the OS taskbar is the tray. birdie-gui
-does **not** ship an in-app dock on native backends; `BD_DOCK` stays a
-single-surface widget. This keeps the toolkit out of the business of
-reimplementing a window manager where one already exists, at the cost of a
-consistent in-app dock look across backends.
+On native multi-window backends, window management is the host WM's job:
+minimize maps to OS iconify, and the OS taskbar is the tray. birdie-gui does
+**not** ship an in-app dock on native backends; `BD_DOCK` stays a single-surface
+widget. This keeps the toolkit out of reimplementing a window manager where one
+already exists, at the cost of a consistent in-app dock look across backends.
+
+**Status: DONE.** The `bd_backend` vtable gained optional `window_minimize` /
+`window_restore` hooks. On a `multi_window` backend, `bd_window_minimize` /
+`bd_window_restore` call them with the frame's native window id;
+`bd_window_minimized` and the in-surface flag are advisory there (the OS owns
+the real iconified state). The GLES/X11 backend implements them with
+`XIconifyWindow` and `XMapRaised` (`win_window_minimize/restore` in
+`x11_window.c`). A recording multi-window stub in `test/test_gui.c` verifies the
+delegation. Win32/Wayland/macOS backends map the same hooks to their platform
+iconify when they land; a backend that leaves the hooks NULL simply keeps the
+window mapped (no-op minimize).
 
 Option B (a unified in-app dock via `window_hide/show`) and Option C (a
 strut-reserving panel) are recorded above as the alternatives we considered and

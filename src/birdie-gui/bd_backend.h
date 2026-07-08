@@ -202,6 +202,14 @@ typedef struct bd_backend {
 	int  (*window_width)(int id);
 	int  (*window_height)(int id);
 	void (*window_set_title)(int id, const char *title);
+	/* Iconify / de-iconify a native window through the host's window manager
+	 * (optional; NULL = unsupported). The toolkit calls these from
+	 * bd_window_minimize / bd_window_restore on a multi_window backend, mapping
+	 * minimize to the platform's iconify (e.g. XIconifyWindow). window_restore
+	 * also raises the window. On a single-surface backend these are unused; the
+	 * toolkit's in-surface window manager handles minimize itself. */
+	void (*window_minimize)(int id);
+	void (*window_restore)(int id);
 
 	/* ---- clipboard (optional; NULL = no clipboard) ----
 	 * set copies the UTF-8 string to the system clipboard; get returns the
