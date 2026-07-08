@@ -55,6 +55,44 @@ enum bd_gravity {
 };
 
 /*
+ * Widget anchor (BD_ANCHOR_I) — how a child sits within the cell the layout
+ * gives it, by compass point. BD_ANCHOR_FILL (the default) stretches the child
+ * to fill the cell, matching the pre-anchor behavior.
+ *   - In a FIXED container the anchor pins the child (at its preferred size) to
+ *     that edge/corner of the parent's content box and tracks it on resize;
+ *     BD_X_I / BD_Y_I act as a margin inward from the anchored edge(s).
+ *   - In a ROW/COL container the anchor's cross-axis component aligns the child
+ *     on the cross axis at its preferred cross size instead of stretching it
+ *     (e.g. BD_ANCHOR_W left-aligns a fixed-width child in a column).
+ */
+enum bd_anchor {
+	BD_ANCHOR_FILL = 0,
+	BD_ANCHOR_CENTER,
+	BD_ANCHOR_N,
+	BD_ANCHOR_S,
+	BD_ANCHOR_E,
+	BD_ANCHOR_W,
+	BD_ANCHOR_NE,
+	BD_ANCHOR_NW,
+	BD_ANCHOR_SE,
+	BD_ANCHOR_SW,
+};
+
+/*
+ * Container packing (BD_PACK_I) — how a ROW/COL container distributes leftover
+ * main-axis space among its children when they do not fill it (i.e. no child
+ * grows). BD_PACK_START (the default) leaves the slack at the end. Ignored when
+ * any child has BD_GROW_I, since grow already consumes the slack.
+ */
+enum bd_pack {
+	BD_PACK_START = 0,
+	BD_PACK_CENTER,
+	BD_PACK_END,
+	BD_PACK_SPACE_BETWEEN,
+	BD_PACK_SPACE_AROUND,
+};
+
+/*
  * Attribute IDs — low 4 bits encode the value type so the varargs
  * reader knows which va_arg width to pull:
  *   0=end  1=int  2=string  3=pointer  4=callback  5=color  6=bool
@@ -74,6 +112,8 @@ enum {
 	BD_PAD_I      = 0x0A1,
 	BD_GAP_I      = 0x0B1,
 	BD_GRAVITY_I  = 0x0C1,   /* top-level frame: enum bd_gravity */
+	BD_ANCHOR_I   = 0x0D1,   /* child: enum bd_anchor (cell alignment) */
+	BD_PACK_I     = 0x0E1,   /* ROW/COL container: enum bd_pack (main-axis) */
 
 	BD_LABEL_S    = 0x012,
 	BD_NAME_S     = 0x022,

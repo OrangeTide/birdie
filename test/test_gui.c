@@ -658,6 +658,85 @@ main(void)
 
 	bd_gui_cleanup();
 
+	/* ---- layout: cross-axis gravity (BD_ANCHOR_I) in a column ----
+	 * The surface is 800x500; a COL frame with no padding gives each child a
+	 * 800px-wide cross cell. A non-FILL anchor makes the child take its
+	 * preferred width and align within that cell instead of stretching. */
+	bd_gui_init(&stub, NULL);
+	bd_id lcol = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 0, BD_GAP_I, 0, BD_END);
+	bd_id c_fill = bd_create(lcol, BD_BUTTON, BD_LABEL_S, "fill",
+	    BD_PREF_W_I, 100, BD_PREF_H_I, 30, BD_END);           /* default FILL */
+	bd_id c_w = bd_create(lcol, BD_BUTTON, BD_LABEL_S, "w",
+	    BD_PREF_W_I, 100, BD_PREF_H_I, 30, BD_ANCHOR_I, BD_ANCHOR_W, BD_END);
+	bd_id c_e = bd_create(lcol, BD_BUTTON, BD_LABEL_S, "e",
+	    BD_PREF_W_I, 100, BD_PREF_H_I, 30, BD_ANCHOR_I, BD_ANCHOR_E, BD_END);
+	bd_id c_c = bd_create(lcol, BD_BUTTON, BD_LABEL_S, "c",
+	    BD_PREF_W_I, 100, BD_PREF_H_I, 30, BD_ANCHOR_I, BD_ANCHOR_CENTER, BD_END);
+	bd_gui_layout(800, 500);
+	int layx, layy, layw, layh;
+	bd_widget_rect(c_fill, &layx, &layy, &layw, &layh);
+	check("FILL child stretches the full cross axis", layx == 0 && layw == 800);
+	bd_widget_rect(c_w, &layx, &layy, &layw, &layh);
+	check("W anchor left-aligns at preferred width", layx == 0 && layw == 100);
+	bd_widget_rect(c_e, &layx, &layy, &layw, &layh);
+	check("E anchor right-aligns at preferred width", layx == 700 && layw == 100);
+	bd_widget_rect(c_c, &layx, &layy, &layw, &layh);
+	check("CENTER anchor centers at preferred width", layx == 350 && layw == 100);
+	bd_gui_cleanup();
+
+	/* ---- layout: main-axis packing (BD_PACK_I) in a row ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id lrow = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_ROW,
+	    BD_PAD_I, 0, BD_GAP_I, 0, BD_PACK_I, BD_PACK_END, BD_END);
+	bd_id p1 = bd_create(lrow, BD_BUTTON, BD_LABEL_S, "1", BD_PREF_W_I, 100, BD_END);
+	bd_id p2 = bd_create(lrow, BD_BUTTON, BD_LABEL_S, "2", BD_PREF_W_I, 100, BD_END);
+	bd_gui_layout(800, 500);   /* 800 wide, 200 used -> 600 leftover */
+	bd_widget_rect(p1, &layx, &layy, &layw, &layh);
+	int layp2x; bd_widget_rect(p2, &layp2x, &layy, &layw, &layh);
+	check("PACK_END pushes the group to the main-axis end",
+	    layx == 600 && layp2x == 700);
+	bd_set(lrow, BD_PACK_I, BD_PACK_CENTER, BD_END);
+	bd_gui_layout(800, 500);
+	bd_widget_rect(p1, &layx, &layy, &layw, &layh);
+	bd_widget_rect(p2, &layp2x, &layy, &layw, &layh);
+	check("PACK_CENTER centers the group", layx == 300 && layp2x == 400);
+	bd_set(lrow, BD_PACK_I, BD_PACK_SPACE_BETWEEN, BD_END);
+	bd_gui_layout(800, 500);
+	bd_widget_rect(p1, &layx, &layy, &layw, &layh);
+	bd_widget_rect(p2, &layp2x, &layy, &layw, &layh);
+	check("PACK_SPACE_BETWEEN spreads to both ends", layx == 0 && layp2x == 700);
+	bd_gui_cleanup();
+
+	/* ---- layout: FIXED edge/corner anchoring (BD_ANCHOR_I + margins) ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id lfix = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id a_se = bd_create(lfix, BD_PANEL, BD_PREF_W_I, 120, BD_PREF_H_I, 24,
+	    BD_ANCHOR_I, BD_ANCHOR_SE, BD_X_I, 10, BD_Y_I, 8, BD_END);
+	bd_id a_nw = bd_create(lfix, BD_PANEL, BD_PREF_W_I, 120, BD_PREF_H_I, 24,
+	    BD_ANCHOR_I, BD_ANCHOR_NW, BD_X_I, 5, BD_Y_I, 5, BD_END);
+	bd_id a_ctr = bd_create(lfix, BD_PANEL, BD_PREF_W_I, 120, BD_PREF_H_I, 24,
+	    BD_ANCHOR_I, BD_ANCHOR_CENTER, BD_END);
+	bd_id a_leg = bd_create(lfix, BD_PANEL, BD_PREF_W_I, 120, BD_PREF_H_I, 24,
+	    BD_X_I, 12, BD_Y_I, 12, BD_END);   /* default FILL: legacy top-left */
+	bd_gui_layout(800, 500);
+	bd_widget_rect(a_se, &layx, &layy, &layw, &layh);
+	check("SE anchor pins bottom-right with inward margins",
+	    layx == 800 - 120 - 10 && layy == 500 - 24 - 8);
+	bd_widget_rect(a_nw, &layx, &layy, &layw, &layh);
+	check("NW anchor pins top-left with margins", layx == 5 && layy == 5);
+	bd_widget_rect(a_ctr, &layx, &layy, &layw, &layh);
+	check("CENTER anchor centers in the parent box", layx == 340 && layy == 238);
+	bd_widget_rect(a_leg, &layx, &layy, &layw, &layh);
+	check("FILL keeps legacy top-left X/Y placement", layx == 12 && layy == 12);
+	/* docked window re-tracks on resize: shrink the surface, SE stays pinned */
+	bd_gui_layout(600, 400);
+	bd_widget_rect(a_se, &layx, &layy, &layw, &layh);
+	check("anchored FIXED child tracks the parent on resize",
+	    layx == 600 - 120 - 10 && layy == 400 - 24 - 8);
+	bd_gui_cleanup();
+
 	/* ---- explorer: drag-move and rubber-band selection ---- */
 	bd_gui_init(&stub, NULL);
 	bd_explorer_model emodel = {

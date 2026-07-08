@@ -63,6 +63,8 @@ struct widget {
 
 	int pref_w, pref_h, grow;
 	int layout, pad, gap;
+	int anchor;             /* enum bd_anchor: how the child sits in its cell */
+	int pack;               /* enum bd_pack: main-axis distribution (container) */
 	int user_x, user_y;
 
 	int x, y, w, h;
@@ -548,6 +550,8 @@ apply_i(struct widget *w, int attr, int val)
 	case BD_PAD_I:    w->pad = val; break;
 	case BD_GAP_I:    w->gap = val; break;
 	case BD_GRAVITY_I: w->gravity = val; break;
+	case BD_ANCHOR_I: w->anchor = val; break;
+	case BD_PACK_I:   w->pack = val; break;
 	}
 }
 
@@ -1040,6 +1044,8 @@ bd_get_i(bd_id id, int attr)
 	case BD_PAD_I:    return w->pad;
 	case BD_GAP_I:    return w->gap;
 	case BD_GRAVITY_I:  return w->gravity;
+	case BD_ANCHOR_I:   return w->anchor;
+	case BD_PACK_I:     return w->pack;
 	case BD_VISIBLE_B:  return w->visible;
 	case BD_ENABLED_B:  return w->enabled;
 	case BD_MENU_PIN_B: return w->menu_pinned;
@@ -1088,6 +1094,43 @@ bd_next_sibling(bd_id id)
 
 static void layout_children(bd_id id);
 
+/* One axis of an anchor, projected from its compass point. */
+enum { AL_FILL, AL_START, AL_CENTER, AL_END };
+
+static int
+anchor_h(int a)   /* horizontal component of enum bd_anchor */
+{
+	switch (a) {
+	case BD_ANCHOR_W: case BD_ANCHOR_NW: case BD_ANCHOR_SW: return AL_START;
+	case BD_ANCHOR_E: case BD_ANCHOR_NE: case BD_ANCHOR_SE: return AL_END;
+	case BD_ANCHOR_CENTER: case BD_ANCHOR_N: case BD_ANCHOR_S: return AL_CENTER;
+	default: return AL_FILL;   /* BD_ANCHOR_FILL */
+	}
+}
+
+static int
+anchor_v(int a)   /* vertical component of enum bd_anchor */
+{
+	switch (a) {
+	case BD_ANCHOR_N: case BD_ANCHOR_NE: case BD_ANCHOR_NW: return AL_START;
+	case BD_ANCHOR_S: case BD_ANCHOR_SE: case BD_ANCHOR_SW: return AL_END;
+	case BD_ANCHOR_CENTER: case BD_ANCHOR_E: case BD_ANCHOR_W: return AL_CENTER;
+	default: return AL_FILL;
+	}
+}
+
+/* Offset of a `size`-long item within an `avail`-long cell for alignment `al`,
+ * with `m` an inward margin (START/END) or extra shift (CENTER). */
+static int
+align_offset(int al, int avail, int size, int m)
+{
+	switch (al) {
+	case AL_END:    return avail - size - m;
+	case AL_CENTER: return (avail - size) / 2 + m;
+	default:        return m;   /* AL_START / AL_FILL */
+	}
+}
+
 static void
 layout_children_rect(bd_id id, int rx, int ry, int rw, int rh)
 {
@@ -1108,10 +1151,20 @@ layout_children_rect(bd_id id, int rx, int ry, int rw, int rh)
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
 			struct widget *ch = &pool[c];
-			ch->x = ax + ch->user_x;
-			ch->y = ay + ch->user_y;
 			ch->w = ch->pref_w > 0 ? ch->pref_w : aw;
 			ch->h = ch->pref_h > 0 ? ch->pref_h : ah;
+			if (ch->anchor == BD_ANCHOR_FILL) {
+				/* legacy: place by top-left offset, fill unset axes */
+				ch->x = ax + ch->user_x;
+				ch->y = ay + ch->user_y;
+			} else {
+				/* pin to the anchored edge/corner; user_x/user_y are
+				 * inward margins from it */
+				ch->x = ax + align_offset(anchor_h(ch->anchor),
+				    aw, ch->w, ch->user_x);
+				ch->y = ay + align_offset(anchor_v(ch->anchor),
+				    ah, ch->h, ch->user_y);
+			}
 			if (ch->type != BD_MENU)
 				layout_children(c);
 		}
@@ -1138,7 +1191,28 @@ layout_children_rect(bd_id id, int rx, int ry, int rw, int rh)
 	int remaining = total - sum_pref - gaps;
 	if (remaining < 0) remaining = 0;
 
-	int pos = is_row ? ax : ay;
+	/* main-axis packing (BD_PACK_I): distribute leftover space when no child
+	 * grows to consume it. `lead` shifts the group start, `extra` adds space
+	 * between children. */
+	int leftover = (sum_grow > 0) ? 0 : remaining;
+	int lead = 0, extra = 0;
+	if (leftover > 0 && n > 0) {
+		switch (w->pack) {
+		case BD_PACK_CENTER: lead = leftover / 2; break;
+		case BD_PACK_END:    lead = leftover; break;
+		case BD_PACK_SPACE_BETWEEN:
+			if (n > 1) extra = leftover / (n - 1);
+			else       lead = leftover / 2;
+			break;
+		case BD_PACK_SPACE_AROUND:
+			extra = leftover / n;
+			lead = extra / 2;
+			break;
+		default: break;   /* BD_PACK_START */
+		}
+	}
+
+	int pos = (is_row ? ax : ay) + lead;
 	for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
 		struct widget *ch = &pool[c];
 		int pref = is_row ? ch->pref_w : ch->pref_h;
@@ -1149,15 +1223,25 @@ layout_children_rect(bd_id id, int rx, int ry, int rw, int rh)
 		if (sum_grow > 0 && ch->grow > 0)
 			extent += remaining * ch->grow / sum_grow;
 
-		if (is_row) {
-			ch->x = pos; ch->y = ay;
-			ch->w = extent; ch->h = cross;
-		} else {
-			ch->x = ax; ch->y = pos;
-			ch->w = cross; ch->h = extent;
+		/* cross-axis gravity (BD_ANCHOR_I): a non-FILL child takes its
+		 * preferred cross size and aligns within the cross extent. */
+		int cal = is_row ? anchor_v(ch->anchor) : anchor_h(ch->anchor);
+		int cpref = is_row ? ch->pref_h : ch->pref_w;
+		int csize = cross, coff = 0;
+		if (cal != AL_FILL && cpref > 0) {
+			csize = cpref < cross ? cpref : cross;
+			coff = align_offset(cal, cross, csize, 0);
 		}
 
-		pos += extent + w->gap;
+		if (is_row) {
+			ch->x = pos; ch->y = ay + coff;
+			ch->w = extent; ch->h = csize;
+		} else {
+			ch->x = ax + coff; ch->y = pos;
+			ch->w = csize; ch->h = extent;
+		}
+
+		pos += extent + w->gap + extra;
 		if (ch->type != BD_MENU)
 			layout_children(c);
 	}

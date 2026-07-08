@@ -236,6 +236,18 @@ Children advertise a preferred size (`BD_PREF_W`, `BD_PREF_H`) and an
 optional grow weight (`BD_GROW`). This covers every dialog birdie ships
 in v1.0 without needing constraint solvers.
 
+Placement within a cell is tuned by two more directives (see the
+[reference](gui-reference.md) for the enums):
+
+- `BD_ANCHOR_I` on a child (`enum bd_anchor`, compass points). In `FIXED` it
+  pins the child to a parent edge/corner and tracks it on resize, with `BD_X`/
+  `BD_Y` as inward margins; in `ROW`/`COL` it aligns the child on the cross
+  axis at its preferred size instead of stretching. Default `BD_ANCHOR_FILL`
+  keeps the original fill/top-left behavior.
+- `BD_PACK_I` on a `ROW`/`COL` container (`enum bd_pack`): start/center/end/
+  space-between/space-around distribution of leftover main-axis space when no
+  child grows. Default `BD_PACK_START`.
+
 **A container is never measured against its contents.** Layout is a
 single pass: a box's size is its explicit `BD_PREF_W`/`BD_PREF_H` (or a
 small `DEFAULT_MIN_*` fallback) plus a share of the leftover space when it

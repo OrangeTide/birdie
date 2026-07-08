@@ -71,6 +71,8 @@ knows the width to pull. Terminate a list with `BD_END`.
 | `BD_ROLE_I`     | int  | any               | accessibility role hint                    |
 | `BD_PAD_I`      | int  | container         | inner padding (px)                         |
 | `BD_GAP_I`      | int  | flex container    | gap between children (px)                   |
+| `BD_ANCHOR_I`   | int  | child             | `enum bd_anchor` — cell alignment / edge-anchoring |
+| `BD_PACK_I`     | int  | flex container    | `enum bd_pack` — main-axis distribution     |
 | `BD_GRAVITY_I`  | int  | floating frame    | `enum bd_gravity` edge/corner dock         |
 | `BD_LABEL_S`    | str  | most              | text / items (`\n`-separated for list/tabs)|
 | `BD_NAME_S`     | str  | any               | accessibility name                         |
@@ -94,6 +96,41 @@ Containers arrange children by their `BD_LAYOUT_I`:
 
 The layout engine never measures contents; a content panel needs an explicit
 `BD_PREF_W_I`/`BD_PREF_H_I` or `BD_GROW_I` or it collapses.
+
+### Anchor & packing
+
+`BD_ANCHOR_I` (`enum bd_anchor`, on a child) controls how the child sits in
+the cell the layout hands it; `BD_ANCHOR_FILL` (default) stretches to fill it,
+matching the pre-anchor behavior.
+
+```c
+enum bd_anchor { BD_ANCHOR_FILL, BD_ANCHOR_CENTER,
+    BD_ANCHOR_N, BD_ANCHOR_S, BD_ANCHOR_E, BD_ANCHOR_W,
+    BD_ANCHOR_NE, BD_ANCHOR_NW, BD_ANCHOR_SE, BD_ANCHOR_SW };
+```
+
+- **In `FIXED`** the anchor pins the child (at its preferred size, filling any
+  axis whose preferred size is 0) to that edge/corner of the parent's content
+  box and re-tracks it on resize; `BD_X_I`/`BD_Y_I` become inward margins from
+  the anchored edge(s). `BD_ANCHOR_CENTER` centers; `BD_ANCHOR_FILL` keeps the
+  legacy top-left `X/Y` placement.
+- **In `ROW`/`COL`** only the cross-axis component matters: a non-`FILL` child
+  takes its preferred cross size and aligns start/center/end within the cross
+  extent instead of stretching (e.g. `BD_ANCHOR_W` left-aligns a fixed-width
+  child in a column; `BD_ANCHOR_E` right-aligns it).
+
+`BD_PACK_I` (`enum bd_pack`, on a `ROW`/`COL` container) distributes leftover
+main-axis space when no child grows to consume it. Ignored when any child has
+`BD_GROW_I` (grow already eats the slack).
+
+```c
+enum bd_pack { BD_PACK_START, BD_PACK_CENTER, BD_PACK_END,
+    BD_PACK_SPACE_BETWEEN, BD_PACK_SPACE_AROUND };
+```
+
+`BD_PACK_START` (default) leaves the slack at the end; `CENTER`/`END` shift the
+whole group; `SPACE_BETWEEN`/`SPACE_AROUND` insert equal gaps between (and, for
+around, outside) the children.
 
 ## Widget catalog
 
