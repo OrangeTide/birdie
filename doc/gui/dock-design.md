@@ -23,6 +23,16 @@ that changed in implementation is corrected here.
 | Arrangement (v1)    | **Auto-packed strip** — tiles pack along the dock's axis; no hand-arrangement yet. Full 2D snap-grid is a roadmap item (§10). |
 | Placement           | **Relocatable via window gravity** — the dock hugs an edge/corner using `enum bd_gravity`; its axis follows the edge. |
 | Persistence         | Host-owned; only arrangement is ever persisted (roadmap, §8). |
+| Backend             | **Single-surface only** (`multi_window == 0`). On native multi-window backends the OS manages windows; see §14. |
+
+> **Backend applicability.** The dock, minimize, and the whole in-surface
+> window manager exist only when the backend cannot open native windows
+> (`bd_backend.multi_window == 0`: ludica, SDL, the headless stub). There, the
+> toolkit composites floating `BD_FRAME`s itself and can hide/dock them. On a
+> native multi-window backend (the GLES gallery) each frame is a real OS window
+> the host's window manager owns; there are no in-surface frames to minimize,
+> so `BD_DOCK` stays empty and is not exhibited in the gallery. Bridging the two
+> is the open design in §14.
 
 ## 1. What it is
 
@@ -275,3 +285,82 @@ Ported from the reference once the strip ships:
    tile dropped) + SDL3 example demo (minimize → dock tile → restore).
 5. **Deferred (roadmap)** — push windows clear (§7); 2D snap-grid +
    drag-relocate + ghost; persistence; per-frame icon/animation. (§10)
+
+## 14. Extending docks/panels to native windows (open discussion)
+
+The v1 dock only works single-surface because it *is* the in-surface window
+manager's projection. This section frames how docks and panels could work on a
+native multi-window backend (X11/Win32/Wayland/macOS), where the host's window
+manager owns placement, decoration, and minimize. It records the design space;
+nothing here is built.
+
+### The core tension
+
+Single-surface: birdie-gui *is* the window manager. It positions, decorates
+(title bars), minimizes (hides the frame's render), docks (gravity), and draws
+the dock over its own surface. Total control.
+
+Native: the OS WM owns all of that. birdie-gui cannot draw title bars (the WM
+does), cannot freely reposition (the WM may fight or ignore requests), and
+"minimize" means OS-iconify. The OS also already has a taskbar/dock for
+minimized windows, so an in-app dock risks duplicating it.
+
+The scoping question is therefore **whose windows the dock manages**. For a MUD
+client the answer is *its own* sub-windows (session panes, palettes,
+inspectors), never other apps'. That narrows the options.
+
+### What "minimize" needs from a native backend
+
+Minimize on a native window is not close. It needs the backend to hide and
+re-show a window without destroying its GL resources. New optional vtable hooks:
+
+```c
+void (*window_hide)(int id);   /* unmap / iconify, keep the window + context */
+void (*window_show)(int id);   /* re-map / de-iconify + raise */
+```
+
+On X11 (the GLES backend) these are `XUnmapWindow` / `XMapWindow` (app-managed
+hide), or `XIconifyWindow` + `_NET_WM_STATE` for true OS-iconify. `bd_window_
+minimize/restore` would, when `multi_window`, route through these instead of
+just flipping the in-surface render skip.
+
+### Three options
+
+- **A. OS-delegated (CHOSEN).** Minimize maps to OS iconify; there is *no*
+  birdie dock on native backends — the OS taskbar shows minimized windows. Least
+  code (just the two hooks + iconify). Loses a consistent in-app look and the
+  tile thumbnails. This is the decided direction: on a native backend the dock
+  is deliberately absent and window management is left to the host's WM; `BD_DOCK`
+  remains a single-surface widget.
+
+- **B. In-app dock via hide/show (not chosen).** Add `window_hide/show`.
+  `bd_window_minimize` unmaps the native sub-window and the `minimized` flag goes
+  true exactly as today; the **dock widget is unchanged** — it is still the
+  projection of the minimized set. The dock lives as a normal child widget in
+  one host window (e.g. the main window) and shows tiles for the hidden
+  sub-windows. This unifies the dock across backends: the *only* backend-specific
+  part is how a minimized frame is hidden (skip-render vs unmap). It also revives
+  the gallery demo: the gallery's "New Window" sub-windows could minimize into a
+  dock in the main window.
+
+- **C. Panel/strut.** An edge-docked *panel* that reserves screen space (a
+  taskbar-like strip) is a different mechanism: on X11 it is a borderless,
+  always-on-top window that sets `_NET_WM_STRUT`. This is the "birdie-gui is a
+  panel program" case, orthogonal to the minimized-window dock. Only worth it if
+  we want a persistent always-visible strip, not just a minimized-window tray.
+
+### Decision
+
+**Option A.** On native multi-window backends, window management is the host
+WM's job: minimize should map to OS iconify (a future `window_minimize`/
+`window_restore` backend hook over `XIconifyWindow` + `_NET_WM_STATE` and the
+Win32/Wayland/macOS equivalents), and the OS taskbar is the tray. birdie-gui
+does **not** ship an in-app dock on native backends; `BD_DOCK` stays a
+single-surface widget. This keeps the toolkit out of the business of
+reimplementing a window manager where one already exists, at the cost of a
+consistent in-app dock look across backends.
+
+Option B (a unified in-app dock via `window_hide/show`) and Option C (a
+strut-reserving panel) are recorded above as the alternatives we considered and
+declined; revisit only if a future host genuinely needs an in-app tray on a
+native backend.
