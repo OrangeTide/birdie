@@ -497,6 +497,18 @@ The `examples/sdl3` demo carries a real floating "Palette" frame exercising
 this; `test/test_gui.c` covers desktop-fills-surface, drag, snap/dock, lock,
 resize re-snap, and raise on the single-surface stub.
 
+**Any content widget can be a window.** The WM decorates and manages *top-level
+frames*, not particular widget types, so an extension widget (an inventory, a
+table, an editor) becomes a first-class floating window simply by making its
+parent a top-level `BD_FRAME` (parent `BD_NONE`) with a `BD_LABEL_S` title and a
+`BD_PREF_W`/`BD_PREF_H`: it then gets the title bar, drag, snap/dock, lock,
+minimize-to-dock, and close for free, and the WM routes body input into it. The
+SDL3 demo hosts its inventory this way (a "Bag" window you drag and minimize),
+and `test/test_gui.c` verifies an inventory in a floating frame lays out below
+the title bar, takes body clicks, drags by its title, and stops receiving input
+while minimized. The frame does not auto-size to its content (layout never
+measures children), so give the frame an explicit preferred size.
+
 Still to do:
 
 - **ludica / single-surface compositing** for genuinely separate render

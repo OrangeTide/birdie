@@ -731,6 +731,69 @@ main(void)
 	check("a restored window receives clicks again", wm_click_a == 1);
 	bd_gui_cleanup();
 
+	/* ---- an extension widget (inventory) hosted as a WM window ----
+	 * An inventory placed in a top-level BD_FRAME is a first-class floating
+	 * window: the WM decorates it with a title bar and minimize/lock/close, and
+	 * routes body input into the inventory. This is how BD_INVENTORY (and any
+	 * content widget) becomes "like other windows": drag, minimize, restore. */
+	{
+	bd_gui_init(&stub, NULL);
+	memset(inv_slots, 0, sizeof inv_slots);
+	inv_slots[0] = (struct inv_slot){ 200, "Sword",  (bd_texture){1}, 1, 1 };
+	inv_slots[1] = (struct inv_slot){ 201, "Shield", (bd_texture){1}, 1, 1 };
+
+	bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END); /* desktop */
+	bd_id bagwin = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Bag",
+	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 0,
+	    BD_PREF_W_I, 240, BD_PREF_H_I, 220, BD_X_I, 100, BD_Y_I, 100, BD_END);
+	bd_id binv = bd_inventory_create(bagwin, 4, 4,
+	    &(bd_inventory_model){ .get = inv_get }, NULL, BD_GROW_I, 1, BD_END);
+	bd_inventory_set_cell_size(binv, 40);
+	bd_gui_layout(800, 500);
+
+	int bx, by, bw, bh; bd_widget_rect(binv, &bx, &by, &bw, &bh);
+	check("inventory content lays out below the window title bar",
+	    by >= 100 + 22 && bx == 100);
+
+	int s0x = bx + 36, s0y = by + 28;      /* slot-0 / slot-1 centers (cell 56) */
+	int s1x = bx + 36 + 56;
+
+	/* a body click routes through the WM into the inventory */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=s0x, .y=s0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=s0x, .y=s0y });
+	check("a click in the floating window reaches the inventory",
+	    bd_inventory_selected(binv) == 0);
+
+	/* drag the title bar (y 100..122) to move the whole window */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=150, .y=110 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=300, .y=210 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=300, .y=210 });
+	bd_gui_layout(800, 500);
+	int nx, ny; bd_widget_rect(bagwin, &nx, &ny, NULL, NULL);
+	check("dragging the title bar moves the inventory window",
+	    nx == 250 && ny == 200);
+
+	/* minimize it: the window (and its inventory) vanishes from hit-testing */
+	bd_window_minimize(bagwin);
+	bd_gui_layout(800, 500);
+	bd_widget_rect(binv, &bx, &by, &bw, &bh);   /* now over the moved window */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+36+56, .y=by+28 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+36+56, .y=by+28 });
+	check("a minimized inventory window is not hit-tested",
+	    bd_inventory_selected(binv) == 0);   /* still slot 0, click went nowhere */
+
+	/* restore it and the inventory takes input again */
+	bd_window_restore(bagwin);
+	bd_gui_layout(800, 500);
+	bd_widget_rect(binv, &bx, &by, &bw, &bh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+36+56, .y=by+28 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+36+56, .y=by+28 });
+	check("a restored inventory window takes input again",
+	    bd_inventory_selected(binv) == 1);
+	(void)s1x;
+	bd_gui_cleanup();
+	}
+
 	/* ---- BD_DOCK: tiles derived from minimized windows, click restores ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id dskt = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,

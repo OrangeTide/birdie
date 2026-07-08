@@ -332,6 +332,7 @@ static bd_id min_btn;    /* minimize / restore button */
 static bd_id term;       /* terminal body */
 static bd_id term_input; /* command line */
 static bd_id palette;    /* a real top-level window run by the in-surface WM */
+static bd_id invwin;     /* the inventory, hosted as a real WM-managed window */
 static bd_id actionbar;  /* CRPG hotbar: drop items onto it, press 1..6 to fire */
 static int   minimized;
 
@@ -528,10 +529,14 @@ build_ui(void)
 	    BD_PREF_H_I, 26, BD_ON_CLICK_F, on_submit,
 	    BD_END);
 
-	/* Inventory subwindow. Slot 0 holds the live 3D relic (its icon is the
-	 * FBO texture updated each frame in the main loop); the rest are static
+	/* Inventory window. A genuine top-level frame (parent BD_NONE), so the
+	 * in-surface window manager treats it exactly like the palette below: a
+	 * real title bar to drag it by, and the minimize / lock / close buttons.
+	 * Minimize it (the "_" button) and it collapses to a tile on the left dock;
+	 * click the tile to restore it. Slot 0 holds the live 3D relic (its icon is
+	 * the FBO texture updated each frame in the main loop); the rest are static
 	 * items. Drag between slots, right-click, wheel to scroll, hover for a
-	 * tooltip. */
+	 * tooltip, or drag an item onto the action bar. */
 	inv_icons[0] = make_icon(0xD24B4BFFu);   /* potion  */
 	inv_icons[1] = make_icon(0xE8C24AFFu);   /* gold    */
 	inv_icons[2] = make_icon(0x6FB36FFFu);   /* herb    */
@@ -540,17 +545,13 @@ build_ui(void)
 	inv_bag[2] = (struct bag_slot){ "Gold",   inv_icons[1], 99 };
 	inv_bag[4] = (struct bag_slot){ "Herb",   inv_icons[2], 12 };
 
-	bd_id invwin = bd_create(root, BD_PANEL,
-	    BD_LAYOUT_I, BD_LAYOUT_COL,
+	invwin = bd_create(BD_NONE, BD_FRAME,
+	    BD_LABEL_S, "Inventory",
+	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 4, BD_GAP_I, 0,
 	    BD_X_I, 720, BD_Y_I, 70,
-	    BD_PREF_W_I, 260, BD_PREF_H_I, 250,
-	    BD_PAD_I, 0, BD_GAP_I, 0,
+	    BD_PREF_W_I, 260, BD_PREF_H_I, 300,
+	    BD_BG_C, 0x222A33FFu,
 	    BD_END);
-	bd_id invbar = bd_create(invwin, BD_PANEL,
-	    BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, TITLE_H, BD_PAD_I, 3,
-	    BD_BG_C, 0x2A3340FFu, BD_END);
-	bd_create(invbar, BD_LABEL, BD_LABEL_S, "Inventory", BD_GROW_I, 1,
-	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
 	bd_id inv = bd_inventory_create(invwin, 4, 4,
 	    &(bd_inventory_model){ .get = inv_get },
 	    &(bd_inventory_cb){ .activate = inv_activate, .context = inv_context,
