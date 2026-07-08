@@ -37,7 +37,8 @@ birdie_gui_SRCS = \
 	src/bd_widget_canvas.c \
 	src/bd_widget_table.c \
 	src/bd_widget_inventory.c \
-	src/bd_widget_dock.c
+	src/bd_widget_dock.c \
+	src/bd_widget_actionbar.c
 
 # The library builds against its own public headers and the vendored stb
 # single-headers. include/ is exported so anything that lists birdie_gui in

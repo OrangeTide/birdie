@@ -34,7 +34,8 @@ birdie_gui_SRCS = \
 	bd_widget_canvas.c \
 	bd_widget_table.c \
 	bd_widget_inventory.c \
-	bd_widget_dock.c
+	bd_widget_dock.c \
+	bd_widget_actionbar.c
 
 # bd_widget_vt.c needs libvt's headers (pulled transitively via bd_vt); the
 # toolkit bakes the stb single-headers.

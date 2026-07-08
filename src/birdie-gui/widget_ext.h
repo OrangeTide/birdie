@@ -83,4 +83,38 @@ double bd_time(void);
 /* va_list form of bd_create(), so extensions can wrap it in variadic helpers. */
 bd_id bd_create_va(bd_id parent, int type, va_list ap);
 
+/*
+ * Cross-widget drag-and-drop.
+ *
+ * The toolkit's pointer capture keeps a drag glued to its source widget, so the
+ * source never sees the release land on another widget. This facility bridges
+ * that gap: a source widget (inventory, dock, ...) that has grabbed the pointer
+ * calls bd_dnd_begin() once the drag starts to advertise what is being carried.
+ * The toolkit then draws a ghost tile trailing the pointer and, when the button
+ * is released over a *different* extension widget, synthesizes a BD_EV_DROP
+ * event to that target's event() hook. The target reads the payload with
+ * bd_dnd_get() and returns 1 to accept the drop.
+ *
+ * The payload is copied into the toolkit (label bytes included, up to a bounded
+ * length), so the source may pass borrowed strings. A drag ends when the button
+ * is released; there is no separate cancel (a release over the source or empty
+ * space just discards it).
+ */
+typedef struct bd_dnd_payload {
+	bd_id       source;   /* widget the drag started from */
+	uint64_t    key;      /* app identity of the dragged item */
+	const char *label;    /* caption shown on the ghost (copied) */
+	bd_texture  icon;     /* ghost image; id 0 = a plain marker */
+	void       *user;     /* opaque app payload, passed through unchanged */
+} bd_dnd_payload;
+
+/* Source: begin (or refresh) the active drag with this payload. No-op unless a
+ * pointer drag is in flight (the toolkit ties the drag's lifetime to it). */
+void bd_dnd_begin(const bd_dnd_payload *p);
+
+/* The payload of the drag in flight, or NULL when none. A drop target queries
+ * this from its event() hook on a BD_EV_DROP; a source may query it to suppress
+ * its own in-widget ghost while the toolkit draws the shared one. */
+const bd_dnd_payload *bd_dnd_get(void);
+
 #endif

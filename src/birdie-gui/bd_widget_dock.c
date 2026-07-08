@@ -19,6 +19,7 @@
 #include "widget_ext.h"
 #include "bd_draw.h"
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DOCK_PAD 4       /* inset of the icon square within a tile cell */
@@ -32,7 +33,11 @@ struct dock {
 	bd_id        tiles[DOCK_MAX];  /* current minimized frames, in order */
 	int          ntiles;
 	int          press_tile;   /* index pressed, -1 = none */
+	int          press_x, press_y; /* pointer at press, for the drag threshold */
+	int          dragging;     /* a cross-widget drag started from press_tile */
 };
+
+#define DOCK_DRAG_THRESHOLD 4  /* px the pointer must move to start a drag */
 
 static int dock_type;
 
@@ -174,14 +179,35 @@ dock_event(bd_id id, void *state, const bd_event *ev)
 
 	if (ev->type == BD_EV_MOUSE_DOWN && ev->button == BD_MOUSE_LEFT) {
 		d->press_tile = dock_tile_at(d, x, y, ev->x, ev->y);
+		d->press_x = ev->x;
+		d->press_y = ev->y;
+		d->dragging = 0;
 		return d->press_tile >= 0;
+	}
+	if (ev->type == BD_EV_MOUSE_MOVE && d->press_tile >= 0 && !d->dragging &&
+	    (abs(ev->x - d->press_x) > DOCK_DRAG_THRESHOLD ||
+	     abs(ev->y - d->press_y) > DOCK_DRAG_THRESHOLD)) {
+		/* offer the tile's window as a cross-widget drag payload (e.g. drop
+		 * onto an action bar to bind a "restore this window" action). The
+		 * toolkit draws the ghost and delivers the drop on release. */
+		d->dragging = 1;
+		bd_dock_item it;
+		dock_item(d, d->tiles[d->press_tile], &it);
+		bd_dnd_payload p = {0};
+		p.source = id;
+		p.key    = d->tiles[d->press_tile];
+		p.label  = it.label;
+		p.icon   = it.icon;
+		bd_dnd_begin(&p);
+		return 1;
 	}
 	if (ev->type == BD_EV_MOUSE_UP && ev->button == BD_MOUSE_LEFT &&
 	    d->press_tile >= 0) {
 		int t = dock_tile_at(d, x, y, ev->x, ev->y);
-		if (t == d->press_tile && t < d->ntiles)
-			bd_window_restore(d->tiles[t]);   /* click restores */
+		if (!d->dragging && t == d->press_tile && t < d->ntiles)
+			bd_window_restore(d->tiles[t]);   /* a plain click restores */
 		d->press_tile = -1;
+		d->dragging = 0;
 		return 1;
 	}
 	return 0;

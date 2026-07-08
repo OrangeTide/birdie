@@ -114,6 +114,29 @@ sel_changed(bd_id id, struct inv *v)
 		v->cb.selection_changed(id, v->cb.ctx);
 }
 
+/* fetch a slot's item (declared early for the drag-source helper below) */
+static void slot_item(const struct inv *v, int slot, bd_inventory_item *out);
+
+/* Advertise the pressed slot as a cross-widget drag payload, so it can be
+ * dropped onto another extension widget (e.g. an action bar). The toolkit draws
+ * the ghost and delivers the drop; the in-widget slot-to-slot move still runs
+ * from inv_event's own MOUSE_UP when the release lands back inside the grid. */
+static void
+inv_start_dnd(bd_id id, struct inv *v)
+{
+	if (v->press_slot < 0)
+		return;
+	bd_inventory_item it;
+	slot_item(v, v->press_slot, &it);
+	bd_dnd_payload p = {0};
+	p.source = id;
+	p.key    = it.key;
+	p.label  = it.label;
+	p.icon   = it.icon;
+	p.user   = it.user;
+	bd_dnd_begin(&p);
+}
+
 /* fetch a slot's item (zeroed for empty / no model) */
 static void
 slot_item(const struct inv *v, int slot, bd_inventory_item *out)
@@ -273,8 +296,10 @@ inv_render(bd_id id, void *state)
 		}
 	}
 
-	/* ghost of the dragged item, following the pointer */
-	if (v->mode == DRAG_ITEM && v->press_slot >= 0) {
+	/* ghost of the dragged item, following the pointer. Suppressed once a
+	 * cross-widget drag is live, since the toolkit then draws the shared ghost
+	 * (unclipped, so it stays visible after the pointer leaves this grid). */
+	if (v->mode == DRAG_ITEM && v->press_slot >= 0 && !bd_dnd_get()) {
 		bd_inventory_item it;
 		slot_item(v, v->press_slot, &it);
 		if (it.icon.id)
@@ -385,8 +410,10 @@ inv_event(bd_id id, void *state, const bd_event *ev)
 		v->mouse_y = ev->y;
 		if (v->mode == DRAG_PENDING &&
 		    (abs(ev->x - v->press_x) > DRAG_THRESHOLD ||
-		     abs(ev->y - v->press_y) > DRAG_THRESHOLD))
+		     abs(ev->y - v->press_y) > DRAG_THRESHOLD)) {
 			v->mode = DRAG_ITEM;
+			inv_start_dnd(id, v);   /* also offer it to other widgets */
+		}
 		if (v->mode == DRAG_ITEM) {
 			v->drop_slot = hit_slot(id, v, ev->x, ev->y);
 			return 1;

@@ -508,6 +508,52 @@ Still to do:
   window resize handles, and per-window menu state (one open menu at a time
   across all windows).
 
+### Cross-widget drag-and-drop — implemented
+
+The toolkit's pointer capture keeps a drag glued to the widget it started on, so
+a source never sees the release land elsewhere. A small facility in the
+extension API (`widget_ext.h`) bridges that: a source widget mid-drag calls
+`bd_dnd_begin()` with a `bd_dnd_payload` (source id, item key, label, icon, opaque
+user pointer). The toolkit copies it, draws a translucent ghost tile trailing the
+pointer, and on release over a **different** extension widget synthesizes a
+`BD_EV_DROP` event to that target's `event()` hook. The target reads the payload
+with `bd_dnd_get()` and returns 1 to accept. A release over the source or empty
+space just discards the drag; there is no separate cancel. It is mouse-driven
+(the touch/pen capture paths are unaffected) and the payload's lifetime is tied
+to the active pointer capture, so a destroyed source cleanly drops the drag.
+
+`bd_widget_inventory` and `bd_widget_dock` are both drag sources now (a grid item
+or a minimized-window tile), and `bd_widget_actionbar` (below) is the reference
+drop target. Verified headlessly in `test/test_gui.c` (drag an inventory item
+onto an action-bar slot; the ghost renders without crashing) and demoed live in
+the SDL3 example.
+
+### Action bar widget — implemented
+
+A CRPG-style hotbar / floating tool palette (`bd_widget_actionbar.{c,h}`, a
+`widget_ext` extension), the mutable sibling of the dock. It renders the same
+beveled tiles (`bd_draw_tile`) and hugs a screen edge/corner with `enum
+bd_gravity` (vertical for LEFT/RIGHT and corners, horizontal for TOP/BOTTOM),
+but where the dock is a read-only projection of the minimized-window set, the
+action bar **owns** its slots. With `BD_GRAVITY_NONE` it floats at its
+`BD_X_I`/`BD_Y_I` position and the user drags it by the grip at its leading edge;
+place it in a `BD_LAYOUT_FIXED` parent (the desktop root) so it can anchor.
+
+- **Filled by drag-and-drop.** Drop an inventory item or a dock tile onto a slot
+  (via the cross-widget DND above) and its icon/label/key bind there; a `drop`
+  callback can veto or customize. Slots also reorder by dragging one onto
+  another (fires `move`), and a plain click fires `activate`.
+- **Hotkeys.** Each slot carries an optional keyboard binding (ASCII key +
+  Shift/Ctrl/Alt), like a WoW/Neverwinter Nights hotbar. The binding belongs to
+  the slot, not the action, so it survives a re-drop. Its label (`⇧` Shift, `^`
+  Control, `⌥` Alt, then the key) is drawn in the slot corner when the slot is
+  empty or hovered. Feed presses to `bd_actionbar_key()` from the host's key
+  handling to fire the matching slot; the bar does not grab global keys itself.
+
+Covered by `test/test_gui.c` (drop-binds, click-activate, hotkey dispatch with
+modifier matching, internal reorder) and exercised in the SDL3 example (a
+six-slot floating bar bound to Q W E R T Y).
+
 ### Explorer / icon-browser widget
 
 A new widget type (v0.3, built as a `widget_ext` extension) modeled on

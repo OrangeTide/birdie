@@ -7,7 +7,10 @@
  * subwindow you can drag by its title bar and minimize, and an inventory grid
  * whose "Relic" cell shows the same spinning model rendered into an FBO texture
  * each frame (the "host renders to a texture" path a backend-neutral widget
- * relies on). Drag anywhere over the background to rotate it; the wheel zooms.
+ * relies on). A floating action bar (a CRPG hotbar) sits at the bottom: drag an
+ * item off the inventory (or a minimized-window tile off the dock) onto a slot
+ * to bind it, then click the slot or press its Q W E R T Y hotkey to fire it.
+ * Drag anywhere over the background to rotate it; the wheel zooms.
  *
  * It is the demo host for the SDL3 backend (bd_backend_sdl3.c, in src/birdie-gui
  * alongside the ludica backend): this file owns the window/frame loop and the
@@ -40,6 +43,7 @@
 #include "bd_widget_vt.h"
 #include "bd_widget_inventory.h"
 #include "bd_widget_dock.h"
+#include "bd_widget_actionbar.h"
 
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
@@ -328,6 +332,7 @@ static bd_id min_btn;    /* minimize / restore button */
 static bd_id term;       /* terminal body */
 static bd_id term_input; /* command line */
 static bd_id palette;    /* a real top-level window run by the in-surface WM */
+static bd_id actionbar;  /* CRPG hotbar: drop items onto it, press 1..6 to fire */
 static int   minimized;
 
 static void
@@ -452,6 +457,26 @@ inv_move(bd_id w, int from, int to, void *ctx)
 	report(b);
 }
 
+/* ---- action bar: a CRPG hotbar, filled by dragging items onto it ---- */
+static void
+act_activate(bd_id w, int slot, uint64_t key, void *ctx)
+{
+	(void)w; (void)key; (void)ctx;
+	char b[48];
+	snprintf(b, sizeof b, "fire action in slot %d", slot);
+	report(b);
+}
+static int
+act_drop(bd_id w, int slot, const bd_dnd_payload *p, void *ctx)
+{
+	(void)w; (void)ctx;
+	char b[80];
+	snprintf(b, sizeof b, "bound \"%s\" to action slot %d (hotkey %d)",
+	    p->label ? p->label : "?", slot, slot + 1);
+	report(b);
+	return 1;   /* accept: the bar copies the item's icon/label into the slot */
+}
+
 static void
 build_ui(void)
 {
@@ -565,6 +590,21 @@ build_ui(void)
 	bd_id dock = bd_dock_create(root, NULL, BD_END);
 	bd_dock_set_gravity(dock, BD_GRAVITY_LEFT);
 	bd_dock_set_tile_size(dock, 48);
+
+	/* A CRPG-style action bar (hotbar): a floating strip of six empty slots.
+	 * Drag an item out of the inventory (or a minimized-window tile off the
+	 * dock) and drop it on a slot to bind it there; click a bound slot to fire
+	 * it. Each slot is bound to a letter hotkey (Q W E R T Y), shown in the slot
+	 * corner while it is empty or hovered; press the key to trigger it (wired in
+	 * the main loop). Drag the grip at its left edge to move the whole bar. */
+	static const char hotkeys[6] = { 'Q', 'W', 'E', 'R', 'T', 'Y' };
+	bd_id abar = bd_actionbar_create(root, 6,
+	    &(bd_actionbar_cb){ .activate = act_activate, .drop = act_drop },
+	    BD_X_I, 300, BD_Y_I, 650, BD_END);
+	bd_actionbar_set_tile_size(abar, 44);
+	for (int i = 0; i < 6; i++)
+		bd_actionbar_set_hotkey(abar, i, hotkeys[i], 0);
+	actionbar = abar;
 }
 
 /* ------------------------------------------------------------------ */
@@ -654,6 +694,11 @@ main(void)
 					if (cam_dist < 2.5f)  cam_dist = 2.5f;
 					if (cam_dist > 12.0f) cam_dist = 12.0f;
 				}
+			} else if (bev.type == BD_EV_KEY_DOWN &&
+			    bd_focused() == BD_NONE &&
+			    bd_actionbar_key(actionbar, bev.key, bev.mods)) {
+				/* a hotbar key fired its action (only when no text
+				 * field has focus, so typing is never stolen) */
 			} else {
 				bd_gui_event(&bev);
 			}

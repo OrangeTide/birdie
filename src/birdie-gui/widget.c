@@ -133,6 +133,12 @@ static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer 
 #define MAX_TOUCHES 10
 static struct { int active; int id; bd_id widget; } touches[MAX_TOUCHES];
 static bd_id pen_capture = BD_NONE;     /* extension widget grabbing the stylus */
+/* cross-widget drag-and-drop, active only during a pointer_capture drag: the
+ * source advertises a payload with bd_dnd_begin, the toolkit draws a ghost and
+ * delivers a BD_EV_DROP to the widget the release lands on. */
+static int          dnd_active;
+static bd_dnd_payload dnd_payload;
+static char         dnd_label[128];
 static bd_id active_menu = BD_NONE;
 static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
@@ -257,6 +263,33 @@ double
 bd_time(void)
 {
 	return (be && be->time) ? be->time() : bd_default_time();
+}
+
+void
+bd_dnd_begin(const bd_dnd_payload *p)
+{
+	/* only meaningful mid-drag: the toolkit ties the payload's lifetime to
+	 * the active pointer capture and clears it when the button is released */
+	if (!p || pointer_capture == BD_NONE)
+		return;
+	dnd_payload = *p;
+	if (p->label) {
+		size_t n = strlen(p->label);
+		if (n >= sizeof dnd_label)
+			n = sizeof dnd_label - 1;
+		memcpy(dnd_label, p->label, n);
+		dnd_label[n] = '\0';
+	} else {
+		dnd_label[0] = '\0';
+	}
+	dnd_payload.label = dnd_label;
+	dnd_active = 1;
+}
+
+const bd_dnd_payload *
+bd_dnd_get(void)
+{
+	return dnd_active ? &dnd_payload : NULL;
 }
 
 const bd_theme *
@@ -1074,8 +1107,10 @@ bd_destroy(bd_id id)
 		root = BD_NONE;
 	if (active_press == id)
 		active_press = BD_NONE;
-	if (pointer_capture == id)
+	if (pointer_capture == id) {
 		pointer_capture = BD_NONE;
+		dnd_active = 0;   /* source gone: drop the drag it was carrying */
+	}
 	if (hover_ext == id)
 		hover_ext = BD_NONE;
 	if (wm_active_frame == id)
@@ -2559,6 +2594,7 @@ bd_gui_cleanup(void)
 	active_menu = BD_NONE;
 	active_press = BD_NONE;
 	pointer_capture = BD_NONE;
+	dnd_active = 0;
 	hover_ext = BD_NONE;
 	pen_capture = BD_NONE;
 	drag_menu = BD_NONE;
@@ -3029,6 +3065,32 @@ render_wm_frame(bd_id f)
 	bd_draw_end();
 }
 
+/* The drag ghost trailing the pointer during a cross-widget drag: a translucent
+ * icon (or a plain marker when the payload has none) with its caption beneath,
+ * drawn unclipped and above everything so it is visible over any target. */
+static void
+render_dnd_ghost(int W, int H)
+{
+	if (!dnd_active)
+		return;
+	const int s = 40;
+	int gx = mouse_x - s / 2, gy = mouse_y - s / 2;
+	bd_draw_begin(W, H);
+	if (dnd_payload.icon.id)
+		bd_draw_sprite(dnd_payload.icon, (float)gx, (float)gy, (float)s,
+		    (float)s, 0, 0, 1, 1, 0xFFFFFFC0u);
+	else {
+		fill_rect(gx, gy, s, s, (theme.widget & 0xFFFFFF00) | 0xC0);
+		stroke_rect(gx, gy, s, s, theme.border);
+	}
+	if (dnd_label[0]) {
+		float tw = bd_draw_text_width(dnd_label);
+		queue_text(dnd_label, (float)mouse_x - tw / 2,
+		    (float)(gy + s + 2), theme.text_hi);
+	}
+	bd_draw_end();
+}
+
 void
 bd_gui_render(void)
 {
@@ -3049,6 +3111,8 @@ bd_gui_render(void)
 				    be->window_height(id));
 				render_notice(be->window_width(id),
 				    be->window_height(id));
+				render_dnd_ghost(be->window_width(id),
+				    be->window_height(id));
 			}
 			be->window_swap(id);
 		}
@@ -3062,6 +3126,7 @@ bd_gui_render(void)
 		}
 		render_modal(be->width(), be->height());
 		render_notice(be->width(), be->height());
+		render_dnd_ghost(be->width(), be->height());
 	}
 
 	handle_ime_state();
@@ -3783,6 +3848,17 @@ bd_gui_event(const bd_event *ev)
 				pool[pointer_capture].pressed = 0;
 			else
 				ext_event(pointer_capture, ev);
+			/* cross-widget drop: hand an active payload to the widget the
+			 * release landed on, if it is a different extension widget */
+			if (dnd_active) {
+				bd_id tgt = hit_extension(frame, ev->x, ev->y);
+				if (tgt != BD_NONE && tgt != pointer_capture) {
+					bd_event drop = *ev;
+					drop.type = BD_EV_DROP;
+					ext_event(tgt, &drop);
+				}
+				dnd_active = 0;
+			}
 			pointer_capture = BD_NONE;
 			return 1;
 		}

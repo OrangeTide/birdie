@@ -47,6 +47,10 @@ enum bd_ev_type {
 	BD_EV_PEN_DOWN,     /* stylus tip contacted the surface */
 	BD_EV_PEN_MOVE,     /* stylus moving while in contact */
 	BD_EV_PEN_UP,       /* stylus tip lifted off the surface */
+	BD_EV_DROP,         /* toolkit-synthesized: a cross-widget drag was released
+	                       over this widget; read the payload with bd_dnd_get().
+	                       Not injected by the host; the toolkit delivers it to an
+	                       extension widget's event() at `x`,`y` on mouse-up. */
 };
 
 /* Pen flag bitmask (bd_event.pen_flags), valid for the BD_EV_PEN_* events. */

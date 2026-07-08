@@ -18,6 +18,7 @@
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
 #include "bd_widget_dock.h"
+#include "bd_widget_actionbar.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -68,6 +69,17 @@ static void inv_on_ctx(bd_id w, int s, uint64_t k, int sx, int sy, void *c)
 static int inv_hov = -2;
 static void inv_on_hover(bd_id w, int s, uint64_t k, void *c)
 { (void)w; (void)k; (void)c; inv_hov = s; }
+
+/* ---- action bar recorded callbacks ---- */
+static int ab_act_slot = -1; static uint64_t ab_act_key;
+static void ab_on_act(bd_id w, int s, uint64_t k, void *c)
+{ (void)w; (void)c; ab_act_slot = s; ab_act_key = k; }
+static int ab_drop_slot = -1; static uint64_t ab_drop_key;
+static int ab_on_drop(bd_id w, int s, const bd_dnd_payload *p, void *c)
+{ (void)w; (void)c; ab_drop_slot = s; ab_drop_key = p->key; return 1; }
+static int ab_move_from = -1, ab_move_to = -1;
+static void ab_on_move(bd_id w, int f, int t, void *c)
+{ (void)w; (void)c; ab_move_from = f; ab_move_to = t; }
 
 static int checks, fails;
 static void
@@ -1634,6 +1646,76 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_SCROLL, .scroll_dy=-3 });
 	bd_gui_render();
 	check("inventory scroll + render does not crash", 1);
+
+	bd_gui_cleanup();
+	}
+
+	/* ---- action bar: cross-widget drop / click-activate / reorder / hotkey ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	memset(inv_slots, 0, sizeof inv_slots);
+	inv_slots[0] = (struct inv_slot){ 100, "Sword", (bd_texture){1}, 1, 1 };
+	ab_act_slot = ab_drop_slot = ab_move_from = ab_move_to = -1;
+
+	bd_inventory_model im = { .get = inv_get };
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_ROW,
+	    BD_PAD_I, 10, BD_GAP_I, 20, BD_END);
+	bd_id inv = bd_inventory_create(fr, 4, 5, &im, NULL, BD_END);
+	bd_inventory_set_cell_size(inv, 48);
+	bd_actionbar_cb abcb = { .activate = ab_on_act, .drop = ab_on_drop,
+	    .move = ab_on_move };
+	bd_id bar = bd_actionbar_create(fr, 4, &abcb, BD_END);
+	bd_actionbar_set_tile_size(bar, 48);
+	bd_actionbar_set_hotkey(bar, 0, 'A', BD_MOD_CTRL);
+	bd_gui_layout(800, 600);
+
+	int abx, aby, abw, abh;
+	bd_widget_rect(bar, &abx, &aby, &abw, &abh);
+	check("action bar got geometry", abw > 100 && abh > 40);
+	check("action bar slot 0 starts empty",
+	    !bd_actionbar_get_slot(bar, 0, NULL));
+
+	int ix, iy, iw, ih; bd_widget_rect(inv, &ix, &iy, &iw, &ih);
+	int inv0x = ix + 40, inv0y = iy + 20;              /* inventory slot-0 center */
+	int b0x = abx + 40, b0y = aby + 28;               /* bar slot-0 center */
+	int b2x = abx + 40 + 2 * 56;                      /* bar slot-2 center x */
+
+	/* drag Sword out of the inventory and drop it on action-bar slot 0 */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=inv0x, .y=inv0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=inv0x+30, .y=inv0y }); /* start drag */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=b0x, .y=b0y });        /* over the bar */
+	bd_gui_render();   /* draws the drag ghost; must not crash */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=b0x, .y=b0y });
+	bd_action got;
+	check("drop fires drop(slot 0, Sword)", ab_drop_slot == 0 && ab_drop_key == 100);
+	check("dropped item binds into action-bar slot 0",
+	    bd_actionbar_get_slot(bar, 0, &got) && got.key == 100);
+	check("the hotkey binding survives the drop",
+	    bd_actionbar_get_hotkey(bar, 0, NULL, NULL));
+
+	/* a plain click on the filled slot fires activate */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=b0x, .y=b0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=b0x, .y=b0y });
+	check("click activates action-bar slot 0", ab_act_slot == 0 && ab_act_key == 100);
+
+	/* the Ctrl-A hotkey activates slot 0 too; a wrong modifier does not */
+	ab_act_slot = -1;
+	check("Ctrl-A hotkey activates slot 0",
+	    bd_actionbar_key(bar, 'A', BD_MOD_CTRL) && ab_act_slot == 0);
+	ab_act_slot = -1;
+	check("plain A (no Ctrl) does not match the binding",
+	    !bd_actionbar_key(bar, 'A', 0) && ab_act_slot == -1);
+
+	/* drag slot 0 onto slot 2 within the bar -> reorder */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=b0x, .y=b0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=b0x+30, .y=b0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=b2x, .y=b0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT, .x=b2x, .y=b0y });
+	check("internal reorder fires move(0,2)", ab_move_from == 0 && ab_move_to == 2);
+	check("Sword moved to slot 2",
+	    bd_actionbar_get_slot(bar, 2, &got) && got.key == 100);
+	check("slot 0 is empty after the reorder",
+	    !bd_actionbar_get_slot(bar, 0, NULL));
 
 	bd_gui_cleanup();
 	}

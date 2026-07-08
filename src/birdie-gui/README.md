@@ -462,7 +462,8 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ilibvt \
    backend-gles/bd_backend_gles.c src/bd_backend_gles_core.c \
    src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
    src/bd_widget_explorer.c src/bd_widget_editor.c src/bd_widget_canvas.c \
-   src/bd_widget_table.c src/bd_widget_inventory.c libvt/*.c \
+   src/bd_widget_table.c src/bd_widget_inventory.c src/bd_widget_dock.c \
+   src/bd_widget_actionbar.c libvt/*.c \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o gallery
 ```
 
