@@ -264,4 +264,17 @@ void bd_window_set_locked(bd_id frame, int locked);
 int  bd_window_locked(bd_id frame);
 int  bd_window_gravity(bd_id frame);
 
+/*
+ * Minimize: a minimized floating window is hidden from the surface (skipped in
+ * layout, render, and hit-testing) but still exists; the title bar carries a
+ * minimize button, and a BD_DOCK widget shows a tile per minimized window that
+ * restores it on click. bd_window_restore also raises the window to the front.
+ * bd_window_list copies the top-level frames (back-to-front z-order) into `out`
+ * and returns the count, so a dock can enumerate and filter them.
+ */
+void bd_window_minimize(bd_id frame);
+void bd_window_restore(bd_id frame);
+int  bd_window_minimized(bd_id frame);
+int  bd_window_list(bd_id *out, int max);
+
 #endif
