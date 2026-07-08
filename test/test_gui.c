@@ -19,6 +19,7 @@
 #include "bd_widget_inventory.h"
 #include "bd_widget_dock.h"
 #include "bd_widget_actionbar.h"
+#include "bd_widget_tabview.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -80,6 +81,13 @@ static int ab_on_drop(bd_id w, int s, const bd_dnd_payload *p, void *c)
 static int ab_move_from = -1, ab_move_to = -1;
 static void ab_on_move(bd_id w, int f, int t, void *c)
 { (void)w; (void)c; ab_move_from = f; ab_move_to = t; }
+
+/* ---- tab view recorded callbacks ---- */
+static int tv_change_n;
+static void tv_on_change(bd_id w, void *c) { (void)w; (void)c; tv_change_n++; }
+static int tv_btn0, tv_btn1;
+static void tv_click0(bd_id w, void *c) { (void)w; (void)c; tv_btn0++; }
+static void tv_click1(bd_id w, void *c) { (void)w; (void)c; tv_btn1++; }
 
 static int checks, fails;
 static void
@@ -1780,6 +1788,63 @@ main(void)
 	check("slot 0 is empty after the reorder",
 	    !bd_actionbar_get_slot(bar, 0, NULL));
 
+	bd_gui_cleanup();
+	}
+
+	/* ---- tab view: swap complex panes, only the active one shows / hits ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	tv_change_n = tv_btn0 = tv_btn1 = 0;
+
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id tv = bd_tabview_create(fr, BD_GROW_I, 1, BD_END);
+	bd_tabview_on_change(tv, tv_on_change, NULL);
+	bd_id p0 = bd_tabview_add_pane(tv, "One");
+	bd_id p1 = bd_tabview_add_pane(tv, "Two");
+	bd_id p2 = bd_tabview_add_pane(tv, "Three");
+	bd_create(p0, BD_BUTTON, BD_LABEL_S, "b0", BD_GROW_I, 1, BD_ON_CLICK_F, tv_click0, BD_END);
+	bd_create(p1, BD_BUTTON, BD_LABEL_S, "b1", BD_GROW_I, 1, BD_ON_CLICK_F, tv_click1, BD_END);
+	bd_gui_layout(800, 500);
+
+	check("tab view reports three panes", bd_tabview_count(tv) == 3);
+	check("first pane is active", bd_tabview_active(tv) == 0);
+	check("only the active pane is visible",
+	    bd_get_i(p0, BD_VISIBLE_B) == 1 && bd_get_i(p1, BD_VISIBLE_B) == 0 &&
+	    bd_get_i(p2, BD_VISIBLE_B) == 0);
+
+	/* the panes overlap in one content rect, below the tab strip */
+	int cx, cy, cw, ch; bd_widget_rect(p0, &cx, &cy, &cw, &ch);
+	int mx = cx + cw / 2, my = cy + ch / 2;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mx, .y=my });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mx, .y=my });
+	check("a click in the active pane reaches its content", tv_btn0 == 1 && tv_btn1 == 0);
+
+	/* focus the strip with a click on the first tab, then Right to the next
+	 * (robust to font metrics, which set each folder tab's width) */
+	int tx, ty; bd_widget_rect(tv, &tx, &ty, NULL, NULL);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+13 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+13 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
+	check("switching tabs activates the next pane", bd_tabview_active(tv) == 1);
+	check("the change callback fired", tv_change_n == 1);
+	check("visibility follows the active tab",
+	    bd_get_i(p0, BD_VISIBLE_B) == 0 && bd_get_i(p1, BD_VISIBLE_B) == 1);
+
+	/* the same content-area click now reaches the newly active pane, not the old */
+	bd_gui_layout(800, 500);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mx, .y=my });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mx, .y=my });
+	check("input routes to the active pane only, not the hidden one",
+	    tv_btn1 == 1 && tv_btn0 == 1);
+
+	/* programmatic switch does not fire the change callback */
+	bd_tabview_set_active(tv, 2);
+	check("bd_tabview_set_active switches panes", bd_tabview_active(tv) == 2 &&
+	    bd_get_i(p2, BD_VISIBLE_B) == 1);
+	check("a programmatic switch is silent", tv_change_n == 1);
+
+	bd_gui_render();   /* rendering the tab view does not crash */
+	check("tab view render does not crash", 1);
 	bd_gui_cleanup();
 	}
 

@@ -566,6 +566,36 @@ Covered by `test/test_gui.c` (drop-binds, click-activate, hotkey dispatch with
 modifier matching, internal reorder) and exercised in the SDL3 example (a
 six-slot floating bar bound to Q W E R T Y).
 
+### Tab view widget — implemented
+
+A tabbed container (`bd_widget_tabview.{c,h}`, a `widget_ext` extension): a
+`BD_TAB_BAR` folder-tab strip over a content area in which exactly one *pane*
+shows at a time. Where `BD_TAB_BAR` is only the strip (it tracks an active index
+and fires a callback), the tab view owns the strip **and** the panes and swaps
+them. `bd_tabview_add_pane(tv, label)` returns a `BD_PANEL` the host fills with
+any widget subtree, so a pane is as complex as a whole window: labels, an
+inventory, an editor, a texture-backed view of a live GLES animation, another
+layout.
+
+It is a thin composite: a `BD_TAB_BAR` child over a `BD_LAYOUT_FIXED` content
+child, one `BD_PANEL` pane per tab. Because the content is FIXED, every pane
+fills the **same** rectangle (they overlap), so switching tabs is free and each
+pane keeps its own laid-out contents; the view just keeps the active pane
+`BD_VISIBLE_B` and hides the rest, which the core already skips in render and
+hit-testing. The class sets `BD_WC_CONTAINS_CHILDREN`, so the core lays out,
+renders, and routes input through the strip and panes for free; the only custom
+logic is building the subtree and syncing pane visibility from the strip's active
+index (done in the layout hook and the strip's change callback, so a tab click,
+Left/Right, or `bd_tabview_set_active` all converge).
+
+Covered by `test/test_gui.c` (three panes, only the active one visible and
+hittable, tab switch flips visibility and input routing, programmatic switch is
+silent) and shown in the SDL3 example (a "Panels" window flipping between plain
+widgets, the spinning relic as a live GLES animation, and the editor).
+
+Because `MAX_WIDGET_CLASSES` had to grow to seat this alongside the recording
+test stubs, the extension-class registry cap is now 32 (was 16).
+
 ### Explorer / icon-browser widget
 
 A new widget type (v0.3, built as a `widget_ext` extension) modeled on

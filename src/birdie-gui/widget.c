@@ -180,7 +180,7 @@ is_text_field(int type)
 /* ------------------------------------------------------------------ */
 
 #define BD_TYPE_CUSTOM_BASE 256
-#define MAX_WIDGET_CLASSES  16
+#define MAX_WIDGET_CLASSES  32   /* toolkit ships ~14; leave room for host + test classes */
 
 static const bd_widget_class *classes[MAX_WIDGET_CLASSES];
 static int class_count;

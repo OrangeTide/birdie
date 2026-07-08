@@ -10,6 +10,8 @@
  * relies on). A floating action bar (a CRPG hotbar) sits at the bottom: drag an
  * item off the inventory (or a minimized-window tile off the dock) onto a slot
  * to bind it, then click the slot or press its Q W E R T Y hotkey to fire it.
+ * A tabbed "Panels" window flips between plain widgets, the spinning relic (a
+ * live GLES animation), and the rich-text editor, one full pane per tab.
  * Drag anywhere over the background to rotate it; the wheel zooms.
  *
  * It is the demo host for the SDL3 backend (bd_backend_sdl3.c, in src/birdie-gui
@@ -44,6 +46,8 @@
 #include "bd_widget_inventory.h"
 #include "bd_widget_dock.h"
 #include "bd_widget_actionbar.h"
+#include "bd_widget_tabview.h"
+#include "bd_widget_editor.h"
 
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
@@ -478,6 +482,18 @@ act_drop(bd_id w, int slot, const bd_dnd_payload *p, void *ctx)
 	return 1;   /* accept: the bar copies the item's icon/label into the slot */
 }
 
+/* one-cell model for the tab-view "Relic" pane: shows the live FBO texture, so
+ * a tab pane can hold a running GLES animation as readily as static widgets */
+static void
+relic_get(void *ctx, int slot, bd_inventory_item *out)
+{
+	(void)ctx; (void)slot;
+	out->key = 1;
+	out->label = "Relic";
+	out->icon = (bd_texture){ relic.tex };
+	out->enabled = 1;
+}
+
 static void
 build_ui(void)
 {
@@ -606,6 +622,35 @@ build_ui(void)
 	for (int i = 0; i < 6; i++)
 		bd_actionbar_set_hotkey(abar, i, hotkeys[i], 0);
 	actionbar = abar;
+
+	/* A tabbed window. Each pane is a full container, as complex as a window:
+	 * folder tabs across the top flip between "Notes" (plain widgets), "Relic"
+	 * (a live GLES animation, the spinning tetrahedron in an inventory cell),
+	 * and "Editor" (the rich-text editor). Hosted in a top-level frame, so it is
+	 * itself a draggable / minimizable WM window. */
+	bd_id tabwin = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Panels",
+	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 4,
+	    BD_X_I, 60, BD_Y_I, 360, BD_PREF_W_I, 300, BD_PREF_H_I, 260,
+	    BD_BG_C, 0x222A33FFu, BD_END);
+	bd_id tabs = bd_tabview_create(tabwin, BD_GROW_I, 1, BD_END);
+
+	bd_id notes = bd_tabview_add_pane(tabs, "Notes");
+	bd_create(notes, BD_LABEL, BD_LABEL_S, "Each tab holds a whole", BD_PREF_H_I, 18,
+	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
+	bd_create(notes, BD_LABEL, BD_LABEL_S, "widget subtree.", BD_PREF_H_I, 18,
+	    BD_BG_C, 0x00000000u, BD_FG_C, 0xDCE3EAFFu, BD_END);
+	bd_create(notes, BD_BUTTON, BD_LABEL_S, "A button", BD_PREF_H_I, 26,
+	    BD_ON_CLICK_F, on_palette_float, BD_END);
+
+	bd_id relicpane = bd_tabview_add_pane(tabs, "Relic");
+	bd_id relicinv = bd_inventory_create(relicpane, 1, 1,
+	    &(bd_inventory_model){ .get = relic_get }, NULL, BD_GROW_I, 1, BD_END);
+	bd_inventory_set_cell_size(relicinv, 128);
+
+	bd_id edpane = bd_tabview_add_pane(tabs, "Editor");
+	bd_id ed = bd_editor_create(edpane, BD_GROW_I, 1, BD_END);
+	bd_editor_set_text(ed, "The editor lives in a tab.\n"
+	    "Type here; switch tabs and back\nand your text is kept.");
 }
 
 /* ------------------------------------------------------------------ */
