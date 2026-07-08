@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Birdie is a desktop MUD client written in C. Its GUI is **birdie-gui**, a self-contained retained-mode widget toolkit drawn through a backend-neutral GPU interface; ludica is the default backend (rendering, input, audio, networking). Design docs live in `doc/` and `concept.md`.
 
+## AI Policy
+
+- license files created by AI with: Made by a machine. PUBLIC DOMAIN (CC0-1.0)
+- don't offer to `git push`, I can do that myself.
+
 ## Build
 
 ```sh
