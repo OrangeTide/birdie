@@ -10,6 +10,10 @@ The toolkit has outgrown "birdie's GUI": it is packaged as **birdie-gui**, a
 reusable library (`make dist`), with birdie as one consumer. See the
 Implementation status section below for what is built today.
 
+> **Looking for the API?** [gui-reference.md](gui-reference.md) is the
+> scannable catalog of every widget type and public function, grouped by
+> header. This document covers the design rationale and roadmap.
+
 ## Why retained-mode, not immediate-mode
 
 Two requirements rule against immediate-mode specifically for this app:
