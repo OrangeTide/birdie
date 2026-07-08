@@ -136,7 +136,10 @@ typedef struct bd_backend {
 	/* frame / window */
 	int    (*width)(void);
 	int    (*height)(void);
-	double (*time)(void);                       /* monotonic seconds */
+	/* Monotonic seconds. Optional: leave NULL and the toolkit uses its own
+	 * monotonic clock (bd_time()). Supply this only when the host has a
+	 * frame-synced clock the toolkit should share. */
+	double (*time)(void);
 	void   (*viewport)(int x, int y, int w, int h);
 	/* Clear the frame to the given color at the start of each rendered
 	 * window. Optional: leave NULL when the host clears the framebuffer

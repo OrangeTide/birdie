@@ -387,7 +387,7 @@ editor_render(bd_id id, void *state)
 	}
 
 	if (focused && !e->locked) {
-		double t = be->time();
+		double t = bd_time();
 		if (((int)(t * 2.0)) % 2 == 0) {
 			int cx = ix + (int)(caret_px - e->scroll_x);
 			int cy = iy + caret_top - e->scroll_y;

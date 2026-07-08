@@ -68,7 +68,7 @@ static int inv_type;
 /* helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-static double be_time(void) { return bd_backend_get()->time(); }
+static double be_time(void) { return bd_time(); }
 
 static int capacity(const struct inv *v) { return v->cols * v->rows; }
 static int cell_w(const struct inv *v)   { return v->icon_size + 2 * CELL_PAD; }

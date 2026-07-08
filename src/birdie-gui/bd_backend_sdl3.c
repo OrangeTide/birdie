@@ -15,18 +15,9 @@
  */
 
 #include "bd_backend_sdl3.h"
+#include "bd_backend_gles_core.h"
 
-#include <GLES3/gl3.h>
-
-#include <stddef.h>
 #include <stdio.h>
-
-/* stb_image decodes the toolkit's PNG assets (terminal atlas, pushpins). It is
- * bundled with birdie-gui; the backend owns the single implementation so a host
- * that links only this backend still resolves stbi_load. */
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#include "stb_image.h"
 
 /* ------------------------------------------------------------------ */
 /* SDL window + GL context                                            */
@@ -36,36 +27,11 @@ static struct {
 	SDL_Window   *win;
 	SDL_GLContext ctx;
 	char         *clip;      /* last clipboard string handed out (SDL-owned) */
-
-	/* GL streaming state for the toolkit's 2D quads. */
-	GLuint vao, vbo;
-	int    vbo_cap;          /* current VBO capacity in vertices */
-	GLuint cur_program;      /* program bound by use_shader */
-	int    ready;
 } S;
 
-static void
-gl_lazy_init(void)
-{
-	if (S.ready)
-		return;
-	S.ready = 1;
-
-	glGenVertexArrays(1, &S.vao);
-	glGenBuffers(1, &S.vbo);
-	glBindVertexArray(S.vao);
-	glBindBuffer(GL_ARRAY_BUFFER, S.vbo);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(bd_vertex),
-	    (void *)offsetof(bd_vertex, x));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(bd_vertex),
-	    (void *)offsetof(bd_vertex, u));
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(bd_vertex),
-	    (void *)offsetof(bd_vertex, r));
-	glBindVertexArray(0);
-}
+/* The GPU vtable rows (shaders, draw, textures, viewport) come from
+ * bd_backend_gles_core; only windowing, clipboard, and IME are SDL-specific.
+ * No clear hook: the host owns the frame clear so the UI composites on top. */
 
 /* ------------------------------------------------------------------ */
 /* frame / window                                                     */
@@ -87,236 +53,10 @@ be_height(void)
 	return h;
 }
 
-static double be_time(void) { return SDL_GetTicks() / 1000.0; }
-
-static void be_viewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
-
-/* No clear hook: the host clears the framebuffer and draws its background
- * itself each frame, so the toolkit's optional clear is left NULL and the UI
- * composites on top. draw_verts establishes the 2D render state, so the UI
- * still renders correctly. */
-
-/* ------------------------------------------------------------------ */
-/* shaders                                                            */
-/* ------------------------------------------------------------------ */
-
-static GLuint
-compile(GLenum type, const char *src)
-{
-	GLuint s = glCreateShader(type);
-	glShaderSource(s, 1, &src, NULL);
-	glCompileShader(s);
-	GLint ok = 0;
-	glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-	if (!ok) {
-		char log[512];
-		glGetShaderInfoLog(s, sizeof log, NULL, log);
-		fprintf(stderr, "sdl3: shader compile failed: %s\n", log);
-		glDeleteShader(s);
-		return 0;
-	}
-	return s;
-}
-
-static bd_shader
-be_make_shader(const char *vert, const char *frag)
-{
-	GLuint vs = compile(GL_VERTEX_SHADER, vert);
-	GLuint fs = compile(GL_FRAGMENT_SHADER, frag);
-	if (!vs || !fs) {
-		if (vs) glDeleteShader(vs);
-		if (fs) glDeleteShader(fs);
-		return (bd_shader){0};
-	}
-
-	GLuint prog = glCreateProgram();
-	glAttachShader(prog, vs);
-	glAttachShader(prog, fs);
-	/* Bind the shared bd_vertex attribute names so shaders that omit the
-	 * layout(location=) qualifier still land at 0/1/2. Shaders that use an
-	 * explicit layout override these. */
-	glBindAttribLocation(prog, 0, "a_pos");
-	glBindAttribLocation(prog, 1, "a_uv");
-	glBindAttribLocation(prog, 2, "a_col");
-	glLinkProgram(prog);
-	glDeleteShader(vs);
-	glDeleteShader(fs);
-
-	GLint ok = 0;
-	glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-	if (!ok) {
-		char log[512];
-		glGetProgramInfoLog(prog, sizeof log, NULL, log);
-		fprintf(stderr, "sdl3: program link failed: %s\n", log);
-		glDeleteProgram(prog);
-		return (bd_shader){0};
-	}
-	return (bd_shader){prog};
-}
-
-static void
-be_destroy_shader(bd_shader sh)
-{
-	if (sh.id)
-		glDeleteProgram(sh.id);
-}
-
-static void
-be_use_shader(bd_shader sh)
-{
-	S.cur_program = sh.id;
-	glUseProgram(sh.id);
-}
-
-/* glUniform* target the active program in GLES3, so bind first. */
-static GLint
-uloc(bd_shader sh, const char *name)
-{
-	if (S.cur_program != sh.id) {
-		S.cur_program = sh.id;
-		glUseProgram(sh.id);
-	}
-	return glGetUniformLocation(sh.id, name);
-}
-
-static void be_uni_int  (bd_shader s, const char *n, int v)
-{ glUniform1i(uloc(s, n), v); }
-static void be_uni_float(bd_shader s, const char *n, float v)
-{ glUniform1f(uloc(s, n), v); }
-static void be_uni_vec2 (bd_shader s, const char *n, float x, float y)
-{ glUniform2f(uloc(s, n), x, y); }
-static void be_uni_vec3 (bd_shader s, const char *n, float x, float y, float z)
-{ glUniform3f(uloc(s, n), x, y, z); }
-static void be_uni_vec4 (bd_shader s, const char *n, float x, float y, float z, float w)
-{ glUniform4f(uloc(s, n), x, y, z, w); }
-static void be_uni_mat4 (bd_shader s, const char *n, const float m[16])
-{ glUniformMatrix4fv(uloc(s, n), 1, GL_FALSE, m); }
-
-/* ------------------------------------------------------------------ */
-/* draw                                                               */
-/* ------------------------------------------------------------------ */
-
-static void
-be_draw_verts(const bd_vertex *verts, int count)
-{
-	if (count <= 0)
-		return;
-	gl_lazy_init();
-	/* establish 2D UI render state for the draw: alpha blend, no depth or
-	 * cull. A host that left depth testing on for a 3D scene relies on this
-	 * (rather than on clear) to let the UI draw on top. */
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-	glBindVertexArray(S.vao);
-	glBindBuffer(GL_ARRAY_BUFFER, S.vbo);
-	if (count > S.vbo_cap) {
-		glBufferData(GL_ARRAY_BUFFER,
-		    (GLsizeiptr)count * (GLsizeiptr)sizeof(bd_vertex),
-		    verts, GL_STREAM_DRAW);
-		S.vbo_cap = count;
-	} else {
-		glBufferData(GL_ARRAY_BUFFER,
-		    (GLsizeiptr)S.vbo_cap * (GLsizeiptr)sizeof(bd_vertex),
-		    NULL, GL_STREAM_DRAW);
-		glBufferSubData(GL_ARRAY_BUFFER, 0,
-		    (GLsizeiptr)count * (GLsizeiptr)sizeof(bd_vertex), verts);
-	}
-	glDrawArrays(GL_TRIANGLES, 0, count);
-}
-
-/* ------------------------------------------------------------------ */
-/* textures                                                           */
-/* ------------------------------------------------------------------ */
-
-static GLuint
-make_gl_texture(int w, int h, const void *rgba, GLint filter)
-{
-	GLuint id;
-	glGenTextures(1, &id);
-	glBindTexture(GL_TEXTURE_2D, id);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
-	    GL_UNSIGNED_BYTE, rgba);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	return id;
-}
-
-static bd_texture
-be_load_texture(const char *path)
-{
-	int w, h, comp;
-	unsigned char *pixels = stbi_load(path, &w, &h, &comp, 4);
-	if (!pixels) {
-		fprintf(stderr, "sdl3: cannot load texture '%s'\n", path);
-		return (bd_texture){0};
-	}
-	GLuint id = make_gl_texture(w, h, pixels, GL_NEAREST); /* pixel-art PNGs */
-	stbi_image_free(pixels);
-	return (bd_texture){id};
-}
-
-/* Decode a PNG from memory, matching be_load_texture's NEAREST filtering. */
-static bd_texture
-be_load_texture_mem(const unsigned char *data, int len)
-{
-	int w, h, comp;
-	unsigned char *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
-	if (!pixels) {
-		fprintf(stderr, "sdl3: cannot decode embedded texture\n");
-		return (bd_texture){0};
-	}
-	GLuint id = make_gl_texture(w, h, pixels, GL_NEAREST); /* pixel-art PNGs */
-	stbi_image_free(pixels);
-	return (bd_texture){id};
-}
-
-static bd_texture
-be_make_texture(int w, int h, const void *rgba)
-{
-	return (bd_texture){make_gl_texture(w, h, rgba, GL_LINEAR)};
-}
-
-static void
-be_update_texture(bd_texture t, int x, int y, int w, int h, const void *rgba)
-{
-	if (!t.id)
-		return;
-	glBindTexture(GL_TEXTURE_2D, t.id);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA,
-	    GL_UNSIGNED_BYTE, rgba);
-}
-
-static void
-be_bind_texture(bd_texture t, int unit)
-{
-	glActiveTexture(GL_TEXTURE0 + unit);
-	glBindTexture(GL_TEXTURE_2D, t.id);
-}
-
-static void
-be_destroy_texture(bd_texture t)
-{
-	if (t.id)
-		glDeleteTextures(1, &t.id);
-}
-
-/* ------------------------------------------------------------------ */
-/* scissor                                                            */
-/* ------------------------------------------------------------------ */
-
-static void
-be_scissor(int x, int y, int w, int h)
-{
-	/* toolkit clip is top-left pixels; GL scissor origin is bottom-left. */
-	glEnable(GL_SCISSOR_TEST);
-	glScissor(x, be_height() - (y + h), w, h);
-}
-
-static void be_scissor_off(void) { glDisable(GL_SCISSOR_TEST); }
+/* Scissor needs the framebuffer height for the top-left/bottom-left flip; the
+ * core takes it explicitly (a windowing concern), so wrap it with our height. */
+static void be_scissor(int x, int y, int w, int h)
+{ bd_gles_scissor(x, y, w, h, be_height()); }
 
 /* ------------------------------------------------------------------ */
 /* clipboard + IME (SDL)                                              */
@@ -360,27 +100,26 @@ be_ime_set_cursor_rect(int x, int y, int w, int h)
 const bd_backend bd_backend_sdl3 = {
 	.width             = be_width,
 	.height            = be_height,
-	.time              = be_time,
-	.viewport          = be_viewport,
+	.viewport          = bd_gles_viewport,
 	.clear             = NULL,       /* host owns the frame clear */
-	.make_shader       = be_make_shader,
-	.destroy_shader    = be_destroy_shader,
-	.use_shader        = be_use_shader,
-	.set_uniform_int   = be_uni_int,
-	.set_uniform_float = be_uni_float,
-	.set_uniform_vec2  = be_uni_vec2,
-	.set_uniform_vec3  = be_uni_vec3,
-	.set_uniform_vec4  = be_uni_vec4,
-	.set_uniform_mat4  = be_uni_mat4,
-	.draw_verts        = be_draw_verts,
-	.load_texture      = be_load_texture,
-	.load_texture_mem  = be_load_texture_mem,
-	.make_texture      = be_make_texture,
-	.update_texture    = be_update_texture,
-	.bind_texture      = be_bind_texture,
-	.destroy_texture   = be_destroy_texture,
+	.make_shader       = bd_gles_make_shader,
+	.destroy_shader    = bd_gles_destroy_shader,
+	.use_shader        = bd_gles_use_shader,
+	.set_uniform_int   = bd_gles_uniform_int,
+	.set_uniform_float = bd_gles_uniform_float,
+	.set_uniform_vec2  = bd_gles_uniform_vec2,
+	.set_uniform_vec3  = bd_gles_uniform_vec3,
+	.set_uniform_vec4  = bd_gles_uniform_vec4,
+	.set_uniform_mat4  = bd_gles_uniform_mat4,
+	.draw_verts        = bd_gles_draw_verts,
+	.load_texture      = bd_gles_load_texture,
+	.load_texture_mem  = bd_gles_load_texture_mem,
+	.make_texture      = bd_gles_make_texture,
+	.update_texture    = bd_gles_update_texture,
+	.bind_texture      = bd_gles_bind_texture,
+	.destroy_texture   = bd_gles_destroy_texture,
 	.scissor           = be_scissor,
-	.scissor_off       = be_scissor_off,
+	.scissor_off       = bd_gles_scissor_off,
 	.multi_window      = 0,      /* one window; the host swaps it itself */
 	.clipboard_set     = be_clipboard_set,
 	.clipboard_get     = be_clipboard_get,

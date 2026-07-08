@@ -516,7 +516,7 @@ table_event(bd_id id, void *state, const bd_event *ev)
 			return 1;
 		}
 
-		double now = bd_backend_get()->time();
+		double now = bd_time();
 		if (v == t->last_row && now - t->last_time < DBLCLICK_S) {
 			if (t->cb.activate)
 				t->cb.activate(id, t->order[v], t->cb.ctx);

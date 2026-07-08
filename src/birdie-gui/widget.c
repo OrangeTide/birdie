@@ -229,6 +229,36 @@ bd_backend_get(void)
 	return be;
 }
 
+/* Toolkit monotonic clock, used when a backend leaves the time() hook NULL. */
+#if defined(_WIN32)
+#include <windows.h>
+static double
+bd_default_time(void)
+{
+	static LARGE_INTEGER freq;
+	LARGE_INTEGER now;
+	if (!freq.QuadPart)
+		QueryPerformanceFrequency(&freq);
+	QueryPerformanceCounter(&now);
+	return (double)now.QuadPart / (double)freq.QuadPart;
+}
+#else
+#include <time.h>
+static double
+bd_default_time(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+#endif
+
+double
+bd_time(void)
+{
+	return (be && be->time) ? be->time() : bd_default_time();
+}
+
 const bd_theme *
 bd_gui_theme(void)
 {
@@ -1458,7 +1488,7 @@ render_widget(bd_id id)
 
 		/* blinking cursor */
 		if (focused) {
-			double t = be->time() - (double)cursor_blink;
+			double t = bd_time() - (double)cursor_blink;
 			if (((int)(t * 2.0)) % 2 == 0)
 				fill_rect((int)caret_x, w->y + 2, 2, w->h - 4, w->fg);
 		}
@@ -1521,7 +1551,7 @@ render_widget(bd_id id)
 		}
 
 		if (focused) {
-			double t = be->time() - (double)cursor_blink;
+			double t = bd_time() - (double)cursor_blink;
 			if (((int)(t * 2.0)) % 2 == 0) {
 				int cx = ix + (int)(caret_px - w->scroll_x);
 				int cy = iy + caret_top - (int)w->scroll_y;
@@ -2098,7 +2128,7 @@ input_insert_char(bd_id id, unsigned codepoint)
 	w->cursor += n;
 	w->text_buf[w->text_len] = '\0';
 	w->sel_anchor = -1;
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 }
 
 /* copy the current selection (if any) to the system clipboard */
@@ -2140,7 +2170,7 @@ input_insert_text(struct widget *w, const char *s, int single_line)
 	}
 	w->text_buf[w->text_len] = '\0';
 	w->sel_anchor = -1;
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 }
 
 static void
@@ -2166,7 +2196,7 @@ input_click(bd_id id, int mx)
 	}
 	w->cursor = best;
 	w->sel_anchor = -1;
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 }
 
 static int
@@ -2183,7 +2213,7 @@ input_key(bd_id id, int key, unsigned mods)
 			w->cursor = w->sel_anchor < w->cursor
 			    ? w->sel_anchor : w->cursor;
 			w->sel_anchor = -1;
-			cursor_blink = (float)be->time();
+			cursor_blink = (float)bd_time();
 			return 1;
 		}
 		if (ctrl)
@@ -2196,7 +2226,7 @@ input_key(bd_id id, int key, unsigned mods)
 			w->cursor = w->sel_anchor > w->cursor
 			    ? w->sel_anchor : w->cursor;
 			w->sel_anchor = -1;
-			cursor_blink = (float)be->time();
+			cursor_blink = (float)bd_time();
 			return 1;
 		}
 		if (ctrl)
@@ -2226,7 +2256,7 @@ input_key(bd_id id, int key, unsigned mods)
 			w->text_buf[w->text_len] = '\0';
 		}
 		w->sel_anchor = -1;
-		cursor_blink = (float)be->time();
+		cursor_blink = (float)bd_time();
 		return 1;
 	case BD_KEY_DELETE:
 		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
@@ -2241,7 +2271,7 @@ input_key(bd_id id, int key, unsigned mods)
 			w->text_buf[w->text_len] = '\0';
 		}
 		w->sel_anchor = -1;
-		cursor_blink = (float)be->time();
+		cursor_blink = (float)bd_time();
 		return 1;
 
 	case BD_KEY_ENTER:
@@ -2256,7 +2286,7 @@ input_key(bd_id id, int key, unsigned mods)
 			w->sel_anchor = -1;
 			w->scroll_x = 0.0f;
 		}
-		cursor_blink = (float)be->time();
+		cursor_blink = (float)bd_time();
 		return 1;
 	case BD_KEY_ESCAPE:
 		focus_id = BD_NONE;
@@ -2265,7 +2295,7 @@ input_key(bd_id id, int key, unsigned mods)
 		if (ctrl) {
 			w->sel_anchor = 0;
 			w->cursor = w->text_len;
-			cursor_blink = (float)be->time();
+			cursor_blink = (float)bd_time();
 			return 1;
 		}
 		return 0;
@@ -2280,7 +2310,7 @@ input_key(bd_id id, int key, unsigned mods)
 			clipboard_copy_selection(w);
 			if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor)
 				input_delete_selection(w);
-			cursor_blink = (float)be->time();
+			cursor_blink = (float)bd_time();
 			return 1;
 		}
 		return 0;
@@ -2302,7 +2332,7 @@ input_key(bd_id id, int key, unsigned mods)
 	} else {
 		w->sel_anchor = -1;
 	}
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 	return 1;
 }
 
@@ -2354,7 +2384,7 @@ multiline_key(bd_id id, int key, unsigned mods)
 		return input_key(id, key, mods);
 	}
 	w->sel_anchor = -1;
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 	return 1;
 }
 
@@ -2382,7 +2412,7 @@ multiline_click(bd_id id, int mx, int my)
 	float target = (float)(mx - ix) + w->scroll_x;
 	w->cursor = ml_col_at_px(w->text_buf, pos, le, target);
 	w->sel_anchor = -1;
-	cursor_blink = (float)be->time();
+	cursor_blink = (float)bd_time();
 }
 
 /* ------------------------------------------------------------------ */
@@ -3692,7 +3722,7 @@ bd_gui_event(const bd_event *ev)
 			if (hit != BD_NONE && pool[hit].type == BD_LIST) {
 				focus_id = hit;
 				int row = list_click(hit, my);
-				double now = be->time();
+				double now = bd_time();
 				if (row >= 0 && hit == list_last_id &&
 				    row == list_last_row &&
 				    now - list_last_time < 0.4) {

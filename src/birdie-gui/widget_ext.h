@@ -75,6 +75,11 @@ void bd_widget_rect(bd_id id, int *x, int *y, int *w, int *h);
 /* The renderer/window backend the toolkit was initialized with. */
 const bd_backend *bd_backend_get(void);
 
+/* Monotonic time in seconds. Uses the backend's time() hook when it supplies
+ * one, else the toolkit's own monotonic clock. Extensions should call this
+ * rather than bd_backend_get()->time() so a NULL time hook is handled. */
+double bd_time(void);
+
 /* va_list form of bd_create(), so extensions can wrap it in variadic helpers. */
 bd_id bd_create_va(bd_id parent, int type, va_list ap);
 

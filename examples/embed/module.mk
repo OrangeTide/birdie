@@ -31,7 +31,8 @@ embed_example_TOOLKIT := \
     ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_widget_vt.c \
     ../../src/birdie-gui/bd_widget_editor.c
 embed_example_BACKEND := \
-    ../../src/guitest/bd_backend_gles.c ../../src/guitest/x11_window.c
+    ../../src/guitest/bd_backend_gles.c ../../src/birdie-gui/bd_backend_gles_core.c \
+    ../../src/guitest/x11_window.c
 
 embed_example_SRCS = embed_example.c embed_assets.S \
     $(embed_example_TOOLKIT) $(embed_example_BACKEND)

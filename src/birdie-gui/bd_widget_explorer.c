@@ -794,7 +794,7 @@ explorer_event(bd_id id, void *state, const bd_event *ev)
 		}
 
 		/* double-click activates */
-		double now = bd_backend_get()->time();
+		double now = bd_time();
 		if (key == e->last_key && now - e->last_time < DBLCLICK_S) {
 			if (e->cb.activate) {
 				bd_explorer_item it = {0};

@@ -438,7 +438,10 @@ Tab / Shift-Tab; `bd_focused()` reports it.
 `backend-gles/` is a ready-to-use raw X11 + EGL + OpenGL ES 3 backend
 (`window.h`, `x11_window.c`, `bd_backend_gles.{c,h}`) plus a standalone widget
 gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
-example. Build it (Linux) with the bundled `libvt/` on the include path and the
+example. Its GPU code (shaders, quad batch, textures, scissor) lives in the
+shared `src/bd_backend_gles_core.{c,h}`, which `src/bd_backend_sdl3.c` uses too;
+compile `src/bd_backend_gles_core.c` alongside whichever GLES backend you pick.
+Build it (Linux) with the bundled `libvt/` on the include path and the
 asset paths pointed at the bundle's `assets/` (the compiled-in defaults assume
 birdie's source tree):
 
@@ -456,7 +459,7 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ilibvt \
    -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
    -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
    backend-gles/widget_test.c backend-gles/x11_window.c \
-   backend-gles/bd_backend_gles.c \
+   backend-gles/bd_backend_gles.c src/bd_backend_gles_core.c \
    src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
    src/bd_widget_explorer.c src/bd_widget_editor.c src/bd_widget_canvas.c \
    src/bd_widget_table.c src/bd_widget_inventory.c libvt/*.c \

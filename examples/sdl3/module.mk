@@ -17,7 +17,7 @@ sdl3_example_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 sdl3_example_TOOLKIT := \
     ../../src/birdie-gui/widget.c ../../src/birdie-gui/bd_draw.c \
     ../../src/birdie-gui/bd_asset.c \
-    ../../src/birdie-gui/bd_backend_sdl3.c \
+    ../../src/birdie-gui/bd_backend_sdl3.c ../../src/birdie-gui/bd_backend_gles_core.c \
     ../../src/birdie-gui/bd_widget_vt.c ../../src/birdie-gui/bd_widget_value.c \
     ../../src/birdie-gui/bd_widget_explorer.c ../../src/birdie-gui/bd_widget_editor.c \
     ../../src/birdie-gui/bd_widget_canvas.c ../../src/birdie-gui/bd_widget_table.c \
