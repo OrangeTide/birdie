@@ -39,6 +39,7 @@
 #include "bd_backend_sdl3.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_inventory.h"
+#include "bd_widget_dock.h"
 
 #include <SDL3/SDL.h>
 #include <GLES3/gl3.h>
@@ -365,6 +366,14 @@ on_palette_float(bd_id id, void *arg)
 	report("palette floating");
 }
 
+static void
+on_palette_minimize(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	bd_window_minimize(palette);
+	report("palette minimized -> dock tile (click it to restore)");
+}
+
 /* The input line fires its click handler on Enter, before it clears, so the
  * submitted text is still readable here. Echo it to the terminal. */
 static void
@@ -534,7 +543,7 @@ build_ui(void)
 	    BD_LABEL_S, "Palette",
 	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 8, BD_GAP_I, 6,
 	    BD_X_I, 360, BD_Y_I, 320,
-	    BD_PREF_W_I, 190, BD_PREF_H_I, 150,
+	    BD_PREF_W_I, 190, BD_PREF_H_I, 200,
 	    BD_BG_C, 0x222A33FFu,
 	    BD_END);
 	bd_create(palette, BD_LABEL,
@@ -547,6 +556,15 @@ build_ui(void)
 	    BD_ON_CLICK_F, on_dock_left, BD_END);
 	bd_create(palette, BD_BUTTON, BD_LABEL_S, "Float", BD_PREF_H_I, 26,
 	    BD_ON_CLICK_F, on_palette_float, BD_END);
+	bd_create(palette, BD_BUTTON, BD_LABEL_S, "Minimize", BD_PREF_H_I, 26,
+	    BD_ON_CLICK_F, on_palette_minimize, BD_END);
+
+	/* A NeXTSTEP-style dock hugging the left edge. It is derived state: a tile
+	 * appears for each minimized window (click the title-bar "_" button), and
+	 * clicking a tile restores that window. Empty until something is minimized. */
+	bd_id dock = bd_dock_create(root, NULL, BD_END);
+	bd_dock_set_gravity(dock, BD_GRAVITY_LEFT);
+	bd_dock_set_tile_size(dock, 48);
 }
 
 /* ------------------------------------------------------------------ */

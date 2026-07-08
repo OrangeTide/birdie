@@ -17,6 +17,7 @@
 #include "bd_widget_canvas.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
+#include "bd_widget_dock.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -656,6 +657,97 @@ main(void)
 	bd_gui_render();
 	check("WM render issued GPU draws", n_drawverts > 0);
 
+	bd_gui_cleanup();
+
+	/* ---- in-surface WM: minimize / restore (dock prerequisite) ---- */
+	wm_click_a = 0;
+	bd_gui_init(&stub, NULL);
+	bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END); /* desktop */
+	bd_id mwin = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Win",
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 100, BD_Y_I, 100, BD_END);
+	bd_create(mwin, BD_BUTTON, BD_LABEL_S, "A", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_wm_a, BD_END);
+	bd_gui_layout(800, 500);
+
+	/* bd_window_list enumerates the two top-level frames */
+	bd_id wlist[8];
+	int nwin = bd_window_list(wlist, 8);
+	check("bd_window_list returns all top-level frames", nwin == 2);
+
+	/* click the title-bar minimize glyph (leftmost of the three), at
+	 * min_x = x+w-16-4 -16-2 -16-2 = 100+200-56 = 244, centered */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 252, .y = 111,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 252, .y = 111,
+	    .button = BD_MOUSE_LEFT });
+	check("title-bar minimize button minimizes the window",
+	    bd_window_minimized(mwin) == 1);
+
+	/* a minimized window is hidden: a click where its body was reaches the
+	 * desktop, not the window's button */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 150, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 150, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	check("a minimized window is not hit-tested", wm_click_a == 0);
+
+	/* rendering skips the minimized window without crashing */
+	bd_gui_layout(800, 500);
+	bd_gui_render();
+	check("render skips a minimized window", 1);
+
+	bd_window_restore(mwin);
+	check("bd_window_restore clears the minimized flag",
+	    bd_window_minimized(mwin) == 0);
+	bd_gui_layout(800, 500);
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 150, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 150, .y = 200,
+	    .button = BD_MOUSE_LEFT });
+	check("a restored window receives clicks again", wm_click_a == 1);
+	bd_gui_cleanup();
+
+	/* ---- BD_DOCK: tiles derived from minimized windows, click restores ---- */
+	bd_gui_init(&stub, NULL);
+	bd_id dskt = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);                    /* desktop (FIXED so the dock anchors) */
+	bd_id dock = bd_dock_create(dskt, NULL, BD_END);
+	bd_dock_set_gravity(dock, BD_GRAVITY_LEFT);  /* vertical strip, top-left */
+	bd_id da = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Aa",
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 300, BD_Y_I, 100, BD_END);
+	bd_id db = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Bb",
+	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 350, BD_Y_I, 120, BD_END);
+
+	bd_gui_layout(800, 500);
+	check("dock is empty with no minimized windows", bd_dock_count(dock) == 0);
+
+	bd_window_minimize(da);
+	bd_window_minimize(db);
+	bd_gui_layout(800, 500);   /* reconcile: two tiles */
+	check("dock shows one tile per minimized window", bd_dock_count(dock) == 2);
+
+	/* second layout lets the FIXED parent place the now-sized dock at the edge */
+	bd_gui_layout(800, 500);
+	bd_gui_render();
+	check("dock renders its tiles without crashing", 1);
+
+	/* click the first tile (top-left, ~(30,30)) -> restores that window */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 30, .y = 30,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 30, .y = 30,
+	    .button = BD_MOUSE_LEFT });
+	check("clicking a dock tile restores its window",
+	    bd_window_minimized(da) == 0);
+
+	bd_gui_layout(800, 500);
+	check("the restored window's tile is dropped (derived state)",
+	    bd_dock_count(dock) == 1);
+
+	/* closing the other minimized window also drops its tile */
+	bd_destroy(db);
+	bd_gui_layout(800, 500);
+	check("destroying a minimized window drops its tile too",
+	    bd_dock_count(dock) == 0);
 	bd_gui_cleanup();
 
 	/* ---- layout: cross-axis gravity (BD_ANCHOR_I) in a column ----
