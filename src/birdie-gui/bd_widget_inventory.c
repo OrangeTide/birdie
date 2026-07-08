@@ -173,40 +173,6 @@ ensure_visible(bd_id id, struct inv *v, int slot)
 	if (v->scroll_y < 0) v->scroll_y = 0;
 }
 
-/* fit a caption to `maxw` px, appending an ellipsis when it overflows */
-static void
-fit_label(const char *s, float maxw, char *buf, int bufsz)
-{
-	buf[0] = '\0';
-	if (!s || !s[0] || bufsz < 8)
-		return;
-	if (bd_draw_text_width(s) <= maxw) {
-		int n = (int)strlen(s);
-		if (n >= bufsz) n = bufsz - 1;
-		memcpy(buf, s, (size_t)n);
-		buf[n] = '\0';
-		return;
-	}
-	static const char ell[] = "...";   /* chrome font is ASCII-only */
-	float ew = bd_draw_text_width(ell);
-	int len = 0;
-	for (int i = 0; s[i]; ) {
-		unsigned char c = (unsigned char)s[i];
-		int cl = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-		if (len + cl >= bufsz - (int)sizeof ell)
-			break;
-		memcpy(buf + len, s + i, (size_t)cl);
-		buf[len + cl] = '\0';
-		if (bd_draw_text_width(buf) + ew > maxw) {
-			buf[len] = '\0';
-			break;
-		}
-		len += cl;
-		i += cl;
-	}
-	memcpy(buf + len, ell, sizeof ell);
-}
-
 /* preferred width follows the column count and cell size */
 static void
 update_pref_w(bd_id id, const struct inv *v)
@@ -255,19 +221,6 @@ inv_layout(bd_id id, void *state, int w, int h)
 }
 
 static void
-draw_badge(int ix, int iy, int is, int count)
-{
-	char b[24];
-	snprintf(b, sizeof b, "x%d", count);   /* chrome font is ASCII-only */
-	float lh = bd_draw_line_height();
-	float bw = bd_draw_text_width(b);
-	float bx = (float)(ix + is) - bw - 3.0f;
-	float by = (float)(iy + is) - lh;
-	bd_draw_rect(bx - 2.0f, by, bw + 4.0f, lh, 0x000000C0u);
-	bd_draw_text(b, bx, by, 0xFFFFFFFFu);
-}
-
-static void
 inv_render(bd_id id, void *state)
 {
 	struct inv *v = state;
@@ -302,17 +255,13 @@ inv_render(bd_id id, void *state)
 
 			int ix = rx + CELL_PAD, iy = ry + CELL_PAD;
 
-			/* recessed slot square, so empty slots read as a grid */
-			bd_draw_rect(ix, iy, is, is, th->bg);
-			bd_draw_rect_lines(ix, iy, is, is, th->border);
-
 			bd_inventory_item it;
 			slot_item(v, slot, &it);
 
-			if (it.icon.id) {
-				uint32_t tint = it.enabled ? 0xFFFFFFFFu : 0xFFFFFF80u;
-				bd_draw_sprite(it.icon, ix, iy, is, is, 0, 0, 1, 1, tint);
-			}
+			/* the shared tile: recessed square + icon + badge + caption
+			 * (identical to the dock widget) */
+			bd_draw_tile(rx, ry, cw, CELL_PAD, is, it.icon, it.label,
+			    it.count, it.enabled, th->bg, th->border, th->text);
 
 			/* drop-target ring during a drag-move */
 			if (v->mode == DRAG_ITEM && slot == v->drop_slot &&
@@ -321,20 +270,6 @@ inv_render(bd_id id, void *state)
 
 			if (slot == v->cursor)
 				bd_draw_rect_lines(rx, ry, cw, ch, th->focus);
-
-			if (it.count > 1)
-				draw_badge(ix, iy, is, it.count);
-
-			if (it.label && it.label[0]) {
-				char lb[128];
-				fit_label(it.label, (float)(cw - 4), lb, sizeof lb);
-				float tw = bd_draw_text_width(lb);
-				float tx = (float)rx + ((float)cw - tw) / 2.0f;
-				if (tx < rx + 2) tx = (float)rx + 2.0f;
-				float ty = (float)(iy + is) + 2.0f;
-				uint32_t fg = it.enabled ? th->text : th->border;
-				bd_draw_text(lb, tx, ty, fg);
-			}
 		}
 	}
 

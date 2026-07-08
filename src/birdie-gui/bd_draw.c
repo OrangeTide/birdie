@@ -427,6 +427,77 @@ bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
 	quad(tex, dx, dy, dw, dh, u0, v0, u1, v1, rgba);
 }
 
+/* Truncate `s` with a trailing "..." to fit `maxw` pixels into `buf`. */
+static void
+tile_fit_label(const char *s, float maxw, char *buf, int bufsz)
+{
+	buf[0] = '\0';
+	if (!s || !s[0] || bufsz < 8)
+		return;
+	if (bd_draw_text_width(s) <= maxw) {
+		int n = (int)strlen(s);
+		if (n >= bufsz) n = bufsz - 1;
+		memcpy(buf, s, (size_t)n);
+		buf[n] = '\0';
+		return;
+	}
+	static const char ell[] = "...";
+	float ew = bd_draw_text_width(ell);
+	int len = 0;
+	for (int i = 0; s[i]; ) {
+		unsigned char c = (unsigned char)s[i];
+		int cl = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+		if (len + cl >= bufsz - (int)sizeof ell)
+			break;
+		memcpy(buf + len, s + i, (size_t)cl);
+		buf[len + cl] = '\0';
+		if (bd_draw_text_width(buf) + ew > maxw) {
+			buf[len] = '\0';
+			break;
+		}
+		len += cl;
+		i += cl;
+	}
+	memcpy(buf + len, ell, sizeof ell);
+}
+
+void
+bd_draw_tile(float rx, float ry, int cell_w, int pad, int icon_size,
+    bd_texture icon, const char *label, int count, int enabled,
+    uint32_t bg, uint32_t border, uint32_t fg)
+{
+	float ix = rx + pad, iy = ry + pad, is = (float)icon_size;
+
+	/* recessed icon square, so an empty tile still reads as a cell */
+	bd_draw_rect(ix, iy, is, is, bg);
+	bd_draw_rect_lines(ix, iy, is, is, border);
+
+	if (icon.id) {
+		uint32_t tint = enabled ? 0xFFFFFFFFu : 0xFFFFFF80u;
+		bd_draw_sprite(icon, ix, iy, is, is, 0, 0, 1, 1, tint);
+	}
+
+	if (count > 1) {
+		char b[24];
+		snprintf(b, sizeof b, "x%d", count);
+		float lh = bd_draw_line_height();
+		float bw = bd_draw_text_width(b);
+		float bx = ix + is - bw - 3.0f, by = iy + is - lh;
+		bd_draw_rect(bx - 2.0f, by, bw + 4.0f, lh, 0x000000C0u);
+		bd_draw_text(b, bx, by, 0xFFFFFFFFu);
+	}
+
+	if (label && label[0]) {
+		char lb[128];
+		tile_fit_label(label, (float)(cell_w - 4), lb, sizeof lb);
+		float tw = bd_draw_text_width(lb);
+		float tx = rx + ((float)cell_w - tw) / 2.0f;
+		if (tx < rx + 2) tx = rx + 2.0f;
+		float ty = iy + is + 2.0f;
+		bd_draw_text(lb, tx, ty, enabled ? fg : border);
+	}
+}
+
 void
 bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style)
 {

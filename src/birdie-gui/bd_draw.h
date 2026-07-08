@@ -88,6 +88,19 @@ void bd_draw_quad(float x0, float y0, float x1, float y1,
 void bd_draw_sprite(bd_texture tex, float dx, float dy, float dw, float dh,
                     float u0, float v0, float u1, float v1, uint32_t rgba);
 
+/*
+ * Draw one NeXTSTEP/inventory-style icon tile at (rx,ry): a recessed square
+ * (bg fill + border outline) with an icon sprite, an optional "xN" count badge,
+ * and a centered, truncated caption beneath. Shared by the inventory and dock
+ * widgets so tiles look identical. Colors are passed in (bd_draw stays theme-
+ * agnostic); pass enabled=0 to dim the icon and caption. `icon.id == 0` draws
+ * an empty recessed square. `cell_w` is used to center the caption; `pad` is the
+ * inset of the icon square within the cell.
+ */
+void bd_draw_tile(float rx, float ry, int cell_w, int pad, int icon_size,
+                  bd_texture icon, const char *label, int count, int enabled,
+                  uint32_t bg, uint32_t border, uint32_t fg);
+
 /* Chrome text at the baseline-independent top-left pen position (x,y is the
  * top of the line). No-op if the renderer was created without a font. */
 void  bd_draw_text(const char *s, float x, float y, uint32_t rgba);
