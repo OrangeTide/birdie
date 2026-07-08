@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)build, e.g. v0.4.2'
+        description: 'Existing tag to (re)build, e.g. v0.5.0'
         required: true
         type: string
 
