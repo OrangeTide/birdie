@@ -170,6 +170,10 @@ What is built:
   Flexbox row/col + fixed layout. The v1.0 core widget set is complete.
 - **Value widgets** (extensions) — slider, shaded knob, sliding toggle, scroll
   wheel, jog dial, X-Y pad.
+- **Indicator lamp** (extension) — a panel-mount LED indicator (clear, frosted,
+  or faceted cut-glass jewel lens) drawn in a fragment shader. Its state is an
+  index into a string-parsed color list (names or `#hex`), state 0 = off;
+  optionally a clickable lamp button that cycles. `bd_widget_indicator.{c,h}`.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
   runs: fg/bg/underline/strike/bold/super-sub) for code or ABC-notation music.
 - **Explorer widget** (extension) — model-driven icon grid with selection

@@ -20,6 +20,7 @@
 #include "bd_widget_dock.h"
 #include "bd_widget_actionbar.h"
 #include "bd_widget_tabview.h"
+#include "bd_widget_indicator.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -323,6 +324,10 @@ mouse(int type, int x, int y)
 	e.type = type; e.x = x; e.y = y; e.button = BD_MOUSE_LEFT;
 	return e;
 }
+
+static int ind_clicks, ind_last_state;
+static void on_indicator(bd_id id, void *arg, int state)
+{ (void)id; (void)arg; ind_clicks++; ind_last_state = state; }
 
 int
 main(void)
@@ -1879,6 +1884,64 @@ main(void)
 
 	bd_gui_render();   /* rendering the tab view does not crash */
 	check("tab view render does not crash", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- indicator lamp: color-list parsing, state model, lamp button ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id frame = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+
+	/* a bare create defaults to a single amber state (off + on) */
+	bd_id l0 = bd_indicator_create(frame, &(bd_indicator_desc){0}, BD_END);
+	check("default indicator has one lit state (off + on)",
+	    bd_indicator_states(l0) == 2 && bd_indicator_get(l0) == 0);
+
+	/* the color list defines the lit states: off + 3 named colors = 4 states */
+	bd_id l1 = bd_indicator_create(frame, &(bd_indicator_desc){
+	    .colors = "red green amber", .state = 2 }, BD_END);
+	check("three colors give four states", bd_indicator_states(l1) == 4);
+	check("initial state is applied", bd_indicator_get(l1) == 2);
+
+	/* mixed separators and #hex parse; unparsable tokens are skipped */
+	bd_id l2 = bd_indicator_create(frame, &(bd_indicator_desc){
+	    .colors = "#f00, #00ff00  bogusname #1e90ff" }, BD_END);
+	check("commas/spaces/hex parse, junk dropped",
+	    bd_indicator_states(l2) == 4);   /* off + 3 valid colors */
+
+	/* set clamps into range */
+	bd_indicator_set(l1, 99);
+	check("set clamps above the top state", bd_indicator_get(l1) == 3);
+	bd_indicator_set(l1, -5);
+	check("set clamps below off", bd_indicator_get(l1) == 0);
+
+	/* re-coloring shrinks the range and clamps the current state */
+	bd_indicator_set(l1, 3);
+	bd_indicator_set_colors(l1, "blue");
+	check("re-color clamps the state into the new range",
+	    bd_indicator_states(l1) == 2 && bd_indicator_get(l1) == 1);
+
+	/* a clickable lamp button cycles states (wrapping through off) */
+	bd_id btn = bd_indicator_create(frame, &(bd_indicator_desc){
+	    .colors = "red green", .clickable = 1,
+	    .cb = on_indicator }, BD_END);
+	bd_gui_layout(800, 500);
+	int bx, by, bw, bh;
+	bd_widget_rect(btn, &bx, &by, &bw, &bh);
+	int cx = bx + bw / 2, cy = by + bh / 2;
+	ind_clicks = 0;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	check("clicking the lamp button cycles to the first lit state",
+	    bd_indicator_get(btn) == 1 && ind_clicks == 1 && ind_last_state == 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=cx, .y=cy });
+	check("cycling wraps back through off", bd_indicator_get(btn) == 0);
+
+	bd_gui_render();   /* shader path (stub) does not crash */
+	check("indicator render does not crash", 1);
 	bd_gui_cleanup();
 	}
 

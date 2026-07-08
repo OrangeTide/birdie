@@ -21,6 +21,7 @@
 #include "bd_widget_canvas.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
+#include "bd_widget_indicator.h"
 #include "bd_backend_gles.h"
 #include "window.h"
 
@@ -32,6 +33,7 @@
 
 static bd_id status;
 static bd_id term;
+static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
 
 /* Echo a line to both the status bar and the terminal log, so every widget
@@ -102,6 +104,15 @@ on_knob(bd_id id, void *arg, float v)
 	(void)id;
 	static char b[64];
 	snprintf(b, sizeof b, "%s: %g", (const char *)arg, v);
+	report(b);
+}
+
+static void
+on_indicator(bd_id id, void *arg, int state)
+{
+	(void)id;
+	static char b[64];
+	snprintf(b, sizeof b, "%s -> state %d", (const char *)arg, state);
 	report(b);
 }
 
@@ -474,6 +485,33 @@ build_ui(void)
 		.relative = 1, .dimples = 3, .cb = on_jog }, /* endless jog dial */
 		BD_PREF_W_I, 76, BD_END);
 
+	/* indicator lamps: LEDs (clear/frosted/jewel lens), a bi-color, and a
+	 * clickable lamp button that cycles off/red/green/amber */
+	bd_id irow = section(right, "Indicators (click the last to cycle)",
+		BD_LAYOUT_ROW, 60);
+	/* FOCUS mirrors the window focus state: amber (unfocused) / green
+	 * (focused). Driven each frame in the main loop from bd_gui_focused(),
+	 * so it exercises the BD_EV_FOCUS_IN/OUT handler end to end. */
+	focus_led = bd_indicator_create(irow, &(bd_indicator_desc){
+		.colors = "amber green", .state = 2,
+		.diameter = 16, .label = "FOCUS" }, BD_END);
+	bd_indicator_create(irow, &(bd_indicator_desc){
+		.lens = BD_LENS_CLEAR, .colors = "green",
+		.state = 1, .diameter = 16, .label = "LINK" }, BD_END);
+	bd_indicator_create(irow, &(bd_indicator_desc){
+		.lens = BD_LENS_FROSTED, .colors = "blue",
+		.diameter = 16, .label = "off" }, BD_END);
+	bd_indicator_create(irow, &(bd_indicator_desc){
+		.lens = BD_LENS_JEWEL, .colors = "red", .state = 1,
+		.diameter = 24, .label = "ALARM" }, BD_END);
+	bd_indicator_create(irow, &(bd_indicator_desc){
+		.colors = "red green amber", .state = 2,
+		.diameter = 16, .label = "MODE" }, BD_END);
+	bd_indicator_create(irow, &(bd_indicator_desc){
+		.colors = "red green amber",
+		.clickable = 1, .diameter = 18, .label = "STATUS",
+		.cb = on_indicator, .arg = (void *)"Status" }, BD_END);
+
 	/* X-Y pads: bounded square + spring-return joystick circle */
 	bd_id xrow = section(right, "X-Y pads", BD_LAYOUT_ROW, 120);
 	bd_xypad_create(xrow, &(bd_xypad_desc){
@@ -629,7 +667,10 @@ main(void)
 				bd_gui_event(&bev);
 		}
 
+		/* mirror the focus state onto the FOCUS lamp: green focused,
+		 * amber not (state 2 vs 1 of its "amber green" list) */
 		int focused = bd_gui_focused();
+		bd_indicator_set(focus_led, focused ? 2 : 1);
 
 		/* the GLES backend is multi_window, so bd_gui_render() makes each
 		 * window current and presents it; no win_swap() here */
