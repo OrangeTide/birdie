@@ -11,6 +11,12 @@
  * vtable, translates its native events into bd_event, and injects the
  * backend via bd_gui_init().
  *
+ * Naming: toolkit-wide public symbols use the bd_ prefix. A backend's own
+ * static functions that implement this vtable use be_ (backend) by
+ * convention, so bd_backend_ludica.c, bd_backend_sdl3.c, and the GLES
+ * backend all read as parallel be_time / be_clear / be_width implementations
+ * of one interface. The be_ names never escape their translation unit.
+ *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 

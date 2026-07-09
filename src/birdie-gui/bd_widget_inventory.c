@@ -68,7 +68,7 @@ static int inv_type;
 /* helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-static double be_time(void) { return bd_time(); }
+static double now(void) { return bd_time(); }
 
 static int capacity(const struct inv *v) { return v->cols * v->rows; }
 static int cell_w(const struct inv *v)   { return v->icon_size + 2 * CELL_PAD; }
@@ -312,7 +312,7 @@ inv_render(bd_id id, void *state)
 
 	/* dwell tooltip, drawn unclipped so it can overhang the panel */
 	if (v->hover_slot >= 0 && v->mode == DRAG_NONE &&
-	    be_time() - v->hover_since > TOOLTIP_DELAY) {
+	    now() - v->hover_since > TOOLTIP_DELAY) {
 		bd_inventory_item it;
 		slot_item(v, v->hover_slot, &it);
 		const char *tip = it.tooltip ? it.tooltip : it.label;
@@ -423,7 +423,7 @@ inv_event(bd_id id, void *state, const bd_event *ev)
 			int hs = hit_slot(id, v, ev->x, ev->y);
 			if (hs != v->hover_slot) {
 				v->hover_slot = hs;
-				v->hover_since = be_time();
+				v->hover_since = now();
 				if (v->cb.hover)
 					v->cb.hover(id, hs, hs >= 0 ? slot_key(v, hs) : 0,
 					    v->cb.ctx);
@@ -465,14 +465,14 @@ inv_event(bd_id id, void *state, const bd_event *ev)
 
 		select_click(id, v, slot, ev->mods);
 
-		double now = be_time();
-		if (slot == v->last_slot && now - v->last_time < DBLCLICK_S) {
+		double t = now();
+		if (slot == v->last_slot && t - v->last_time < DBLCLICK_S) {
 			if (v->cb.activate)
 				v->cb.activate(id, slot, slot_key(v, slot), v->cb.ctx);
 			v->last_slot = -1;
 		} else {
 			v->last_slot = slot;
-			v->last_time = now;
+			v->last_time = t;
 		}
 
 		/* arm a possible drag from this slot */
