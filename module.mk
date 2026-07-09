@@ -23,8 +23,8 @@ SUBDIRS = \
 	src/thirdparty/miniz \
 	src/thirdparty/lua \
 	src/thirdparty/lpeg \
-	src/libvt \
 	src/birdie-gui \
+	src/birdie-gui/bd_vt \
 	src/birdie \
 	test
 
@@ -74,17 +74,20 @@ DIST_SRC    := src/birdie-gui
 DIST_GLES   := src/guitest
 DIST_STB    := src/thirdparty/stb
 
-# public API headers
+# public API headers. bd_widget_vt.h ships in the bd_vt/ dir (with its library),
+# not here, so a terminal-free consumer needn't see it.
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
                 bd_asset.h bd_utf8.h bd_backend_gles_core.h \
-                bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h \
+                bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_canvas.h bd_widget_table.h \
                 bd_widget_inventory.h bd_widget_dock.h bd_widget_actionbar.h \
                 bd_widget_tabview.h bd_widget_indicator.h
-# toolkit implementation + reference ludica and SDL3 backends. The shared GLES
-# GPU core (bd_backend_gles_core.c) backs both the SDL3 and X11/EGL/GLES
-# backends; its header ships in include/ so either resolves it with -Iinclude.
-DIST_SOURCES := widget.c bd_draw.c bd_fallback_font.h bd_asset.c bd_utf8.c bd_widget_vt.c bd_widget_value.c \
+# toolkit implementation + reference ludica and SDL3 backends. No terminal here:
+# the VT engine + widget ship as the separate birdie_gui_vt library in bd_vt/.
+# The shared GLES GPU core (bd_backend_gles_core.c) backs both the SDL3 and
+# X11/EGL/GLES backends; its header ships in include/ so either resolves it
+# with -Iinclude.
+DIST_SOURCES := widget.c bd_draw.c bd_fallback_font.h bd_asset.c bd_utf8.c bd_widget_value.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_canvas.c \
                 bd_widget_table.c bd_widget_inventory.c bd_widget_dock.c \
                 bd_widget_actionbar.c bd_widget_tabview.c \
@@ -97,21 +100,21 @@ DIST_GLES_FILES := window.h x11_window.c bd_backend_gles.c bd_backend_gles.h \
                    widget_test.c
 # vendored single-file libraries the toolkit includes
 DIST_STB_FILES := stb_truetype.h stb_image.h
-# libvt (terminal escape-sequence engine) — bundled so the VT widget compiles
-DIST_LIBVT  := src/libvt
+# the terminal library (VT engine + widget) — bundled so BD_TERMINAL compiles
+DIST_VT     := src/birdie-gui/bd_vt
 
 .PHONY : dist
 dist :
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
 	@mkdir -p $(DIST_STAGE)/include $(DIST_STAGE)/src \
-	    $(DIST_STAGE)/backend-gles $(DIST_STAGE)/libvt \
+	    $(DIST_STAGE)/backend-gles $(DIST_STAGE)/bd_vt \
 	    $(DIST_STAGE)/thirdparty/stb \
 	    $(DIST_STAGE)/assets/fonts $(DIST_STAGE)/assets/pushpin
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_HEADERS)) $(DIST_STAGE)/include/
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_SOURCES)) $(DIST_STAGE)/src/
 	@cp $(addprefix $(DIST_GLES)/,$(DIST_GLES_FILES)) $(DIST_STAGE)/backend-gles/
 	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
-	@cp $(DIST_LIBVT)/*.c $(DIST_LIBVT)/*.h $(DIST_STAGE)/libvt/
+	@cp $(DIST_VT)/*.c $(DIST_VT)/*.h $(DIST_STAGE)/bd_vt/
 	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
 	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans-Bold.ttf \
@@ -137,7 +140,7 @@ dist :
 	    '  include/        public API headers' \
 	    '  src/            toolkit implementation + reference ludica/SDL3 backends' \
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
-	    '  libvt/          terminal escape-sequence engine (backs the VT widget)' \
+	    '  bd_vt/          terminal library: VT engine + BD_TERMINAL widget' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
 	    '  assets/         chrome TTF (+ license), CP437 terminal atlas, pushpins' \
 	    '  module.mk       backend-agnostic modular-make library build' \

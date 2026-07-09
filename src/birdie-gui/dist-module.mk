@@ -8,15 +8,17 @@
 #
 # It declares two libraries:
 #
-#   bd_vt       libvt, the terminal escape-sequence engine behind the terminal
-#               widget. Bundled (libvt/) so the widget compiles out of the box.
-#   birdie_gui  the toolkit: widget core, renderer, and extension widgets. It
-#               commits to no window system, GPU binding, or event source, so it
-#               builds no backend. Reference backends ship in the bundle for you
-#               to compile into your own target: the ludica binding
-#               (src/bd_backend_ludica.c), the SDL3 binding
-#               (src/bd_backend_sdl3.c), and the raw X11/EGL/GLES one
-#               (backend-gles/). For another host, implement bd_backend.
+#   birdie_gui     the toolkit: widget core, renderer, extension widgets, and the
+#                  bd_utf8 codec. It commits to no window system, GPU binding, or
+#                  event source, so it builds no backend, and no terminal. Reference
+#                  backends ship in the bundle for you to compile into your own
+#                  target: the ludica binding (src/bd_backend_ludica.c), the SDL3
+#                  binding (src/bd_backend_sdl3.c), and the raw X11/EGL/GLES one
+#                  (backend-gles/). For another host, implement bd_backend.
+#   birdie_gui_vt  the terminal: the VT escape-sequence engine + the BD_TERMINAL
+#                  widget (bd_vt/). Link it only when you want a terminal; a
+#                  terminal-free UI links birdie_gui alone and never compiles the
+#                  VT engine or its Unicode width tables.
 #
 # Made by a machine. PUBLIC DOMAIN (CC0-1.0)
 #
@@ -49,15 +51,17 @@ birdie_gui_SRCS = \
 birdie_gui_CPPFLAGS = -I$(birdie_gui_DIR)include -I$(birdie_gui_DIR)thirdparty/stb
 birdie_gui_EXPORTED_CPPFLAGS = -I$(birdie_gui_DIR)include
 
-# The terminal widget (bd_widget_vt.c) needs libvt, which this bundle vendors.
-# Set BIRDIE_GUI_VT=0 to drop the terminal widget and skip building libvt.
+# The terminal ships as a SEPARATE library: the VT engine + the BD_TERMINAL
+# widget (bd_widget_vt.c) live in bd_vt/ and build as birdie_gui_vt, which
+# depends on birdie_gui (it draws through bd_draw/bd_asset and decodes UTF-8 via
+# bd_utf8). Add birdie_gui_vt to your LIBS only when you want a terminal. Set
+# BIRDIE_GUI_VT=0 to skip building it entirely.
 BIRDIE_GUI_VT ?= 1
 ifeq ($(BIRDIE_GUI_VT),1)
-LIBRARIES += bd_vt
-birdie_gui_SRCS += src/bd_widget_vt.c
-birdie_gui_LIBS  = bd_vt
-
-bd_vt_DIR := $(_birdie_gui_DIR)
-bd_vt_SRCS = libvt/*.c
-bd_vt_EXPORTED_CPPFLAGS = -I$(bd_vt_DIR)libvt
+LIBRARIES += birdie_gui_vt
+birdie_gui_vt_DIR := $(_birdie_gui_DIR)bd_vt/
+birdie_gui_vt_SRCS = *.c
+birdie_gui_vt_LIBS = birdie_gui
+birdie_gui_vt_CPPFLAGS = -I$(birdie_gui_vt_DIR)
+birdie_gui_vt_EXPORTED_CPPFLAGS = -I$(birdie_gui_vt_DIR)
 endif

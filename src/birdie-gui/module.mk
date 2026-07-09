@@ -26,13 +26,14 @@ LIBRARIES += birdie_gui birdie_gui_ludica birdie_gui_gles_core
 
 birdie_gui_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
-# Portable toolkit: core + renderer + extension widgets. No backend.
+# Portable toolkit: core + renderer + extension widgets. No backend, and no
+# terminal: BD_TERMINAL lives in the separate birdie_gui_vt library (bd_vt/), so
+# a terminal-free UI never drags in the VT engine or its Unicode width tables.
 birdie_gui_SRCS = \
 	widget.c \
 	bd_draw.c \
 	bd_asset.c \
 	bd_utf8.c \
-	bd_widget_vt.c \
 	bd_widget_value.c \
 	bd_widget_explorer.c \
 	bd_widget_editor.c \
@@ -44,9 +45,8 @@ birdie_gui_SRCS = \
 	bd_widget_tabview.c \
 	bd_widget_indicator.c
 
-# bd_widget_vt.c needs libvt's headers (pulled transitively via bd_vt); the
-# toolkit bakes the stb single-headers.
-birdie_gui_LIBS = bd_vt
+# The core has no terminal dependency now (BD_TERMINAL moved to birdie_gui_vt);
+# it only bakes the stb single-headers.
 birdie_gui_CPPFLAGS = -I$(birdie_gui_DIR) -Isrc/thirdparty/stb
 # Consumers get this directory on their include path (widget.h, bd_backend.h, ...).
 birdie_gui_EXPORTED_CPPFLAGS = -I$(birdie_gui_DIR)

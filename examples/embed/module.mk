@@ -29,14 +29,20 @@ embed_ASSETS := $(embed_example_DIR)../../src/birdie-gui/assets
 embed_example_TOOLKIT := \
     ../../src/birdie-gui/widget.c ../../src/birdie-gui/bd_draw.c \
     ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_utf8.c \
-    ../../src/birdie-gui/bd_widget_vt.c ../../src/birdie-gui/bd_widget_editor.c
+    ../../src/birdie-gui/bd_widget_editor.c
 embed_example_BACKEND := \
     ../../src/guitest/bd_backend_gles.c ../../src/birdie-gui/bd_backend_gles_core.c \
     ../../src/guitest/x11_window.c
+# Terminal (VT) engine + widget, now under birdie-gui/bd_vt (formerly libvt).
+embed_example_VT := \
+    ../../src/birdie-gui/bd_vt/vt_parse.c ../../src/birdie-gui/bd_vt/vt_buf.c \
+    ../../src/birdie-gui/bd_vt/vt_cell.c ../../src/birdie-gui/bd_vt/vt_state.c \
+    ../../src/birdie-gui/bd_vt/vt_ops.c ../../src/birdie-gui/bd_vt/rune_width.c \
+    ../../src/birdie-gui/bd_vt/width_tables.c ../../src/birdie-gui/bd_vt/xmalloc.c \
+    ../../src/birdie-gui/bd_vt/bd_widget_vt.c
 
 embed_example_SRCS = embed_example.c embed_assets.S \
-    $(embed_example_TOOLKIT) $(embed_example_BACKEND)
-embed_example_LIBS = bd_vt
+    $(embed_example_TOOLKIT) $(embed_example_BACKEND) $(embed_example_VT)
 # The .incbin source paths (build-time only; never end up in the binary).
 #
 # NOTE: this example deliberately does NOT override BD_ASSET_* to basenames.
@@ -51,6 +57,7 @@ embed_example_LIBS = bd_vt
 # (embed_ASSETS is relative, and .incbin paths never reach the binary).
 embed_example_CPPFLAGS = \
     -I$(embed_example_DIR)../../src/birdie-gui \
+    -I$(embed_example_DIR)../../src/birdie-gui/bd_vt \
     -I$(embed_example_DIR)../../src/guitest \
     -I$(embed_example_DIR)../../src/thirdparty/stb \
     -DEMBED_FONT_UI='"$(embed_ASSETS)/fonts/DejaVuSans.ttf"' \

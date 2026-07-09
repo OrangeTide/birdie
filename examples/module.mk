@@ -9,14 +9,14 @@
 #   cd examples && make          # builds every example under _out/
 #
 # Each example pulls the birdie-gui toolkit sources straight from the parent
-# tree (../src/birdie-gui) and the terminal library from ../src/libvt, so
-# nothing is vendored twice. Build outputs land in examples/_build and _out,
-# isolated from the main project's.
+# tree (../src/birdie-gui), including the terminal engine under
+# ../src/birdie-gui/bd_vt, so nothing is vendored twice. Build outputs land in
+# examples/_build and _out, isolated from the main project's.
 #
 
 PROJECT_CFLAGS   := -Wall -W
 PROJECT_CXXFLAGS := -Wall -W
 
-# ../src/libvt supplies the terminal widget's backing library (bd_vt); sdl3 and
-# embed are the examples themselves.
-SUBDIRS = ../src/libvt sdl3 embed
+# The examples compile the toolkit (and VT) sources directly, so there are no
+# library subdirs to pull in; sdl3 and embed are the examples themselves.
+SUBDIRS = sdl3 embed

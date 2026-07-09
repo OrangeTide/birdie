@@ -3,7 +3,7 @@
  * Licensed under MIT-0 OR PUBLIC DOMAIN */
 
 #include "vt_parse.h"
-#include "utf8.h"
+#include "bd_utf8.h"
 #include "rune_width.h"
 #include "xmalloc.h"
 
@@ -24,7 +24,7 @@ enum {
 };
 
 #define VT_MAX_PARAMS	16
-#define VT_OSC_MAX	256
+#define VT_OSC_MAX	4096
 #define VT_DCS_INIT	4096
 #define VT_DCS_MAX	(16 * 1024 * 1024)	/* 16 MB cap */
 
@@ -163,7 +163,7 @@ emit_osc(struct vt_parse *p)
 	if (p->ops->osc) {
 		/* trim trailing bytes of a truncated UTF-8 sequence */
 		p->osc_buf[p->osc_len] = '\0';
-		p->osc_len = (int)utf8_trunc(p->osc_buf,
+		p->osc_len = (int)bd_utf8_trunc(p->osc_buf,
 		    (size_t)p->osc_len + 1);
 		p->ops->osc(p->ctx, p->osc_buf, (size_t)p->osc_len);
 	}
@@ -216,7 +216,7 @@ process_ground(struct vt_parse *p, unsigned char c)
 		if ((c & 0xC0) == 0x80) {
 			p->utf8_buf[p->utf8_len++] = c;
 			if (p->utf8_len >= p->utf8_need) {
-				utf8_decode(&rune, p->utf8_buf,
+				bd_utf8_decode(&rune, p->utf8_buf,
 				    (size_t)p->utf8_len);
 				emit_print(p, rune);
 				p->utf8_need = 0;
@@ -251,7 +251,7 @@ process_ground(struct vt_parse *p, unsigned char c)
 	/* UTF-8 lead byte */
 	p->utf8_buf[0] = c;
 	p->utf8_len = 1;
-	n = utf8_runelen(0); /* just use byte count heuristic */
+	n = bd_utf8_runelen(0); /* just use byte count heuristic */
 	if ((c & 0xE0) == 0xC0)
 		p->utf8_need = 2;
 	else if ((c & 0xF0) == 0xE0)

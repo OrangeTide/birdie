@@ -3,7 +3,7 @@
  * Licensed under MIT-0 OR PUBLIC DOMAIN */
 
 #include "vt_state.h"
-#include "utf8.h"
+#include "bd_utf8.h"
 #include "xmalloc.h"
 
 #include <stdio.h>
@@ -426,8 +426,8 @@ vt_state_dump(struct vt_state *st, vt_dump_fn emit, void *ctx)
 	char esc[32];
 	int esc_len;
 
-	/* reset terminal state */
-	emit(ctx, "\033[0m\033[2J\033[H", 12);
+	/* reset terminal state (the literal is 11 bytes; do not emit the NUL) */
+	emit(ctx, "\033[0m\033[2J\033[H", 11);
 
 	/* alt screen mode if active */
 	if (st->modes & VT_MODE_ALTSCREEN)
@@ -467,7 +467,7 @@ vt_state_dump(struct vt_state *st, vt_dump_fn emit, void *ctx)
 				emit(ctx, "\033[0m", 4);
 
 			/* emit character */
-			ulen = utf8_encode(ubuf, c->codepoint);
+			ulen = bd_utf8_encode(ubuf, c->codepoint);
 			if (ulen > 0)
 				emit(ctx, (const char *)ubuf, (size_t)ulen);
 		}

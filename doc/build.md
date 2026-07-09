@@ -19,9 +19,9 @@ this document is the design-level overview.
             module.mk
         birdie-gui/                # the birdie-gui toolkit (library) + backends
             module.mk
+            bd_vt/                 # terminal library: VT engine + BD_TERMINAL widget
+                module.mk          #   (birdie_gui_vt; adopted from lumi's libvt)
         guitest/                   # standalone widget gallery (opt-in)
-            module.mk
-        libvt/                     # terminal escape-sequence engine (library)
             module.mk
         thirdparty/
             ludica/                # rendering/input/audio/net (bundles libiox)
@@ -41,9 +41,10 @@ There is a top-level `module.mk` (not `src/module.mk`), so it is responsible
 for adding the source directories to `SUBDIRS`. Each directory with buildable
 code carries a `module.mk` that appends to `EXECUTABLES` / `LIBRARIES` and sets
 per-target `<name>_DIR` / `<name>_SRCS` / `<name>_LIBS` / flags. Libraries
-declared: `birdie_gui`, `birdie_gui_ludica`, `birdie_gui_gles_core`, `bd_vt`
-(libvt), plus the vendored ludica/mbedtls/miniz/lua/lpeg libraries. See
-modular-make's header comment for the full variable set.
+declared: `birdie_gui`, `birdie_gui_ludica`, `birdie_gui_gles_core`,
+`birdie_gui_vt` (the terminal engine + widget, in `bd_vt/`), plus the vendored
+ludica/mbedtls/miniz/lua/lpeg libraries. See modular-make's header comment for
+the full variable set.
 
 The top-level `module.mk` deliberately bypasses ludica's own `src/module.mk`
 (which pulls in samples/imgui and assumes `tools/glsl2h` at the make root) and
@@ -81,21 +82,23 @@ SDL3. Build it with `cd examples && make`.
 
 Dependencies are vendored, not linked to sibling repos, and never symlinked.
 ludica, mbedTLS, miniz, Lua, and LPeg live under `src/thirdparty/<name>/`;
-libvt lives at `src/libvt/`; libiox ships inside ludica. Each vendored
-dependency has an update script under `scripts/` (`update-ludica.sh`,
-`update-lua.sh`, `update-mbedtls.sh`, `update-miniz.sh`) and the GNUmakefile
-itself is refreshed with `update-gnumakefile.sh`. See `doc/vendoring.md` for
-the policy and provenance tracking.
+libiox ships inside ludica. Each vendored dependency has an update script under
+`scripts/` (`update-ludica.sh`, `update-lua.sh`, `update-mbedtls.sh`,
+`update-miniz.sh`) and the GNUmakefile itself is refreshed with
+`update-gnumakefile.sh`. See `doc/vendoring.md` for the policy and provenance
+tracking.
 
-The UTF-8 codec (`src/birdie-gui/bd_utf8.c`) and the embedded fallback font
+The terminal engine (`src/birdie-gui/bd_vt/`, the `vt_*` sources — adopted from
+lumi's libvt), the UTF-8 codec (`bd_utf8.c`), and the embedded fallback font
 (`bd_fallback_font.h`) are adopted as first-class birdie-gui code, not tracked
-as external dependencies.
+as external dependencies (no update script, no upstream tracking).
 
 ## Release artifacts
 
 - **birdie-gui toolkit** — `make dist` produces
   `_out/<triplet>/birdie-gui-$(GUI_VERSION).zip`, a self-contained source
-  bundle (public headers, implementation, reference backends, libvt, stb, and
+  bundle (public headers, implementation, reference backends, the terminal
+  library, stb, and
   assets). The GitHub release workflow publishes it.
 - **Linux app** — tarball of `_out/<triplet>/bin/birdie` plus its runtime
   assets.

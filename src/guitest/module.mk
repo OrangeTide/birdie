@@ -21,8 +21,9 @@ EXECUTABLES += birdie-gui-gallery
 birdie-gui-gallery_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 birdie-gui-gallery_SRCS  = widget_test.c x11_window.c bd_backend_gles.c
 # birdie_gui_gles_core supplies the bd_gles_* GPU primitives this backend wires
-# into the vtable; birdie_gui (transitively bd_vt) supplies the toolkit + their
-# exported include paths. Only this directory's own headers need adding.
-birdie-gui-gallery_LIBS  = birdie_gui_gles_core birdie_gui
+# into the vtable; birdie_gui_vt supplies the terminal widget the gallery
+# exhibits (dragging in birdie_gui + its exported include paths). Only this
+# directory's own headers need adding.
+birdie-gui-gallery_LIBS  = birdie_gui_gles_core birdie_gui_vt birdie_gui
 birdie-gui-gallery_CPPFLAGS = -I$(birdie-gui-gallery_DIR)
 birdie-gui-gallery_LDLIBS = -lX11 -lXi -lEGL -lGLESv2 -lm

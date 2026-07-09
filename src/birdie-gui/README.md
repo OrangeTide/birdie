@@ -46,37 +46,42 @@ scripts/get-birdie-gui.sh --help           # options and environment variables
 The bundle ships a top-level `module.mk` for
 [modular-make](https://github.com/OrangeTide/modular-make). It declares two
 libraries: `birdie_gui`, the backend-agnostic toolkit (widget core, renderer,
-extension widgets, no backend), and `bd_vt`, the bundled `libvt` the terminal
-widget builds on. Add the vendored directory to your project's `SUBDIRS` as a
-single entry, then list `birdie_gui` in your executable's `LIBS` (it pulls in
-`bd_vt` transitively) plus a backend of your own:
+extension widgets, and the UTF-8 codec; no backend and no terminal), and
+`birdie_gui_vt`, the terminal (the VT escape-sequence engine plus the
+`BD_TERMINAL` widget, under `bd_vt/`). Add the vendored directory to your
+project's `SUBDIRS` as a single entry, then list the libraries you need in your
+executable's `LIBS` plus a backend of your own:
 
 ```makefile
 SUBDIRS += third_party/birdie-gui
 
 myapp_SRCS = main.c bd_backend_ludica.c   # your host + a backend
-myapp_LIBS = birdie_gui                   # + ludica/SDL3/... for the backend
+# terminal-free UI:
+myapp_LIBS = birdie_gui
+# ...or, with a terminal (birdie_gui_vt pulls in birdie_gui transitively):
+myapp_LIBS = birdie_gui_vt
 ```
 
 `module.mk` exports its `include/` path, so `#include "widget.h"` and the rest
-of the public API resolve with no extra `-I`. It builds no backend, so compile
-a backend of your own into your target: the bundle ships `bd_backend_ludica.c`
-and `bd_backend_sdl3.c` (both in `src/`) and the raw X11/EGL/GLES one in
-`backend-gles/`; see "Porting to another backend" below.
+of the public API resolve with no extra `-I`; `birdie_gui_vt` likewise exports
+`bd_vt/`, so `#include "bd_widget_vt.h"` resolves when you link it. Neither
+builds a backend, so compile one of your own into your target: the bundle ships
+`bd_backend_ludica.c` and `bd_backend_sdl3.c` (both in `src/`) and the raw
+X11/EGL/GLES one in `backend-gles/`; see "Porting to another backend" below.
 
-The terminal widget (`bd_widget_vt.c`) is the one source that needs `libvt`,
-which the bundle vendors under `libvt/` and builds as `bd_vt` by default. To
-drop the terminal widget and skip building `libvt` entirely:
+The terminal is a separate library so a terminal-free UI never compiles the VT
+engine or its Unicode width tables: link `birdie_gui` alone to leave it out, or
+set `BIRDIE_GUI_VT=0` to skip building `birdie_gui_vt` entirely:
 
 ```sh
 make BIRDIE_GUI_VT=0
 ```
 
-Not using modular-make? The library is nine `.c` files under `src/` (the
-toolkit, no `bd_backend_*`). Compile them with `-Iinclude -Ithirdparty/stb`,
-adding `-Ilibvt` (and libvt's own `.c` files) only if you keep
-`bd_widget_vt.c`. The gallery command under "Bundled X11/GLES backend and
-gallery" shows the full compile of the library plus a backend in one line.
+Not using modular-make? The toolkit is the `.c` files under `src/` (no
+`bd_backend_*`). Compile them with `-Iinclude -Ithirdparty/stb`. For the
+terminal, add the `bd_vt/*.c` files and `-Ibd_vt`. The gallery command under
+"Bundled X11/GLES backend and gallery" shows the full compile of the library
+plus a backend in one line.
 
 ## Usage
 
@@ -441,12 +446,12 @@ gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
 example. Its GPU code (shaders, quad batch, textures, scissor) lives in the
 shared `src/bd_backend_gles_core.{c,h}`, which `src/bd_backend_sdl3.c` uses too;
 compile `src/bd_backend_gles_core.c` alongside whichever GLES backend you pick.
-Build it (Linux) with the bundled `libvt/` on the include path and the
+Build it (Linux) with the bundled `bd_vt/` on the include path and the
 asset paths pointed at the bundle's `assets/` (the compiled-in defaults assume
-birdie's source tree):
+birdie's source tree). `bd_vt/*.c` supplies the terminal (VT engine + widget):
 
 ```sh
-cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ilibvt \
+cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
    -DBD_ASSET_GUI_FONT='"assets/fonts/DejaVuSans.ttf"' \
    -DBD_ASSET_GUI_FONT_BOLD='"assets/fonts/DejaVuSans-Bold.ttf"' \
    -DBD_ASSET_GUI_FONT_ITALIC='"assets/fonts/DejaVuSans-Oblique.ttf"' \
@@ -460,10 +465,11 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ilibvt \
    -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
    backend-gles/widget_test.c backend-gles/x11_window.c \
    backend-gles/bd_backend_gles.c src/bd_backend_gles_core.c \
-   src/widget.c src/bd_draw.c src/bd_widget_vt.c src/bd_widget_value.c \
-   src/bd_widget_explorer.c src/bd_widget_editor.c src/bd_widget_canvas.c \
-   src/bd_widget_table.c src/bd_widget_inventory.c src/bd_widget_dock.c \
-   src/bd_widget_actionbar.c src/bd_widget_tabview.c libvt/*.c \
+   src/widget.c src/bd_draw.c src/bd_asset.c src/bd_utf8.c \
+   src/bd_widget_value.c src/bd_widget_explorer.c src/bd_widget_editor.c \
+   src/bd_widget_canvas.c src/bd_widget_table.c src/bd_widget_inventory.c \
+   src/bd_widget_dock.c src/bd_widget_actionbar.c src/bd_widget_tabview.c \
+   src/bd_widget_indicator.c bd_vt/*.c \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o gallery
 ```
 
@@ -474,8 +480,10 @@ Run `./gallery` from the bundle root so those relative asset paths resolve.
 - A **GLES-capable backend**. The bundle ships three: ludica
   (`src/bd_backend_ludica.c`), SDL3 (`src/bd_backend_sdl3.c`), and raw
   X11/EGL/GLES (`backend-gles/`). SDL, raylib, GLFW, or ANGLE can host it too.
-- **libvt** backs the terminal widget (`bd_widget_vt.c`) and is bundled under
-  `libvt/` (built as `bd_vt`); no need to supply it yourself.
+- **The terminal engine** (adopted from libvt) backs the terminal widget
+  (`bd_widget_vt.c`) and ships under `bd_vt/`, built together with the widget as
+  the `birdie_gui_vt` library; no need to supply it yourself. A terminal-free UI
+  links `birdie_gui` alone and skips it.
 - Vendored: **stb_truetype** (text rasterization) and eight chrome TTFs the
   toolkit bakes — a proportional family (DejaVu Sans) and a fixed-width family
   (DejaVu Sans Mono), each in regular / bold / oblique / bold-oblique.
