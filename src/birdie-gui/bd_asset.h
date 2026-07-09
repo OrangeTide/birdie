@@ -35,7 +35,6 @@
 #define BD_ASSET_FONT_MONO_BOLD        "font.mono-bold"
 #define BD_ASSET_FONT_MONO_ITALIC      "font.mono-italic"
 #define BD_ASSET_FONT_MONO_BOLD_ITALIC "font.mono-bold-italic"
-#define BD_ASSET_TERMINAL_FONT         "terminal.font"
 #define BD_ASSET_PUSHPIN_OUT           "pushpin.out"
 #define BD_ASSET_PUSHPIN_IN            "pushpin.in"
 
@@ -72,7 +71,7 @@ const char *bd_asset_resolve(const bd_backend *be, const char *rel,
  * (decoded from memory), a registered file, or the default when the id is
  * unregistered -- the default is `rel` located via the backend's resolve_asset
  * hook, falling back to `default_path` (current-directory-relative). Used by
- * the toolkit for the pushpins and terminal atlas. */
+ * the toolkit for the pushpin sprites. */
 bd_texture bd_asset_texture(const bd_backend *be, const char *id,
     const char *rel, const char *default_path);
 

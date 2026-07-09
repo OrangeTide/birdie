@@ -31,13 +31,6 @@ emb_pin_in:
 	.incbin EMBED_PIN_IN
 emb_pin_in_end:
 
-	.global emb_term_atlas
-	.global emb_term_atlas_end
-	.balign 4
-emb_term_atlas:
-	.incbin EMBED_TERM_ATLAS
-emb_term_atlas_end:
-
 /* The monospace family the body editor renders: regular, bold, italic. */
 	.global emb_font_mono
 	.global emb_font_mono_end

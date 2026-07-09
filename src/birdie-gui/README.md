@@ -460,7 +460,6 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
    -DBD_ASSET_GUI_FONT_MONO_BOLD='"assets/fonts/DejaVuSansMono-Bold.ttf"' \
    -DBD_ASSET_GUI_FONT_MONO_ITALIC='"assets/fonts/DejaVuSansMono-Oblique.ttf"' \
    -DBD_ASSET_GUI_FONT_MONO_BOLDITALIC='"assets/fonts/DejaVuSansMono-BoldOblique.ttf"' \
-   -DBD_ASSET_TERM_FONT='"assets/font8x16.png"' \
    -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
    -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
    backend-gles/widget_test.c backend-gles/x11_window.c \
@@ -553,8 +552,8 @@ macros.
 ## Embedding assets (fonts and images), and custom fonts
 
 The toolkit requests each runtime asset by a **generic identifier**, not a
-filename: `BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces,
-`BD_ASSET_TERMINAL_FONT`, and `BD_ASSET_PUSHPIN_OUT` / `_IN` (all in
+filename: `BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces, and
+`BD_ASSET_PUSHPIN_OUT` / `_IN` (all in
 `bd_asset.h`). Register a source under an id and the toolkit uses it instead of
 the built-in default. A source is **either a file path or in-memory data**, so
 the same mechanism covers "use a different font on disk" and "ship a
@@ -570,17 +569,16 @@ bd_gui_init(backend, theme);   /* the rest fall back to the built-in faces */
 ```
 
 Or embed blobs for a **single self-contained binary** -- fonts *and* the PNG
-textures (terminal atlas, pushpins), all through one registry:
+sprites (the pushpins), all through one registry (the terminal needs no asset;
+its bitmap font is compiled into the toolkit):
 
 ```c
 extern const unsigned char font_ui[];    extern const unsigned char font_ui_end[];
 extern const unsigned char pin_out[];    extern const unsigned char pin_out_end[];
-extern const unsigned char term_atlas[]; extern const unsigned char term_atlas_end[];
 
 /* register BEFORE bd_gui_init*; keyed by identity, not by any filename */
 bd_asset_register_data(BD_ASSET_FONT_REGULAR,  font_ui,    font_ui_end    - font_ui);
 bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   pin_out,    pin_out_end    - pin_out);
-bd_asset_register_data(BD_ASSET_TERMINAL_FONT, term_atlas, term_atlas_end - term_atlas);
 
 bd_gui_init(backend, theme);
 ```
@@ -610,7 +608,7 @@ font_ui_end:
 
 The registry keys are the fixed `BD_ASSET_*` id strings (short, generic), so
 they expose nothing. The only paths that get baked in are the **default file
-paths** the toolkit falls back to (the `BD_ASSET_GUI_FONT*`, `BD_ASSET_TERM_FONT`,
+paths** the toolkit falls back to (the `BD_ASSET_GUI_FONT*` and
 `BD_ASSET_PIN_*` macros -- string literals compiled in). Two rules keep those
 clean:
 

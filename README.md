@@ -48,7 +48,7 @@ sudo apt-get install -y libx11-dev libegl-dev libgles-dev   # Debian / Ubuntu
 ```
 
 The binary lands at `_out/<triplet>/bin/birdie`, e.g.
-`_out/x86_64-linux-gnu/bin/birdie`. Fonts and the terminal atlas are loaded
+`_out/x86_64-linux-gnu/bin/birdie`. Fonts and image assets are loaded
 from `src/birdie-gui/assets/` relative to the working directory, so run it from
 the repository root:
 

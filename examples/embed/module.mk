@@ -63,7 +63,6 @@ embed_example_CPPFLAGS = \
     -DEMBED_FONT_UI='"$(embed_ASSETS)/fonts/DejaVuSans.ttf"' \
     -DEMBED_PIN_OUT='"$(embed_ASSETS)/pushpin/pushpin-out-14.png"' \
     -DEMBED_PIN_IN='"$(embed_ASSETS)/pushpin/pushpin-in-14.png"' \
-    -DEMBED_TERM_ATLAS='"$(embed_ASSETS)/font8x16.png"' \
     -DEMBED_FONT_MONO='"$(embed_ASSETS)/fonts/DejaVuSansMono.ttf"' \
     -DEMBED_FONT_MONO_BOLD='"$(embed_ASSETS)/fonts/DejaVuSansMono-Bold.ttf"' \
     -DEMBED_FONT_MONO_ITALIC='"$(embed_ASSETS)/fonts/DejaVuSansMono-Oblique.ttf"'

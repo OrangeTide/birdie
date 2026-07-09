@@ -314,7 +314,8 @@ primitives widgets actually call:
 - text run (stb_truetype atlases baked from the chrome TTFs — a proportional
   and a fixed-width family, each in regular/bold/italic/bold-italic, selected
   by `bd_draw_text_styled` via `BD_FONT_BOLD|ITALIC|MONO`; the terminal
-  extension keeps its own CP437 atlas)
+  extension draws its cells from an embedded fixed-cell bitmap font via
+  `bd_draw_cell`, carrying no texture of its own)
 
 These batch into one dynamic vertex buffer that flushes on texture change or
 on `bd_draw_flush()`. A widget that needs an effect (the shaded knob, and the
@@ -326,10 +327,11 @@ the loop currently redraws each frame.
 
 ### Custom and embedded assets (`bd_asset`)
 
-The toolkit requests each runtime asset (the chrome font faces, the CP437
-terminal atlas, the pushpin PNGs) by a **generic identifier**, not a filename:
-`BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces,
-`BD_ASSET_TERMINAL_FONT`, `BD_ASSET_PUSHPIN_OUT`/`_IN` (in **`bd_asset.h`**).
+The toolkit requests each runtime asset (the chrome font faces, the pushpin
+PNGs) by a **generic identifier**, not a filename: `BD_ASSET_FONT_REGULAR`, the
+seven other `BD_ASSET_FONT_*` faces, `BD_ASSET_PUSHPIN_OUT`/`_IN` (in
+**`bd_asset.h`**). The terminal needs no asset; it draws from a bitmap font
+compiled into the toolkit.
 Register a source under an id to override its built-in default. A source is
 **either a file path or in-memory data**, so one mechanism covers both "use a
 different font" and "ship a self-contained binary":
@@ -339,7 +341,7 @@ different font" and "ship a self-contained binary":
 bd_asset_register_file(BD_ASSET_FONT_REGULAR, "/home/me/.fonts/Inter.otf");
 
 /* or serve it from bytes compiled in (an .incbin / xxd -i blob) */
-bd_asset_register_data(BD_ASSET_TERMINAL_FONT, atlas, atlas_len);
+bd_asset_register_data(BD_ASSET_FONT_MONO, mono_ttf, mono_ttf_len);
 ```
 
 Register before `bd_gui_init*`. The key is the asset's identity, so a custom
@@ -360,7 +362,7 @@ lower-level per-path hook for a host with its own resolver.
 **Keeping build paths out of the binary.** The registry keys are the fixed
 `BD_ASSET_*` id strings (short, generic) and expose nothing. The only paths that
 get baked in are the toolkit's **default fallback** file paths (the
-`BD_ASSET_GUI_FONT*` / `BD_ASSET_TERM_FONT` / `BD_ASSET_PIN_*` macros, compiled
+`BD_ASSET_GUI_FONT*` / `BD_ASSET_PIN_*` macros, compiled
 in as literals). Never set one (or an `.incbin` source path) to an
 `$(abspath ...)`: that bakes the build machine's directory layout and username
 into every copy, and once every asset is registered by id nothing reads those
@@ -373,7 +375,7 @@ bytes/file"; the remaining case is an *installed* app whose assets sit next to
 the executable rather than in the current working directory. For that the
 toolkit asks the backend's optional `resolve_asset(rel, buf, bufsz)` hook to
 locate a runtime asset by its **asset-root-relative** sub-path (e.g.
-`"fonts/DejaVuSans.ttf"`, `"pushpin/pushpin-out-14.png"`, `"font8x16.png"`).
+`"fonts/DejaVuSans.ttf"`, `"pushpin/pushpin-out-14.png"`).
 The backend searches the locations that fit its platform, writes the located
 absolute path into the caller-owned `buf`, and returns it; it returns `NULL`
 when the asset is not found there, and the toolkit then uses the built-in

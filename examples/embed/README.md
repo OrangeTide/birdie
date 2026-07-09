@@ -1,21 +1,23 @@
 # birdie-gui with assets embedded in the binary
 
 A small example host that ships as a **single self-contained executable**: the
-chrome font, the pushpin sprites, the terminal's CP437 atlas, and the monospace
-family the body editor renders (regular + bold + italic) are all compiled into
-the binary instead of read from disk at runtime. It is the worked reference for
-`bd_asset.h`, the backend-neutral embedded-asset registry.
+chrome font, the pushpin sprites, and the monospace family the body editor
+renders (regular + bold + italic) are all compiled into the binary instead of
+read from disk at runtime. It is the worked reference for `bd_asset.h`, the
+backend-neutral embedded-asset registry. (The terminal needs no asset; its
+bitmap font is compiled into the toolkit itself.)
 
 It runs on the raw X11/EGL/GLES backend (`src/guitest/`), the same one the
 toolkit gallery uses, so it needs no ludica and no SDL3, only X11 + EGL +
 GLESv2.
 
 The window shows a menu bar (the pinnable menu draws the embedded pushpin), a
-label and a terminal (each drawing an embedded font/atlas), and a **rich-text
-editor** whose bold and italic spans pull the embedded `mono-bold` and
-`mono-italic` faces -- so every face the UI touches comes from a baked-in blob.
+label (embedded font) and a terminal (the toolkit's built-in bitmap font), and a
+**rich-text editor** whose bold and italic spans pull the embedded `mono-bold`
+and `mono-italic` faces -- so every UI face comes from a baked-in blob or the
+compiled-in terminal font.
 
-![The embed example: label and Quit button in the embedded proportional face, an editor showing the embedded mono-regular / mono-bold / mono-italic faces, and a terminal drawing the embedded CP437 atlas](../../doc/images/embed-example.png)
+![The embed example: label and Quit button in the embedded proportional face, an editor showing the embedded mono-regular / mono-bold / mono-italic faces, and a terminal drawing the toolkit's built-in bitmap font](../../doc/images/embed-example.png)
 
 ## How it works
 
@@ -34,7 +36,6 @@ Three pieces:
    ```c
    bd_asset_register_data(BD_ASSET_FONT_REGULAR,  emb_font_ui,    emb_font_ui_end    - emb_font_ui);
    bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   emb_pin_out,    emb_pin_out_end    - emb_pin_out);
-   bd_asset_register_data(BD_ASSET_TERMINAL_FONT, emb_term_atlas, emb_term_atlas_end - emb_term_atlas);
    bd_asset_register_data(BD_ASSET_FONT_MONO,      emb_font_mono,      ...);  /* editor body */
    bd_asset_register_data(BD_ASSET_FONT_MONO_BOLD, emb_font_mono_bold, ...);  /* bold spans   */
    /* ...and BD_ASSET_FONT_MONO_ITALIC */
@@ -75,8 +76,8 @@ because this example shares its compiled toolkit objects (`widget.o`,
 `bd_draw.o`, ...) with the SDL3 example in the same modular-make project, so it
 cannot recompile them with its own macro overrides. A real consumer compiles
 birdie-gui as its own single executable and overrides those default paths to
-short strings (`-DBD_ASSET_GUI_FONT='"font.ttf"'`, and the same for the variants,
-`BD_ASSET_TERM_FONT`, and `BD_ASSET_PIN_*`), leaving no `src/birdie-gui/assets/...`
+short strings (`-DBD_ASSET_GUI_FONT='"font.ttf"'`, and the same for the variants
+and `BD_ASSET_PIN_*`), leaving no `src/birdie-gui/assets/...`
 in the binary at all. See the toolkit README's "Keeping build paths out of the
 binary".
 

@@ -1,7 +1,7 @@
 /*
  * embed_example.c -- a self-contained birdie-gui binary with no asset files.
  *
- * The chrome font, pushpin sprites, terminal atlas, and the monospace family
+ * The chrome font, pushpin sprites, and the monospace family
  * the body editor renders (regular, bold, italic) are compiled into the
  * executable (see embed_assets.S) and handed to the toolkit through the registry
  * in bd_asset.h. The toolkit asks for each asset by a generic id
@@ -55,7 +55,6 @@
 EMB(emb_font_ui)
 EMB(emb_pin_out)
 EMB(emb_pin_in)
-EMB(emb_term_atlas)
 EMB(emb_font_mono)
 EMB(emb_font_mono_bold)
 EMB(emb_font_mono_italic)
@@ -73,7 +72,6 @@ static const struct embed {
 	{ BD_ASSET_FONT_REGULAR,     emb_font_ui,          emb_font_ui_end          },
 	{ BD_ASSET_PUSHPIN_OUT,      emb_pin_out,          emb_pin_out_end          },
 	{ BD_ASSET_PUSHPIN_IN,       emb_pin_in,           emb_pin_in_end           },
-	{ BD_ASSET_TERMINAL_FONT,    emb_term_atlas,       emb_term_atlas_end       },
 	{ BD_ASSET_FONT_MONO,        emb_font_mono,        emb_font_mono_end        },
 	{ BD_ASSET_FONT_MONO_BOLD,   emb_font_mono_bold,   emb_font_mono_bold_end   },
 	{ BD_ASSET_FONT_MONO_ITALIC, emb_font_mono_italic, emb_font_mono_italic_end },
@@ -127,7 +125,7 @@ on_quit(bd_id id, void *arg)
 
 /* A tiny UI whose every glyph and sprite comes from the embedded blobs: a menu
  * bar (the pinnable menu draws the embedded pushpin), a label (embedded font),
- * and a terminal (embedded CP437 atlas). */
+ * and a terminal (drawn from birdie-gui's built-in bitmap font). */
 static void
 build_ui(void)
 {
@@ -167,7 +165,7 @@ build_ui(void)
 
 	bd_id term = bd_terminal_create(body, BD_GROW_I, 1, BD_END);
 	bd_terminal_write(term,
-		"\033[1membed_example\033[0m -- CP437 atlas is embedded too.\r\n"
+		"\033[1membed_example\033[0m -- terminal uses the built-in bitmap font.\r\n"
 		"Run this from any directory; it needs no asset files.\r\n", -1);
 
 	bd_create(body, BD_BUTTON, BD_LABEL_S, "Quit", BD_PREF_W_I, 80,

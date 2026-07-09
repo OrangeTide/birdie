@@ -115,7 +115,6 @@ dist :
 	@cp $(addprefix $(DIST_GLES)/,$(DIST_GLES_FILES)) $(DIST_STAGE)/backend-gles/
 	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
 	@cp $(DIST_VT)/*.c $(DIST_VT)/*.h $(DIST_STAGE)/bd_vt/
-	@cp $(DIST_SRC)/assets/font8x16.png $(DIST_STAGE)/assets/
 	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans-Bold.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans-Oblique.ttf \
@@ -142,7 +141,7 @@ dist :
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
 	    '  bd_vt/          terminal library: VT engine + BD_TERMINAL widget' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
-	    '  assets/         chrome TTF (+ license), CP437 terminal atlas, pushpins' \
+	    '  assets/         chrome TTF (+ license), pushpin sprites' \
 	    '  module.mk       backend-agnostic modular-make library build' \
 	    '  LICENSE.txt     CC0 dedication + bundled third-party licenses' \
 	    '  get-birdie-gui.sh  vendoring updater (fetch a release into your project)' \
