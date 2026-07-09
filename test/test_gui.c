@@ -517,6 +517,12 @@ main(void)
 	check("renderer initialized shader", n_shader == 1);
 	check("chrome font baked (real DejaVu): text width > 0",
 	    bd_draw_text_width("Quit") > 0.0f);
+	/* UTF-8: a 2-byte codepoint (U+00E9 'e-acute') is decoded to one glyph,
+	 * not two raw Latin-1 bytes, so its width stays under two wide ASCII
+	 * glyphs (before the fix it measured as two separate byte-glyphs) */
+	check("UTF-8 multibyte counts as one glyph",
+	    bd_draw_text_width("\xC3\xA9") > 0.0f &&
+	    bd_draw_text_width("\xC3\xA9") < bd_draw_text_width("MM"));
 	n_drawverts = 0;
 	bd_gui_render();
 	check("render issued GPU draws (chrome + terminal)", n_drawverts > 0);
@@ -1942,6 +1948,25 @@ main(void)
 
 	bd_gui_render();   /* shader path (stub) does not crash */
 	check("indicator render does not crash", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- embedded fallback font: forced when no TTF loads ---- */
+	{
+	bd_font_set bogus = {0};
+	bogus.regular.path = "/nonexistent/font.ttf";   /* force the fallback */
+	bd_gui_init_fonts(&stub, NULL, &bogus);
+	/* the fallback is a monospaced bitmap, so every mapped glyph shares one
+	 * advance; a resolved codepoint has that width, an unmapped one renders as
+	 * '?' (also that width) */
+	float wa = bd_draw_text_width("A");
+	check("fallback: ASCII glyph has width", wa > 0.0f);
+	check("fallback: box-drawing U+2500 resolves via codepoint map",
+	    bd_draw_text_width("\xE2\x94\x80") == wa);       /* U+2500 */
+	check("fallback: Latin-1 accent U+00E9 resolves",
+	    bd_draw_text_width("\xC3\xA9") == wa);           /* e-acute */
+	check("fallback: unmapped codepoint falls back to '?'",
+	    bd_draw_text_width("\xEF\xBF\xBF") == wa);       /* U+FFFF */
 	bd_gui_cleanup();
 	}
 

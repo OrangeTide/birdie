@@ -7,6 +7,8 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
+#include "bd_fallback_font.h"   /* embedded 8x8 fallback glyphs + codepoint map */
+
 /*
  * Toolkit renderer on the backend GPU interface. One shader (textured *
  * vertex color), one dynamic quad batch, one stb_truetype glyph atlas. Solid
@@ -20,7 +22,11 @@
 #define MAX_VERTS   8192        /* multiple of 6 (quads) */
 #define ATLAS_DIM   512
 #define FONT_FIRST  0x20
-#define FONT_COUNT  0xE0        /* 0x20..0xFF: Basic Latin + Latin-1 */
+#define FONT_COUNT  0xE0        /* 0x20..0xFF: Basic Latin + Latin-1 (TTF bake) */
+#define MAX_GLYPHS  1024        /* packed-glyph capacity per face; the embedded
+                                   fallback maps a large codepoint set (CP437 +
+                                   Latin + box/block), more than the contiguous
+                                   FONT_COUNT the TTF path bakes */
 
 static const char *VERT_SRC =
 	"#version 300 es\n"
@@ -63,7 +69,12 @@ static float      win_w, win_h;
 struct face {
 	int              have;
 	bd_texture       atlas;
-	stbtt_packedchar packed[FONT_COUNT];
+	stbtt_packedchar packed[MAX_GLYPHS];
+	/* codepoint of each packed slot, ascending, for the resolver. NULL means
+	 * the slots are contiguous from FONT_FIRST (the TTF bake); the embedded
+	 * fallback sets an explicit map so it can carry a sparse Unicode set. */
+	const unsigned  *cmap;
+	int              nglyphs;
 	float            ascent;
 	float            line_h;
 };
@@ -274,6 +285,8 @@ bake_font(const bd_font_face *face, float px, int slot, int metrics)
 		}
 		faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
 		faces[slot].have = (faces[slot].atlas.id != 0);
+		faces[slot].cmap = NULL;          /* contiguous 0x20.. from the bake */
+		faces[slot].nglyphs = FONT_COUNT;
 	}
 	free(cov);
 	free(rgba);
@@ -289,6 +302,121 @@ face_for(int style)
 	if (i < 0 || i >= FONT_FACES || !faces[i].have)
 		i = 0;
 	return &faces[i];
+}
+
+/* Decode one UTF-8 scalar from *ps, advancing it. Returns 0 at the terminator
+ * and U+FFFD on a malformed sequence (advancing past the offending byte). */
+static unsigned
+utf8_next(const char **ps)
+{
+	const unsigned char *s = (const unsigned char *)*ps;
+	unsigned c = s[0], cp;
+	int n;
+
+	if (c == 0)              return 0;
+	if (c < 0x80)          { *ps = (const char *)(s + 1); return c; }
+	else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; n = 1; }
+	else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; n = 2; }
+	else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; n = 3; }
+	else                   { *ps = (const char *)(s + 1); return 0xFFFD; }
+
+	for (int i = 1; i <= n; i++) {
+		if ((s[i] & 0xC0) != 0x80) {   /* truncated / invalid continuation */
+			*ps = (const char *)(s + i);
+			return 0xFFFD;
+		}
+		cp = (cp << 6) | (s[i] & 0x3F);
+	}
+	*ps = (const char *)(s + n + 1);
+	return cp;
+}
+
+/* Packed-glyph slot for a codepoint in this face, or -1 if it has no glyph. A
+ * NULL cmap means the slots are contiguous from FONT_FIRST (the TTF bake); a
+ * non-NULL cmap is a sorted codepoint table searched by bisection. */
+static int
+face_slot(const struct face *f, unsigned cp)
+{
+	if (f->cmap) {
+		int lo = 0, hi = f->nglyphs - 1;
+		while (lo <= hi) {
+			int m = (lo + hi) >> 1;
+			unsigned v = f->cmap[m];
+			if (v == cp) return m;
+			if (v < cp)  lo = m + 1;
+			else         hi = m - 1;
+		}
+		return -1;
+	}
+	if (cp >= FONT_FIRST && (int)(cp - FONT_FIRST) < f->nglyphs)
+		return (int)(cp - FONT_FIRST);
+	return -1;
+}
+
+/*
+ * Bake the embedded 8x8 fallback (FALLBACK_GLYPHS + FALLBACK_CMAP, see
+ * bd_fallback_font.h) into a face, nearest-neighbor scaled to ~px, when no TTF
+ * could be read. Fills the same atlas + packedchar data the normal text path
+ * consumes and points the face at the codepoint map, so the UI stays legible
+ * (across CP437 + Latin + box/block, not just ASCII) and nothing downstream
+ * needs to know it is a fallback. Glyphs past the atlas are dropped.
+ */
+static void
+bake_fallback_face(int slot, float px)
+{
+	int sc = (int)(px / 8.0f + 0.5f);
+	if (sc < 1)
+		sc = 1;
+	int gw = 8 * sc, gh = 8 * sc;
+	int per_row = ATLAS_DIM / gw;
+	if (per_row < 1)
+		per_row = 1;
+
+	unsigned char *rgba = calloc((size_t)ATLAS_DIM * ATLAS_DIM * 4, 1);
+	if (!rgba)
+		return;
+	int baked = 0;
+	for (int g = 0; g < FALLBACK_NGLYPHS && g < MAX_GLYPHS; g++) {
+		int cx = (g % per_row) * gw;
+		int cy = (g / per_row) * gh;
+		if (cy + gh > ATLAS_DIM)
+			break;                 /* atlas full; stop (rest unmapped) */
+		for (int r = 0; r < 8; r++)
+			for (int c = 0; c < 8; c++) {
+				if (!(FALLBACK_GLYPHS[g][r] & (1 << c)))
+					continue;
+				for (int yy = 0; yy < sc; yy++)
+					for (int xx = 0; xx < sc; xx++) {
+						int ax = cx + c * sc + xx;
+						int ay = cy + r * sc + yy;
+						unsigned char *p =
+						    &rgba[((size_t)ay * ATLAS_DIM + ax) * 4];
+						p[0] = p[1] = p[2] = p[3] = 255;
+					}
+			}
+		stbtt_packedchar *pc = &faces[slot].packed[g];
+		pc->x0 = (unsigned short)cx;
+		pc->y0 = (unsigned short)cy;
+		pc->x1 = (unsigned short)(cx + gw);
+		pc->y1 = (unsigned short)(cy + gh);
+		pc->xoff = 0.0f;
+		pc->yoff = (float)-gh;
+		pc->xadvance = (float)gw;
+		pc->xoff2 = (float)gw;
+		pc->yoff2 = 0.0f;
+		baked++;
+	}
+	faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
+	faces[slot].have = (faces[slot].atlas.id != 0);
+	faces[slot].cmap = FALLBACK_CMAP;   /* sorted codepoint -> slot map */
+	faces[slot].nglyphs = baked;
+	faces[slot].ascent = (float)gh;
+	faces[slot].line_h = (float)(gh + sc);
+	free(rgba);
+	if (slot == 0) {
+		font_ascent = faces[slot].ascent;
+		font_line_h = faces[slot].line_h;
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -323,6 +451,13 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 		bd_font_face face = resolve_face(f[i], font_asset_id[i],
 		    font_default_path[i]);
 		bake_font(&face, font_px, i, i == 0); /* regular sets metrics */
+	}
+	/* No usable regular face (missing/unreadable font): fall back to the
+	 * embedded 8x8 bitmap so the UI stays legible. Variant styles resolve to
+	 * slot 0 through face_for(), so one fallback face covers them all. */
+	if (!faces[0].have) {
+		fprintf(stderr, "bd_draw: using embedded fallback font\n");
+		bake_fallback_face(0, font_px);
 	}
 	return 1;
 }
@@ -505,13 +640,17 @@ bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style)
 	if (!f->have || !s)
 		return;
 	float px = x, py = y + f->ascent;
-	for (; *s; s++) {
-		int cp = (unsigned char)*s;
-		if (cp < FONT_FIRST || cp >= FONT_FIRST + FONT_COUNT)
-			cp = '?';
+	const char *p = s;
+	unsigned cp;
+	while ((cp = utf8_next(&p))) {
+		int slot = face_slot(f, cp);
+		if (slot < 0)
+			slot = face_slot(f, '?');
+		if (slot < 0)
+			continue;
 		stbtt_aligned_quad q;
 		stbtt_GetPackedQuad(f->packed, ATLAS_DIM, ATLAS_DIM,
-		    cp - FONT_FIRST, &px, &py, &q, 1);
+		    slot, &px, &py, &q, 1);
 		quad(f->atlas, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0,
 		    q.s0, q.t0, q.s1, q.t1, rgba);
 	}
@@ -524,13 +663,17 @@ bd_draw_text_width_styled(const char *s, int style)
 	if (!f->have || !s)
 		return 0.0f;
 	float px = 0, py = 0;
-	for (; *s; s++) {
-		int cp = (unsigned char)*s;
-		if (cp < FONT_FIRST || cp >= FONT_FIRST + FONT_COUNT)
-			cp = '?';
+	const char *p = s;
+	unsigned cp;
+	while ((cp = utf8_next(&p))) {
+		int slot = face_slot(f, cp);
+		if (slot < 0)
+			slot = face_slot(f, '?');
+		if (slot < 0)
+			continue;
 		stbtt_aligned_quad q;
 		stbtt_GetPackedQuad(f->packed, ATLAS_DIM, ATLAS_DIM,
-		    cp - FONT_FIRST, &px, &py, &q, 1);
+		    slot, &px, &py, &q, 1);
 	}
 	return px;
 }
