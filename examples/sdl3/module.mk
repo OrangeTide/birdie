@@ -16,13 +16,14 @@ sdl3_example_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 # linking. bd_backend_sdl3.c is the SDL3 backend, kept beside the ludica one.
 sdl3_example_TOOLKIT := \
     ../../src/birdie-gui/widget.c ../../src/birdie-gui/bd_draw.c \
-    ../../src/birdie-gui/bd_asset.c \
+    ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_utf8.c \
     ../../src/birdie-gui/bd_backend_sdl3.c ../../src/birdie-gui/bd_backend_gles_core.c \
     ../../src/birdie-gui/bd_widget_vt.c ../../src/birdie-gui/bd_widget_value.c \
     ../../src/birdie-gui/bd_widget_explorer.c ../../src/birdie-gui/bd_widget_editor.c \
     ../../src/birdie-gui/bd_widget_canvas.c ../../src/birdie-gui/bd_widget_table.c \
     ../../src/birdie-gui/bd_widget_inventory.c ../../src/birdie-gui/bd_widget_dock.c \
-    ../../src/birdie-gui/bd_widget_actionbar.c ../../src/birdie-gui/bd_widget_tabview.c
+    ../../src/birdie-gui/bd_widget_actionbar.c ../../src/birdie-gui/bd_widget_tabview.c \
+    ../../src/birdie-gui/bd_widget_indicator.c
 
 sdl3_example_SRCS  = sdl3_example.c $(sdl3_example_TOOLKIT)
 sdl3_example_LIBS  = bd_vt

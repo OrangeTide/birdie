@@ -31,6 +31,7 @@ birdie_gui_SRCS = \
 	src/widget.c \
 	src/bd_draw.c \
 	src/bd_asset.c \
+	src/bd_utf8.c \
 	src/bd_widget_value.c \
 	src/bd_widget_explorer.c \
 	src/bd_widget_editor.c \

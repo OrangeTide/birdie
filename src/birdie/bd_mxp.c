@@ -5,6 +5,7 @@
  */
 
 #include "bd_mxp.h"
+#include "bd_utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -170,19 +171,12 @@ finish_entity(bd_mxp *m)
 			v = strtol(e + 2, &end, 16);
 		else
 			v = strtol(e + 1, &end, 10);
-		if (*end == '\0' && v > 0 && v < 0x110000) {
-			/* emit as UTF-8 */
-			if (v < 0x80) {
-				out_putc(m, (char)v);
-			} else if (v < 0x800) {
-				out_putc(m, (char)(0xc0 | (v >> 6)));
-				out_putc(m, (char)(0x80 | (v & 0x3f)));
-			} else {
-				out_putc(m, (char)(0xe0 | (v >> 12)));
-				out_putc(m, (char)(0x80 | ((v >> 6) & 0x3f)));
-				out_putc(m, (char)(0x80 | (v & 0x3f)));
-			}
-		} else {                        /* malformed: verbatim */
+		unsigned char u[BD_UTF8_MAX];
+		int ul;
+		if (*end == '\0' && v > 0 && v <= BD_UTF8_RUNE_MAX &&
+		    (ul = bd_utf8_encode(u, (uint32_t)v)) > 0) {
+			out_put(m, u, (size_t)ul);   /* handles all planes */
+		} else {                        /* malformed/invalid: verbatim */
 			out_putc(m, '&');
 			out_put(m, m->tok, m->toklen);
 			out_putc(m, ';');

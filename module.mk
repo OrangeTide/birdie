@@ -76,7 +76,7 @@ DIST_STB    := src/thirdparty/stb
 
 # public API headers
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
-                bd_asset.h bd_backend_gles_core.h \
+                bd_asset.h bd_utf8.h bd_backend_gles_core.h \
                 bd_widget_vt.h bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_canvas.h bd_widget_table.h \
                 bd_widget_inventory.h bd_widget_dock.h bd_widget_actionbar.h \
@@ -84,7 +84,7 @@ DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
 # toolkit implementation + reference ludica and SDL3 backends. The shared GLES
 # GPU core (bd_backend_gles_core.c) backs both the SDL3 and X11/EGL/GLES
 # backends; its header ships in include/ so either resolves it with -Iinclude.
-DIST_SOURCES := widget.c bd_draw.c bd_fallback_font.h bd_asset.c bd_widget_vt.c bd_widget_value.c \
+DIST_SOURCES := widget.c bd_draw.c bd_fallback_font.h bd_asset.c bd_utf8.c bd_widget_vt.c bd_widget_value.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_canvas.c \
                 bd_widget_table.c bd_widget_inventory.c bd_widget_dock.c \
                 bd_widget_actionbar.c bd_widget_tabview.c \

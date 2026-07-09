@@ -28,8 +28,8 @@ embed_ASSETS := $(embed_example_DIR)../../src/birdie-gui/assets
 # monospace family). The GLES backend + X11 window come from src/guitest.
 embed_example_TOOLKIT := \
     ../../src/birdie-gui/widget.c ../../src/birdie-gui/bd_draw.c \
-    ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_widget_vt.c \
-    ../../src/birdie-gui/bd_widget_editor.c
+    ../../src/birdie-gui/bd_asset.c ../../src/birdie-gui/bd_utf8.c \
+    ../../src/birdie-gui/bd_widget_vt.c ../../src/birdie-gui/bd_widget_editor.c
 embed_example_BACKEND := \
     ../../src/guitest/bd_backend_gles.c ../../src/birdie-gui/bd_backend_gles_core.c \
     ../../src/guitest/x11_window.c

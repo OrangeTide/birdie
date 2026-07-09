@@ -22,6 +22,7 @@
 #include "bd_widget_tabview.h"
 #include "bd_widget_indicator.h"
 #include "bd_asset.h"
+#include "bd_utf8.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -2001,6 +2002,49 @@ main(void)
 	    sizeof buf);
 	check("resolve: no hook returns the fallback",
 	    strcmp(r, "fallback/path") == 0);
+	}
+
+	/* ---- bd_utf8 codec ---- */
+	{
+	unsigned char u[BD_UTF8_MAX];
+	uint32_t cp;
+	/* astral codepoint (U+1F600) encodes to a real 4-byte sequence -- the
+	 * bug the old hand-rolled MXP encoder had (it topped out at 3 bytes) */
+	check("utf8: astral codepoint encodes to 4 bytes",
+	    bd_utf8_encode(u, 0x1F600) == 4 &&
+	    u[0] == 0xF0 && u[1] == 0x9F && u[2] == 0x98 && u[3] == 0x80);
+	check("utf8: 4-byte sequence round-trips",
+	    bd_utf8_decode(&cp, u, 4) == 4 && cp == 0x1F600);
+	/* surrogates and out-of-range are rejected by the encoder */
+	check("utf8: surrogate rejected", bd_utf8_encode(u, 0xD800) == 0);
+	check("utf8: out-of-range rejected", bd_utf8_encode(u, 0x110000) == 0);
+	/* length bound: a truncated trailing lead byte decodes as an error and
+	 * advances by one, never reading past the given length */
+	check("utf8: truncated sequence stays in bounds",
+	    bd_utf8_decode(&cp, (const unsigned char *)"\xF0", 1) == 1 &&
+	    cp == BD_UTF8_RUNE_ERROR);
+	/* trunc keeps whole codepoints: "a" + e-acute (2 bytes) in 3 bytes of
+	 * room (2 usable before the NUL) must drop the accent, not split it */
+	check("utf8: trunc never splits a multibyte sequence",
+	    bd_utf8_trunc("a\xC3\xA9", 3) == 1);
+	}
+
+	/* ---- tile label fit tolerates malformed UTF-8 (no over-read) ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_draw_begin(800, 500);
+	/* a long label containing a malformed 4-byte lead byte, forced through the
+	 * ellipsis-truncation branch by a narrow cell so tile_fit_label's copy loop
+	 * runs. The loop now advances via the length-bounded bd_utf8_decode, so a
+	 * malformed sequence copies only the bytes that exist; under ASAN this
+	 * confirms the loop reads nothing past the buffer. (The exact end-of-string
+	 * boundary is covered by the bd_utf8 bounded-decode checks above.) */
+	bd_draw_tile(0, 0, /*cell_w*/40, /*pad*/2, /*icon*/24, (bd_texture){0},
+	    "Ro\xF0om is a very long name here", /*count*/0, /*enabled*/1,
+	    0xFF, 0xFF, 0xFFFFFFFFu);
+	bd_draw_flush();
+	check("tile: malformed-UTF-8 label lays out without over-read", 1);
+	bd_gui_cleanup();
 	}
 
 	printf("\n%d checks, %d failed\n", checks, fails);

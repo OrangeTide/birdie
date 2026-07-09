@@ -1,5 +1,6 @@
 #include "bd_draw.h"
 #include "bd_asset.h"
+#include "bd_utf8.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -312,33 +313,6 @@ face_for(int style)
 	return &faces[i];
 }
 
-/* Decode one UTF-8 scalar from *ps, advancing it. Returns 0 at the terminator
- * and U+FFFD on a malformed sequence (advancing past the offending byte). */
-static unsigned
-utf8_next(const char **ps)
-{
-	const unsigned char *s = (const unsigned char *)*ps;
-	unsigned c = s[0], cp;
-	int n;
-
-	if (c == 0)              return 0;
-	if (c < 0x80)          { *ps = (const char *)(s + 1); return c; }
-	else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; n = 1; }
-	else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; n = 2; }
-	else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; n = 3; }
-	else                   { *ps = (const char *)(s + 1); return 0xFFFD; }
-
-	for (int i = 1; i <= n; i++) {
-		if ((s[i] & 0xC0) != 0x80) {   /* truncated / invalid continuation */
-			*ps = (const char *)(s + i);
-			return 0xFFFD;
-		}
-		cp = (cp << 6) | (s[i] & 0x3F);
-	}
-	*ps = (const char *)(s + n + 1);
-	return cp;
-}
-
 /* Packed-glyph slot for a codepoint in this face, or -1 if it has no glyph. A
  * NULL cmap means the slots are contiguous from FONT_FIRST (the TTF bake); a
  * non-NULL cmap is a sorted codepoint table searched by bisection. */
@@ -585,28 +559,31 @@ tile_fit_label(const char *s, float maxw, char *buf, int bufsz)
 	if (!s || !s[0] || bufsz < 8)
 		return;
 	if (bd_draw_text_width(s) <= maxw) {
-		int n = (int)strlen(s);
-		if (n >= bufsz) n = bufsz - 1;
-		memcpy(buf, s, (size_t)n);
+		/* bd_utf8_trunc keeps whole codepoints and never splits a
+		 * multibyte sequence, so a truncated tail can't over-read */
+		size_t n = bd_utf8_trunc(s, (size_t)bufsz);
+		memcpy(buf, s, n);
 		buf[n] = '\0';
 		return;
 	}
 	static const char ell[] = "...";
 	float ew = bd_draw_text_width(ell);
-	int len = 0;
-	for (int i = 0; s[i]; ) {
-		unsigned char c = (unsigned char)s[i];
-		int cl = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-		if (len + cl >= bufsz - (int)sizeof ell)
+	size_t len = 0, slen = strlen(s);
+	while (len < slen) {
+		uint32_t cp;
+		int adv = bd_utf8_decode(&cp, (const unsigned char *)s + len,
+		    slen - len);
+		if (adv <= 0)
+			adv = 1;
+		if (len + (size_t)adv >= (size_t)bufsz - sizeof ell)
 			break;
-		memcpy(buf + len, s + i, (size_t)cl);
-		buf[len + cl] = '\0';
+		memcpy(buf + len, s + len, (size_t)adv);
+		buf[len + adv] = '\0';
 		if (bd_draw_text_width(buf) + ew > maxw) {
 			buf[len] = '\0';
 			break;
 		}
-		len += cl;
-		i += cl;
+		len += (size_t)adv;
 	}
 	memcpy(buf + len, ell, sizeof ell);
 }
@@ -655,9 +632,12 @@ bd_draw_text_styled(const char *s, float x, float y, uint32_t rgba, int style)
 	if (!f->have || !s)
 		return;
 	float px = x, py = y + f->ascent;
-	const char *p = s;
-	unsigned cp;
-	while ((cp = utf8_next(&p))) {
+	const unsigned char *p = (const unsigned char *)s;
+	size_t n = strlen(s), i = 0;
+	while (i < n) {
+		uint32_t cp;
+		int adv = bd_utf8_decode(&cp, p + i, n - i);
+		i += adv > 0 ? (size_t)adv : 1;
 		int slot = face_slot(f, cp);
 		if (slot < 0)
 			slot = face_slot(f, '?');
@@ -678,9 +658,12 @@ bd_draw_text_width_styled(const char *s, int style)
 	if (!f->have || !s)
 		return 0.0f;
 	float px = 0, py = 0;
-	const char *p = s;
-	unsigned cp;
-	while ((cp = utf8_next(&p))) {
+	const unsigned char *p = (const unsigned char *)s;
+	size_t n = strlen(s), i = 0;
+	while (i < n) {
+		uint32_t cp;
+		int adv = bd_utf8_decode(&cp, p + i, n - i);
+		i += adv > 0 ? (size_t)adv : 1;
 		int slot = face_slot(f, cp);
 		if (slot < 0)
 			slot = face_slot(f, '?');
