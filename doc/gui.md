@@ -327,11 +327,10 @@ the loop currently redraws each frame.
 
 ### Custom and embedded assets (`bd_asset`)
 
-The toolkit requests each runtime asset (the chrome font faces, the pushpin
-PNGs) by a **generic identifier**, not a filename: `BD_ASSET_FONT_REGULAR`, the
-seven other `BD_ASSET_FONT_*` faces, `BD_ASSET_PUSHPIN_OUT`/`_IN` (in
-**`bd_asset.h`**). The terminal needs no asset; it draws from a bitmap font
-compiled into the toolkit.
+The toolkit requests each runtime asset (the chrome font faces) by a **generic
+identifier**, not a filename: `BD_ASSET_FONT_REGULAR` and the seven other
+`BD_ASSET_FONT_*` faces (in **`bd_asset.h`**). The terminal font and the
+pushpins need no asset; they are 1-bit bitmaps compiled into the toolkit.
 Register a source under an id to override its built-in default. A source is
 **either a file path or in-memory data**, so one mechanism covers both "use a
 different font" and "ship a self-contained binary":
@@ -352,19 +351,17 @@ path strings are **borrowed** and must outlive use (a `.rodata` blob fits).
 
 Resolution lives in the toolkit, not the backends: `bd_draw.c` resolves each of
 the eight faces (explicit `bd_font_set` face, else registry id, else default
-file), and `bd_asset_texture` resolves the pushpins and atlas -- decoding
-registered data through the backend's optional `load_texture_mem` hook, or
-loading a file via `load_texture`. Fonts can still be supplied wholesale as a
+file). Fonts can still be supplied wholesale as a
 `bd_font_set` (`bd_gui_init_fonts`); the registry is the lighter route and the
 only one for the texture assets. `bd_draw_set_font_reader` remains as a
 lower-level per-path hook for a host with its own resolver.
 
 **Keeping build paths out of the binary.** The registry keys are the fixed
 `BD_ASSET_*` id strings (short, generic) and expose nothing. The only file
-names baked in are the built-in assets' short **relative sub-paths**
-(`fonts/DejaVuSans.ttf`, `pushpin/…`) — no absolute paths, nothing
-machine-specific, identical in every build. The build copies those assets into
-`$(BINDIR)` next to the executable, where `resolve_asset` finds them; keep any
+names baked in are the built-in fonts' short **relative sub-paths**
+(`fonts/DejaVuSans.ttf`) — no absolute paths, nothing machine-specific,
+identical in every build. The build copies the fonts into `$(BINDIR)` next to
+the executable, where `resolve_asset` finds them; keep any
 `.incbin` source path (a build-time detail) machine-independent and it never
 reaches the binary either. The `examples/embed/` example registers every asset
 by id so a self-contained binary reads no files at all.
@@ -374,7 +371,7 @@ bytes/file"; the remaining case is an *installed* app whose assets sit next to
 the executable rather than in the current working directory. For that the
 toolkit asks the backend's optional `resolve_asset(rel, buf, bufsz)` hook to
 locate a runtime asset by its **asset-root-relative** sub-path (e.g.
-`"fonts/DejaVuSans.ttf"`, `"pushpin/pushpin-out-14.png"`).
+`"fonts/DejaVuSans.ttf"`).
 The backend searches the locations that fit its platform, writes the located
 absolute path into the caller-owned `buf`, and returns it; it returns `NULL`
 when the asset is not found there, and the toolkit then uses the built-in
@@ -403,8 +400,9 @@ Why: batch operations on similar GUI actions are the killer use case
 Implemented: a pinned menu is a menu whose lifetime is decoupled from the
 SELECT release that opened it. The widget carries `BD_MENU_PIN_B` (a `BD_B`
 boolean attribute) the user can read or set programmatically. The pin glyph is
-a textured sprite (`pushpin-out`/`pushpin-in` PNGs; replacing these with
-scalable vector art is a todo). No new widget type.
+a 1-bit bitmap compiled into the toolkit (from `pushpin_*.xbm`), drawn tinted
+and sized to the chrome font like a text glyph via `bd_draw_pushpin`. No new
+widget type.
 
 Attribute suffix `_B` — `int` used as boolean; added to the suffix list
 above for completeness.
@@ -460,7 +458,7 @@ raw OpenGL ES 3 backend plus a standalone widget gallery:
 - `src/guitest/widget_test.c` — the gallery: menus (incl. a pinnable one),
   terminal, input line, every value widget, sliders, buttons, with an event
   readout. Built by `make widget-test` (Linux/X11, opt-in); the build stages
-  the fonts/pushpin assets next to the binary, so it runs from any directory.
+  the fonts next to the binary, so it runs from any directory.
 
 Owning this backend means birdie-gui has a non-ludica reference
 implementation. The plan is to **bundle both the GLES backend and the

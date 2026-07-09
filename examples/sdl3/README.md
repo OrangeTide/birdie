@@ -59,7 +59,7 @@ toolkit does not consume (over the 3D background) rotate the tetrahedron.
 
 The examples are a **separate modular-make project** (this directory has its own
 copy of `GNUmakefile`), so the main birdie build never depends on SDL3. The build
-stages the toolkit's fonts and pushpin sprites next to the example binaries (the
+stages the toolkit's fonts next to the example binaries (the
 SDL3 backend locates them there via `SDL_GetBasePath`), so it runs from any
 directory:
 

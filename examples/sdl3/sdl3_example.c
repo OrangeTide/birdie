@@ -33,7 +33,7 @@
  *   cd examples && make
  *   examples/_out/<triplet>/bin/sdl3_example
  *
- * The examples build stages the fonts/pushpin assets next to the binary (the
+ * The examples build stages the fonts next to the binary (the
  * SDL3 backend finds them via SDL_GetBasePath), so it runs from any directory.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)

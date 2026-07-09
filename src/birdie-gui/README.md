@@ -466,10 +466,11 @@ cc -I. -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o assets/gallery
 ```
 
-The toolkit finds its fonts and pushpin sprites by their relative sub-path
-(`fonts/…`, `pushpin/…`), located next to the executable or in the current
-directory. The bundle keeps them under `assets/`, so build the binary into
-`assets/` (as above) and run it from there: `cd assets && ./gallery`.
+The toolkit finds its fonts by their relative sub-path (`fonts/…`), located
+next to the executable or in the current directory. The bundle keeps them under
+`assets/`, so build the binary into `assets/` (as above) and run it from there:
+`cd assets && ./gallery`. (The pushpins are 1-bit glyphs compiled into the
+toolkit, no file needed.)
 
 ## Dependencies
 
@@ -487,9 +488,9 @@ directory. The bundle keeps them under `assets/`, so build the binary into
   selects a face; a missing variant TTF falls back to regular. The editor uses
   the mono family by default (`bd_editor_set_monospace`).
 
-The assets the toolkit loads on disk (the chrome TTFs and the pushpin sprites)
-are named only by their asset-root-relative sub-path (`fonts/…`, `pushpin/…`;
-the terminal needs none — its bitmap font is compiled in). The backend's
+The assets the toolkit loads on disk (the chrome TTFs) are named only by their
+asset-root-relative sub-path (`fonts/…`; the terminal font and the pushpins
+need none — they are 1-bit bitmaps compiled into the toolkit). The backend's
 `resolve_asset` hook locates them next to the executable (an installed layout),
 and otherwise they are read relative to the current directory. Stage the
 `assets/` tree next to your binary, or compile the fonts into it and register
@@ -546,15 +547,15 @@ layer. `bd_draw_init(be, path, px)` remains and is unchanged: it bakes `path`
 as the regular face and resolves the seven variants by id / built-in
 relative name.
 
-## Embedding assets (fonts and images), and custom fonts
+## Embedding fonts, and custom fonts
 
-The toolkit requests each runtime asset by a **generic identifier**, not a
-filename: `BD_ASSET_FONT_REGULAR`, the seven other `BD_ASSET_FONT_*` faces, and
-`BD_ASSET_PUSHPIN_OUT` / `_IN` (all in
+The toolkit requests each font by a **generic identifier**, not a filename:
+`BD_ASSET_FONT_REGULAR` and the seven other `BD_ASSET_FONT_*` faces (all in
 `bd_asset.h`). Register a source under an id and the toolkit uses it instead of
 the built-in default. A source is **either a file path or in-memory data**, so
 the same mechanism covers "use a different font on disk" and "ship a
-self-contained binary".
+self-contained binary". (The pushpins and terminal font are 1-bit bitmaps
+compiled into the toolkit, so they are never loaded or embedded.)
 
 Point an id at a file (no recompiling, no embedding) -- e.g. a user-chosen font:
 
@@ -565,24 +566,21 @@ bd_asset_register_file(BD_ASSET_FONT_BOLD,    "/home/me/.fonts/Inter-Bold.otf");
 bd_gui_init(backend, theme);   /* the rest fall back to the built-in faces */
 ```
 
-Or embed blobs for a **single self-contained binary** -- fonts *and* the PNG
-sprites (the pushpins), all through one registry (the terminal needs no asset;
-its bitmap font is compiled into the toolkit):
+Or embed the font blobs for a **single self-contained binary**, all through one
+registry:
 
 ```c
 extern const unsigned char font_ui[];    extern const unsigned char font_ui_end[];
-extern const unsigned char pin_out[];    extern const unsigned char pin_out_end[];
 
 /* register BEFORE bd_gui_init*; keyed by identity, not by any filename */
 bd_asset_register_data(BD_ASSET_FONT_REGULAR,  font_ui,    font_ui_end    - font_ui);
-bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   pin_out,    pin_out_end    - pin_out);
 
 bd_gui_init(backend, theme);
 ```
 
 There is no need to name your font "DejaVuSans.ttf" or override any build macro;
 you register it as *the regular UI font*. Anything left unregistered falls back
-to the default file, so partial embedding is fine (embed the fonts, load PNGs
+to the default file, so partial embedding is fine (embed the fonts, load others
 from disk, or vice versa). Registered data and path strings are **borrowed**:
 they must outlive every use, which a `.rodata` blob satisfies. (For fonts you can
 still pass a whole `bd_font_set` to `bd_gui_init_fonts` instead; the registry is
@@ -605,8 +603,8 @@ font_ui_end:
 
 There is nothing to configure here. The registry keys are the fixed `BD_ASSET_*`
 id strings (short, generic), and the only file names baked in are the built-in
-assets' short relative sub-paths (`fonts/DejaVuSans.ttf`, `pushpin/…`) -- no
-absolute paths, no build-machine layout, identical in every build. The backend's
+fonts' short relative sub-paths (`fonts/DejaVuSans.ttf`) -- no absolute paths,
+no build-machine layout, identical in every build. The backend's
 `resolve_asset` hook locates those next to the executable at runtime; keep an
 `.incbin` source path (a build-time detail) machine-independent and it never
 reaches the binary either. The bundled `examples/embed/` demonstrates registering

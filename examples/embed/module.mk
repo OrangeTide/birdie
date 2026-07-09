@@ -1,9 +1,10 @@
 #
 # examples/embed/module.mk -- the birdie-gui embedded-assets example.
 #
-# Builds a self-contained binary: the chrome font, pushpin sprites, and terminal
-# atlas are baked into the executable with .incbin (embed_assets.S) and served
-# through the bd_asset registry, so the program reads no asset files at runtime.
+# Builds a self-contained binary: the chrome font and the monospace family are
+# baked into the executable with .incbin (embed_assets.S) and served through the
+# bd_asset registry, so the program reads no asset files at runtime. (Pushpins
+# and the terminal font are 1-bit bitmaps compiled into the toolkit itself.)
 # It runs on the raw X11/EGL/GLES backend (src/guitest), the same one the widget
 # gallery uses, so it needs no SDL3 or ludica -- only X11 + EGL + GLESv2.
 #
@@ -61,8 +62,6 @@ embed_example_CPPFLAGS = \
     -I$(embed_example_DIR)../../src/guitest \
     -I$(embed_example_DIR)../../src/birdie-gui/thirdparty/stb \
     -DEMBED_FONT_UI='"$(embed_ASSETS)/fonts/DejaVuSans.ttf"' \
-    -DEMBED_PIN_OUT='"$(embed_ASSETS)/pushpin/pushpin-out-14.png"' \
-    -DEMBED_PIN_IN='"$(embed_ASSETS)/pushpin/pushpin-in-14.png"' \
     -DEMBED_FONT_MONO='"$(embed_ASSETS)/fonts/DejaVuSansMono.ttf"' \
     -DEMBED_FONT_MONO_BOLD='"$(embed_ASSETS)/fonts/DejaVuSansMono-Bold.ttf"' \
     -DEMBED_FONT_MONO_ITALIC='"$(embed_ASSETS)/fonts/DejaVuSansMono-Oblique.ttf"'

@@ -9,6 +9,7 @@
 #include "stb_truetype.h"
 
 #include "bd_embed_font.h"   /* embedded 8x8 + 8x16 bitmap faces + codepoint maps */
+#include "bd_embed_pushpin.h" /* embedded 1-bit pushpin glyphs (10px + 14px tiers) */
 
 /*
  * Toolkit renderer on the backend GPU interface. One shader (textured *
@@ -88,6 +89,13 @@ static float        font_line_h;
  * cell_h it currently holds, 0 = not yet baked. */
 static struct face embed_face;
 static int         embed_baked_h;
+
+/* Embedded pushpin glyphs, baked once into a small private texture (pin_tex,
+ * id 0 = not baked). pin_rect[tier][state] is the glyph's pixel rectangle in
+ * that texture. See bd_embed_pushpin.h for the tiers/states. */
+static bd_texture pin_tex;
+static int        pin_atlas_w, pin_atlas_h;
+static struct { int x, y, w, h; } pin_rect[2][2];
 
 /* Per-face parallel arrays, indexed by BD_FONT_BOLD|ITALIC|MONO. Each face is
  * resolved as: an explicit bd_font_face from the caller, else a source
@@ -488,6 +496,10 @@ bd_draw_shutdown(void)
 		embed_face.have = 0;
 		embed_baked_h = 0;
 	}
+	if (pin_tex.id) {
+		be->destroy_texture(pin_tex);
+		pin_tex.id = 0;
+	}
 	be->destroy_texture(white);
 	be->destroy_shader(shader);
 	be = NULL;
@@ -735,6 +747,85 @@ bd_draw_cell(uint32_t cp, float x, float y, int cell_h, uint32_t rgba)
 	    pc->x0 / (float)ATLAS_DIM, pc->y0 / (float)ATLAS_DIM,
 	    pc->x1 / (float)ATLAS_DIM, pc->y1 / (float)ATLAS_DIM, rgba);
 }
+
+/* Bake the four embedded pushpin glyphs into one small private texture, laid
+ * out as a 2x2 grid ("14" tier on top, "10" below; out then in). Each glyph is
+ * a white coverage mask -- opaque where the XBM bit is CLEAR (ink = 0) -- so a
+ * draw tints it with the pen color, exactly like the bitmap font. */
+static void
+ensure_pins(void)
+{
+	if (pin_tex.id || !be)
+		return;
+	/* Two columns (out | in) and two rows (14px tier on top, 10px below), each
+	 * sized to the widest/tallest glyph plus a 1-2px gap. */
+	int colw = bd_pushpins[1][BD_PIN_OUT].w + 2;      /* widest out + gap */
+	int rowh = bd_pushpins[1][BD_PIN_IN].h + 1;       /* tallest 14-tier + gap */
+	static const int col[2] = { BD_PIN_OUT, BD_PIN_IN };
+	for (int t = 0; t < 2; t++)
+		for (int c = 0; c < 2; c++) {
+			int s = col[c];
+			pin_rect[t][s].x = c ? colw : 0;
+			pin_rect[t][s].y = t == 1 ? 0 : rowh;   /* tier 1 top row */
+			pin_rect[t][s].w = bd_pushpins[t][s].w;
+			pin_rect[t][s].h = bd_pushpins[t][s].h;
+		}
+	pin_atlas_w = colw + bd_pushpins[1][BD_PIN_IN].w;
+	pin_atlas_h = rowh + bd_pushpins[0][BD_PIN_IN].h;
+
+	unsigned char *rgba = calloc((size_t)pin_atlas_w * pin_atlas_h * 4, 1);
+	if (!rgba)
+		return;
+	for (int t = 0; t < 2; t++)
+		for (int s = 0; s < 2; s++) {
+			const struct bd_pushpin_bitmap *b = &bd_pushpins[t][s];
+			int stride = (b->w + 7) / 8;
+			int rx = pin_rect[t][s].x, ry = pin_rect[t][s].y;
+			for (int yy = 0; yy < b->h; yy++)
+				for (int xx = 0; xx < b->w; xx++) {
+					/* ink = cleared bit */
+					if (b->bits[yy * stride + (xx >> 3)] & (1u << (xx & 7)))
+						continue;
+					unsigned char *p =
+					    &rgba[(((size_t)(ry + yy)) * pin_atlas_w + (rx + xx)) * 4];
+					p[0] = p[1] = p[2] = p[3] = 255;
+				}
+		}
+	pin_tex = be->make_texture(pin_atlas_w, pin_atlas_h, rgba);
+	free(rgba);
+}
+
+/* size tier for a chrome font of font_px: the 8x16-font "14" tier unless the
+ * font is small enough to pair with the 8x8 face (matches embed_geom). */
+static int
+pin_tier(int font_px)
+{
+	return font_px <= 8 ? 0 : 1;
+}
+
+void
+bd_draw_pushpin_size(int pinned, int font_px, int *w, int *h)
+{
+	const struct bd_pushpin_bitmap *b =
+	    &bd_pushpins[pin_tier(font_px)][pinned ? BD_PIN_IN : BD_PIN_OUT];
+	if (w) *w = b->w;
+	if (h) *h = b->h;
+}
+
+void
+bd_draw_pushpin(int pinned, float x, float y, int font_px, uint32_t rgba)
+{
+	ensure_pins();
+	if (!pin_tex.id)
+		return;
+	int t = pin_tier(font_px), s = pinned ? BD_PIN_IN : BD_PIN_OUT;
+	int rx = pin_rect[t][s].x, ry = pin_rect[t][s].y;
+	int w = pin_rect[t][s].w, h = pin_rect[t][s].h;
+	quad(pin_tex, x, y, (float)w, (float)h,
+	    rx / (float)pin_atlas_w, ry / (float)pin_atlas_h,
+	    (rx + w) / (float)pin_atlas_w, (ry + h) / (float)pin_atlas_h, rgba);
+}
+
 float bd_draw_text_width(const char *s)
 { return bd_draw_text_width_styled(s, 0); }
 

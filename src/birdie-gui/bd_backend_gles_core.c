@@ -19,9 +19,11 @@
 #include <stddef.h>
 #include <stdio.h>
 
-/* stb_image decodes the toolkit's PNG assets (the pushpin sprites). It is
- * bundled with birdie-gui; this core owns the single implementation so any
- * GLES backend built against it resolves stbi_load without its own copy. */
+/* stb_image decodes PNGs for the backend's load_texture / load_texture_mem
+ * (app-supplied textures; the toolkit's own fonts and pushpins are baked from
+ * embedded bitmaps, not PNGs). It is bundled with birdie-gui; this core owns the
+ * single implementation so any GLES backend built against it resolves stbi_load
+ * without its own copy. */
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #include "stb_image.h"

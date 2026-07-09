@@ -242,8 +242,8 @@ typedef struct bd_backend {
 
 	/* ---- asset path resolution (optional; NULL = current-directory paths) ----
 	 * Locate a runtime asset given `rel`, its path relative to the app's asset
-	 * root (forward-slash separated, e.g. "fonts/DejaVuSans.ttf" or
-	 * "pushpin/pushpin-out-14.png"). The backend searches the locations that fit
+	 * root (forward-slash separated, e.g. "fonts/DejaVuSans.ttf"). The backend
+	 * searches the locations that fit
 	 * its platform -- the executable's directory, a per-user data dir, the macOS
 	 * .app bundle, a virtual FS -- and, on a hit, writes the absolute path into
 	 * the caller's `buf` (of `bufsz` bytes) and returns `buf`; it returns NULL if

@@ -69,26 +69,22 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 # ----------------------------------------------------------------------
 # Runtime assets staged next to the built executables.
 #
-# The toolkit names its built-in fonts and pushpin sprites only by their
-# asset-root-relative sub-path (e.g. "fonts/DejaVuSans.ttf"); the backend's
-# resolve_asset hook looks for them beside the executable. Copy the assets into
-# $(BINDIR) so a plain `make` run finds them there and the binary runs from any
-# working directory, no compile-time dev-path defaults needed.
+# The toolkit names its built-in fonts only by their asset-root-relative
+# sub-path (e.g. "fonts/DejaVuSans.ttf"); the backend's resolve_asset hook looks
+# for them beside the executable. Copy the fonts into $(BINDIR) so a plain
+# `make` run finds them there and the binary runs from any working directory.
+# (The pushpins are 1-bit glyphs compiled into the toolkit, no asset file.)
 # ----------------------------------------------------------------------
 BD_ASSET_DIR := src/birdie-gui/assets
 BD_FONT_OUT  := $(patsubst $(BD_ASSET_DIR)/fonts/%,$(BINDIR)/fonts/%,\
                   $(wildcard $(BD_ASSET_DIR)/fonts/*.ttf))
-BD_PIN_OUT   := $(patsubst $(BD_ASSET_DIR)/pushpin/%,$(BINDIR)/pushpin/%,\
-                  $(wildcard $(BD_ASSET_DIR)/pushpin/*.png))
 
 $(BINDIR)/fonts/% : $(BD_ASSET_DIR)/fonts/% | $(BINDIR)/fonts
 	cp $< $@
-$(BINDIR)/pushpin/% : $(BD_ASSET_DIR)/pushpin/% | $(BINDIR)/pushpin
-	cp $< $@
-$(BINDIR)/fonts $(BINDIR)/pushpin :
+$(BINDIR)/fonts :
 	mkdir -p $@
 
-all :: $(BD_FONT_OUT) $(BD_PIN_OUT)
+all :: $(BD_FONT_OUT)
 
 # ----------------------------------------------------------------------
 # Convenience aliases for the modular-make targets declared in the
@@ -101,7 +97,7 @@ all :: $(BD_FONT_OUT) $(BD_PIN_OUT)
 test : run-test-test_gui
 
 .PHONY : widget-test
-widget-test : $(BD_FONT_OUT) $(BD_PIN_OUT)
+widget-test : $(BD_FONT_OUT)
 	@$(MAKE) WIDGET_TEST=1 birdie-gui-gallery
 	@echo "built widget gallery: $(BINDIR)/birdie-gui-gallery"
 	@echo "run it from anywhere: $(BINDIR)/birdie-gui-gallery"
@@ -145,6 +141,9 @@ DIST_SOURCES := widget.c bd_draw.c bd_embed_font.h bd_asset.c bd_utf8.c bd_widge
                 bd_widget_table.c bd_widget_inventory.c bd_widget_dock.c \
                 bd_widget_actionbar.c bd_widget_tabview.c \
                 bd_widget_indicator.c \
+                bd_embed_pushpin.h \
+                pushpin_out_10.xbm pushpin_in_10.xbm \
+                pushpin_out_14.xbm pushpin_in_14.xbm \
                 bd_backend_gles_core.c \
                 bd_backend_ludica.c bd_backend_ludica.h \
                 bd_backend_sdl3.c bd_backend_sdl3.h
@@ -160,8 +159,7 @@ DIST_VT     := src/birdie-gui/bd_vt
 dist :
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
 	@mkdir -p $(DIST_STAGE)/backend-gles $(DIST_STAGE)/bd_vt \
-	    $(DIST_STAGE)/thirdparty/stb \
-	    $(DIST_STAGE)/assets/fonts $(DIST_STAGE)/assets/pushpin
+	    $(DIST_STAGE)/thirdparty/stb $(DIST_STAGE)/assets/fonts
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_HEADERS)) $(DIST_STAGE)/
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_SOURCES)) $(DIST_STAGE)/
 	@cp $(DIST_SRC)/module.mk $(DIST_STAGE)/module.mk
@@ -177,8 +175,6 @@ dist :
 	    $(DIST_SRC)/assets/fonts/DejaVuSansMono-Oblique.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSansMono-BoldOblique.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans.LICENSE.txt $(DIST_STAGE)/assets/fonts/
-	@cp $(DIST_SRC)/assets/pushpin/pushpin-out-14.png \
-	    $(DIST_SRC)/assets/pushpin/pushpin-in-14.png $(DIST_STAGE)/assets/pushpin/
 	@cp $(DIST_SRC)/README.md $(DIST_STAGE)/
 	@cp $(DIST_SRC)/LICENSE.txt $(DIST_STAGE)/
 	@cp scripts/get-birdie-gui.sh $(DIST_STAGE)/
@@ -195,7 +191,7 @@ dist :
 	    '  bd_vt/          terminal sublibrary: VT engine + BD_TERMINAL widget' \
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
-	    '  assets/         chrome TTF (+ license), pushpin sprites' \
+	    '  assets/         chrome TTF (+ license)' \
 	    '  LICENSE.txt     CC0 dedication + bundled third-party licenses' \
 	    '  get-birdie-gui.sh  vendoring updater (fetch a release into your project)' \
 	    '' \

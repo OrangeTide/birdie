@@ -1,14 +1,14 @@
 /*
  * embed_example.c -- a self-contained birdie-gui binary with no asset files.
  *
- * The chrome font, pushpin sprites, and the monospace family
- * the body editor renders (regular, bold, italic) are compiled into the
- * executable (see embed_assets.S) and handed to the toolkit through the registry
- * in bd_asset.h. The toolkit asks for each asset by a generic id
- * (BD_ASSET_FONT_REGULAR, BD_ASSET_FONT_MONO_BOLD, BD_ASSET_PUSHPIN_OUT, ...), so
+ * The chrome font and the monospace family the body editor renders (regular,
+ * bold, italic) are compiled into the executable (see embed_assets.S) and handed
+ * to the toolkit through the registry in bd_asset.h. The toolkit asks for each
+ * asset by a generic id (BD_ASSET_FONT_REGULAR, BD_ASSET_FONT_MONO_BOLD, ...), so
  * a custom font is registered under BD_ASSET_FONT_REGULAR -- not under the stock
  * font's filename. Nothing here impersonates "DejaVuSans.ttf". This is the same
- * trick a distributed game uses to ship one file.
+ * trick a distributed game uses to ship one file. (The pushpins and terminal
+ * font are 1-bit bitmaps compiled into the toolkit, so they need no embedding.)
  *
  * Each id can be fed bytes (bd_asset_register_data, as here) or a file path
  * (bd_asset_register_file) -- e.g. to let a user pick their own font at runtime
@@ -52,8 +52,6 @@
 	extern const unsigned char sym[]; \
 	extern const unsigned char sym##_end[];
 EMB(emb_font_ui)
-EMB(emb_pin_out)
-EMB(emb_pin_in)
 EMB(emb_font_mono)
 EMB(emb_font_mono_bold)
 EMB(emb_font_mono_italic)
@@ -69,8 +67,6 @@ static const struct embed {
 	const unsigned char *end;
 } embeds[] = {
 	{ BD_ASSET_FONT_REGULAR,     emb_font_ui,          emb_font_ui_end          },
-	{ BD_ASSET_PUSHPIN_OUT,      emb_pin_out,          emb_pin_out_end          },
-	{ BD_ASSET_PUSHPIN_IN,       emb_pin_in,           emb_pin_in_end           },
 	{ BD_ASSET_FONT_MONO,        emb_font_mono,        emb_font_mono_end        },
 	{ BD_ASSET_FONT_MONO_BOLD,   emb_font_mono_bold,   emb_font_mono_bold_end   },
 	{ BD_ASSET_FONT_MONO_ITALIC, emb_font_mono_italic, emb_font_mono_italic_end },
@@ -122,9 +118,9 @@ on_quit(bd_id id, void *arg)
 	running = 0;
 }
 
-/* A tiny UI whose every glyph and sprite comes from the embedded blobs: a menu
- * bar (the pinnable menu draws the embedded pushpin), a label (embedded font),
- * and a terminal (drawn from birdie-gui's built-in bitmap font). */
+/* A tiny UI: a menu bar (the pinnable menu draws the toolkit's built-in pushpin
+ * glyph), a label (embedded font), and a terminal (drawn from birdie-gui's
+ * built-in bitmap font). */
 static void
 build_ui(void)
 {
@@ -138,7 +134,7 @@ build_ui(void)
 	bd_id m_file = bd_create(menu, BD_MENU, BD_LABEL_S, "File", BD_END);
 	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Quit",
 		BD_ON_CLICK_F, on_quit, BD_END);
-	/* pinnable menu: opening it pinned draws the embedded pushpin sprite */
+	/* pinnable menu: opening it pinned draws the toolkit's built-in pushpin */
 	bd_id m_view = bd_create(menu, BD_MENU, BD_LABEL_S, "View (pinnable)",
 		BD_END);
 	bd_create(m_view, BD_BUTTON, BD_LABEL_S, "Nothing here", BD_END);
@@ -177,8 +173,8 @@ main(int argc, char **argv)
 	if (argc > 1 && strcmp(argv[1], "--check") == 0)
 		return run_check();
 
-	/* Register BEFORE bd_gui_init: the toolkit bakes fonts and loads the
-	 * pushpin textures during init, and they must resolve to the blobs. */
+	/* Register BEFORE bd_gui_init: the toolkit bakes the fonts during init,
+	 * and they must resolve to the embedded blobs. */
 	register_assets();
 
 	if (win_open("birdie-gui embedded assets", 900, 600) != 0) {

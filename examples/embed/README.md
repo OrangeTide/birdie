@@ -1,18 +1,19 @@
 # birdie-gui with assets embedded in the binary
 
 A small example host that ships as a **single self-contained executable**: the
-chrome font, the pushpin sprites, and the monospace family the body editor
-renders (regular + bold + italic) are all compiled into the binary instead of
-read from disk at runtime. It is the worked reference for `bd_asset.h`, the
-backend-neutral embedded-asset registry. (The terminal needs no asset; its
-bitmap font is compiled into the toolkit itself.)
+chrome font and the monospace family the body editor renders (regular + bold +
+italic) are all compiled into the binary instead of read from disk at runtime.
+It is the worked reference for `bd_asset.h`, the backend-neutral embedded-asset
+registry. (The pushpins and the terminal font need no asset; they are 1-bit
+bitmaps compiled into the toolkit itself.)
 
 It runs on the raw X11/EGL/GLES backend (`src/guitest/`), the same one the
 toolkit gallery uses, so it needs no ludica and no SDL3, only X11 + EGL +
 GLESv2.
 
-The window shows a menu bar (the pinnable menu draws the embedded pushpin), a
-label (embedded font) and a terminal (the toolkit's built-in bitmap font), and a
+The window shows a menu bar (the pinnable menu draws the toolkit's built-in
+pushpin), a label (embedded font) and a terminal (the toolkit's built-in bitmap
+font), and a
 **rich-text editor** whose bold and italic spans pull the embedded `mono-bold`
 and `mono-italic` faces -- so every UI face comes from a baked-in blob or the
 compiled-in terminal font.
@@ -35,7 +36,6 @@ Three pieces:
 
    ```c
    bd_asset_register_data(BD_ASSET_FONT_REGULAR,  emb_font_ui,    emb_font_ui_end    - emb_font_ui);
-   bd_asset_register_data(BD_ASSET_PUSHPIN_OUT,   emb_pin_out,    emb_pin_out_end    - emb_pin_out);
    bd_asset_register_data(BD_ASSET_FONT_MONO,      emb_font_mono,      ...);  /* editor body */
    bd_asset_register_data(BD_ASSET_FONT_MONO_BOLD, emb_font_mono_bold, ...);  /* bold spans   */
    /* ...and BD_ASSET_FONT_MONO_ITALIC */
@@ -47,11 +47,11 @@ Three pieces:
    just one `bd_asset_register_data` per face, each under its own id -- the editor
    here embeds the three mono faces it renders.
 
-3. The toolkit does the rest. It resolves each asset by id: a registered source
+3. The toolkit does the rest. It resolves each font by id: a registered source
    (here, embedded data) wins over the built-in default file. `bd_draw.c`
-   resolves the font faces and `bd_asset_texture` resolves the pushpins and
-   atlas. Nothing is read from disk; anything left unregistered would fall back
-   to a file.
+   resolves the font faces. Nothing is read from disk; anything left unregistered
+   would fall back to a file. (The pushpins and terminal font are compiled into
+   the toolkit, so they are not part of this resolution at all.)
 
 The registered blobs are **borrowed** (a `.rodata` blob satisfies "must outlive
 use"), so there is nothing to free. Register only the faces you draw: the chrome
@@ -70,8 +70,8 @@ the build machine's directory layout and username into every shipped copy.
 
 The registry keys are the fixed `BD_ASSET_*` id strings (short, generic), so
 they leak nothing. The only file names in `strings embed_example` are the
-toolkit's built-in **relative sub-paths** (`fonts/DejaVuSans.ttf`, `pushpin/…`),
-which this build never reads because every asset is registered by id. They are
+toolkit's built-in font **relative sub-paths** (`fonts/DejaVuSans.ttf`),
+which this build never reads because every font is registered by id. They are
 short and machine-independent by construction — nothing to strip. See the
 toolkit README's "Build paths stay out of the binary".
 

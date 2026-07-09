@@ -24,9 +24,10 @@
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
-/* The eight chrome font faces (a proportional family and a fixed-width "mono"
- * family, each Regular/Bold/Italic/BoldItalic), the terminal glyph atlas, and
- * the two pushpin sprites. These names are stable identities, not filenames. */
+/* The eight chrome font faces: a proportional family and a fixed-width "mono"
+ * family, each Regular/Bold/Italic/BoldItalic. These names are stable
+ * identities, not filenames. (The terminal font and the pushpins are 1-bit
+ * bitmaps compiled into the toolkit, not asset-loaded, so they have no id.) */
 #define BD_ASSET_FONT_REGULAR          "font.regular"
 #define BD_ASSET_FONT_BOLD             "font.bold"
 #define BD_ASSET_FONT_ITALIC           "font.italic"
@@ -35,8 +36,6 @@
 #define BD_ASSET_FONT_MONO_BOLD        "font.mono-bold"
 #define BD_ASSET_FONT_MONO_ITALIC      "font.mono-italic"
 #define BD_ASSET_FONT_MONO_BOLD_ITALIC "font.mono-bold-italic"
-#define BD_ASSET_PUSHPIN_OUT           "pushpin.out"
-#define BD_ASSET_PUSHPIN_IN            "pushpin.in"
 
 /* A resolved asset source: exactly one of `path` or `data` is set. */
 typedef struct {
@@ -66,13 +65,5 @@ void bd_asset_clear(void);
  * or lifetime to track. */
 const char *bd_asset_resolve(const bd_backend *be, const char *rel,
     const char *fallback, char *buf, size_t bufsz);
-
-/* Resolve a texture asset and upload it through the backend: registered data
- * (decoded from memory), a registered file, or the built-in when the id is
- * unregistered -- the built-in is the asset-root-relative `rel`, located via
- * the backend's resolve_asset hook (next to the executable) and otherwise used
- * as-is (relative to the cwd). Used by the toolkit for the pushpin sprites. */
-bd_texture bd_asset_texture(const bd_backend *be, const char *id,
-    const char *rel);
 
 #endif /* BD_ASSET_H */

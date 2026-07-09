@@ -132,4 +132,13 @@ float bd_draw_ascent_styled(int style);      /* per-face ascent, px */
 int   bd_draw_cell_w(int cell_h);
 void  bd_draw_cell(uint32_t cp, float x, float y, int cell_h, uint32_t rgba);
 
+/* Embedded pushpin glyph, drawn like a tinted text glyph next to a title. It is
+ * a 1-bit mask baked into the toolkit (no asset file): `pinned` picks the
+ * pushed-in vs lying-out state, `font_px` picks the size tier (the smaller "10"
+ * pin for a small 8x8-font UI, else the "14" pin), and `rgba` tints it.
+ * bd_draw_pushpin_size reports the glyph's pixel size for that state/tier so a
+ * caller can lay it out (either w or h may be NULL). */
+void  bd_draw_pushpin(int pinned, float x, float y, int font_px, uint32_t rgba);
+void  bd_draw_pushpin_size(int pinned, int font_px, int *w, int *h);
+
 #endif

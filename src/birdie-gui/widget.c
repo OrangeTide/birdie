@@ -2,7 +2,6 @@
 #include "widget_ext.h"
 #include "bd_backend.h"
 #include "bd_draw.h"
-#include "bd_asset.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,15 +19,6 @@
 #define TYPE_F      4
 #define TYPE_C      5
 #define TYPE_B      6
-
-/*
- * Pushpin sprites, named by their asset-root-relative sub-path. The backend's
- * resolve_asset hook locates them next to the installed executable; the build
- * copies them into $(BINDIR) so a plain `make` run finds them there. Register a
- * source under BD_ASSET_PUSHPIN_OUT / _IN (bd_asset.h) to override at runtime.
- */
-#define BD_ASSET_PIN_OUT_REL "pushpin/pushpin-out-14.png"
-#define BD_ASSET_PIN_IN_REL  "pushpin/pushpin-in-14.png"
 
 /* fallback intrinsic size for a child with no preferred dimension */
 #define DEFAULT_MIN_W   64
@@ -139,8 +129,6 @@ static bd_id drag_menu = BD_NONE;
 static int drag_off_x, drag_off_y;
 static int mouse_x, mouse_y;
 static const bd_backend *be;    /* renderer/window backend, set by bd_gui_init */
-static bd_texture pin_out_tex;
-static bd_texture pin_in_tex;
 static bd_id focus_id = BD_NONE;
 static int   motion_mode = BD_MOTION_AUTO; /* BD_MOTION_* */
 static int   motion_hint;                  /* external contribution to AUTO */
@@ -342,16 +330,6 @@ queue_text(const char *text, float x, float y, uint32_t color)
 	/* callers pass y as a baseline; bd_draw_text takes the line top */
 	bd_draw_text(text, x, y - bd_draw_ascent(), color);
 	return bd_draw_text_width(text);
-}
-
-static float
-queue_sprite(bd_texture tex, float x, float y,
-    float w, float h, float sw, float sh, uint32_t color)
-{
-	(void)sw;
-	(void)sh;
-	bd_draw_sprite(tex, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
-	return w;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1837,11 +1815,16 @@ deliver_hover_move(bd_id frame, const bd_event *ev)
 #define PIN_ROW_H     ((int)CHROME_FONT_SZ + 6)
 #define MENU_ITEM_H   ((int)CHROME_FONT_SZ + 6)
 #define POPUP_MIN_W   100
-#define PIN_CLICK_W   (PIN_OUT_W + 2 * POPUP_PAD)
-#define PIN_OUT_W     29
-#define PIN_OUT_H     14
-#define PIN_IN_W      15
-#define PIN_IN_H      15
+
+/* Clickable width of the pin row's pushpin, sized to the chrome font. The "out"
+ * (unpinned) glyph is the wider state, so it bounds the hit region. */
+static int
+pin_click_w(void)
+{
+	int w;
+	bd_draw_pushpin_size(0 /* out */, (int)CHROME_FONT_SZ, &w, NULL);
+	return w + 2 * POPUP_PAD;
+}
 
 static void
 menu_open_at(bd_id id)
@@ -1934,22 +1917,20 @@ render_popup(bd_id id)
 	fill_rect(px, py, pw, ph, theme.panel);
 	stroke_rect(px, py, pw, ph, theme.border);
 
-	/* pushpin row — pen advances through inline sprite + text */
+	/* pushpin row — pen advances through inline glyph + text */
 	int pin_hover = in_rect(mouse_x, mouse_y,
 	    px, py, pw, PIN_ROW_H);
 	if (pin_hover)
 		fill_rect(px + 1, py + 1, pw - 2, PIN_ROW_H - 1, theme.hover);
 	{
-		bd_texture pt = w->menu_pinned ? pin_in_tex : pin_out_tex;
-		float ptw = w->menu_pinned ? PIN_IN_W : PIN_OUT_W;
-		float pth = w->menu_pinned ? PIN_IN_H : PIN_OUT_H;
+		int fpx = (int)CHROME_FONT_SZ, ptw, pth;
+		bd_draw_pushpin_size(w->menu_pinned, fpx, &ptw, &pth);
 		float pen_x = (float)(px + POPUP_PAD);
 		float base_y = chrome_baseline_y(py, PIN_ROW_H);
-		float sprite_y = (float)py + ((float)PIN_ROW_H - pth) * 0.5f;
+		float sprite_y = (float)py + ((float)PIN_ROW_H - (float)pth) * 0.5f;
 
-		pen_x += queue_sprite(pt, pen_x, sprite_y,
-		    ptw, pth, ptw, pth, theme.text_hi);
-		pen_x += POPUP_PAD;
+		bd_draw_pushpin(w->menu_pinned, pen_x, sprite_y, fpx, theme.text_hi);
+		pen_x += (float)ptw + POPUP_PAD;
 		queue_text(w->label, pen_x, base_y, theme.text);
 	}
 
@@ -2058,7 +2039,7 @@ handle_menu_event(const bd_event *ev, bd_id frame)
 
 			/* title bar */
 			if (my < m->popup_y + PIN_ROW_H) {
-				if (mx < m->popup_x + PIN_CLICK_W) {
+				if (mx < m->popup_x + pin_click_w()) {
 					if (m->menu_pinned)
 						menu_close(i);
 					else
@@ -2555,10 +2536,8 @@ bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
 	 * bd_asset registry (by id) or the built-in defaults. */
 	if (!bd_draw_init_fonts(be, fonts, theme.font_size))
 		fprintf(stderr, "bd: renderer init failed\n");
-	pin_out_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_OUT,
-	    BD_ASSET_PIN_OUT_REL);
-	pin_in_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_IN,
-	    BD_ASSET_PIN_IN_REL);
+	/* pushpins are embedded 1-bit glyphs baked by bd_draw (bd_draw_pushpin);
+	 * nothing to load here. */
 }
 
 void
@@ -2570,11 +2549,7 @@ bd_gui_init(const bd_backend *backend, const bd_theme *th)
 void
 bd_gui_cleanup(void)
 {
-	bd_draw_shutdown();
-	if (pin_out_tex.id != 0)
-		be->destroy_texture(pin_out_tex);
-	if (pin_in_tex.id != 0)
-		be->destroy_texture(pin_in_tex);
+	bd_draw_shutdown();   /* frees the embedded pushpin texture too */
 	for (int i = 1; i < pool_next; i++) {
 		if (!pool[i].alive)
 			continue;

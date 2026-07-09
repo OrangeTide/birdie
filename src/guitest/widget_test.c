@@ -7,7 +7,7 @@
  * stay exercised. It also doubles as the place to grow interactive widget
  * tests as new widgets land.
  *
- * The build stages the fonts/pushpin assets next to the binary, so it runs
+ * The build stages the fonts next to the binary, so it runs
  * from any directory.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)

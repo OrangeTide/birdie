@@ -2031,6 +2031,28 @@ main(void)
 	bd_gui_cleanup();
 	}
 
+	/* ---- embedded pushpin glyphs (bd_draw_pushpin), the menu pin path ---- */
+	{
+	bd_gui_init_fonts(&stub, NULL, NULL);
+	int ow, oh, iw, ih, sw, sh;
+	bd_draw_pushpin_size(0 /* out */, 16, &ow, &oh);   /* "14" tier */
+	bd_draw_pushpin_size(1 /* in  */, 16, &iw, &ih);
+	bd_draw_pushpin_size(0 /* out */, 8,  &sw, &sh);   /* small "10" tier */
+	/* out is wider than in; the small tier is smaller than the large one */
+	check("pushpin: out glyph is wider than in", ow > iw);
+	check("pushpin: small font selects the smaller tier", sw < ow && sh < oh);
+	/* a NULL out param is allowed */
+	bd_draw_pushpin_size(1, 16, NULL, &ih);
+	check("pushpin: reports a positive size", iw > 0 && ih > 0);
+	n_drawverts = 0;
+	bd_draw_begin(200, 100);
+	bd_draw_pushpin(0, 4, 4, 16, 0xFFFFFFFFu);         /* out, large */
+	bd_draw_pushpin(1, 4, 24, 8, 0xFFFFFFFFu);         /* in, small */
+	bd_draw_end();
+	check("pushpin: rendering issues GPU draws", n_drawverts > 0);
+	bd_gui_cleanup();
+	}
+
 	/* ---- asset path resolution via the backend hook ---- */
 	{
 	char buf[256];

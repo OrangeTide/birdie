@@ -314,7 +314,6 @@ build has no external `BD_ASSET_*` path dependency.
 void       bd_asset_register_data(const char *id, const void *data, size_t len);
 void       bd_asset_register_file(const char *id, const char *path);
 int        bd_asset_lookup(const char *id, bd_asset *out);   void bd_asset_clear(void);
-bd_texture bd_asset_texture(const bd_backend *be, const char *id, ...);
 ```
 
 ## Renderer (`bd_draw.h`)

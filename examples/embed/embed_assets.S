@@ -17,20 +17,6 @@ emb_font_ui:
 	.incbin EMBED_FONT_UI
 emb_font_ui_end:
 
-	.global emb_pin_out
-	.global emb_pin_out_end
-	.balign 4
-emb_pin_out:
-	.incbin EMBED_PIN_OUT
-emb_pin_out_end:
-
-	.global emb_pin_in
-	.global emb_pin_in_end
-	.balign 4
-emb_pin_in:
-	.incbin EMBED_PIN_IN
-emb_pin_in_end:
-
 /* The monospace family the body editor renders: regular, bold, italic. */
 	.global emb_font_mono
 	.global emb_font_mono_end
