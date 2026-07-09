@@ -25,11 +25,36 @@ SUBDIRS = \
 	src/thirdparty/lpeg \
 	src/libvt \
 	src/birdie-gui \
-	src/birdie
+	src/birdie \
+	test
+
+# The widget gallery (src/guitest) needs X11/EGL/GLES and is Linux-only, so it
+# is opt-in: its module.mk is loaded only when WIDGET_TEST is set, keeping the
+# gallery out of the default `all`. The `widget-test` target below re-enters
+# make with the flag set.
+ifdef WIDGET_TEST
+SUBDIRS += src/guitest
+endif
 
 # Shader-to-C generation using the vendored glsl2h.
 $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 	$(LUDICA)/tools/glsl2h $< > $@
+
+# ----------------------------------------------------------------------
+# Convenience aliases for the modular-make targets declared in the
+# module.mk files above, so the documented entry points keep working:
+#
+#   make test         build + run the headless toolkit test (test/module.mk).
+#   make widget-test   build the opt-in widget gallery (src/guitest/module.mk).
+# ----------------------------------------------------------------------
+.PHONY : test
+test : run-test-test_gui
+
+.PHONY : widget-test
+widget-test :
+	@$(MAKE) WIDGET_TEST=1 birdie-gui-gallery
+	@echo "built widget gallery: $(BINDIR)/birdie-gui-gallery"
+	@echo "run it from the repo root: $(BINDIR)/birdie-gui-gallery"
 
 # ----------------------------------------------------------------------
 # Source distribution of the GUI toolkit (birdie-gui).
@@ -129,56 +154,3 @@ dist :
 	    > $(DIST_STAGE)/MANIFEST.txt
 	@cd $(OUTDIR) && zip -rq $(DIST_NAME).zip $(DIST_NAME)
 	@echo "dist: wrote $(DIST_ZIP)"
-
-# ----------------------------------------------------------------------
-# Headless unit test for the GUI toolkit (test/test_gui.c). Compiles the
-# toolkit sources together with a recording stub backend and runs them
-# with no window, no ludica, and no X11, so it works in CI. Links only
-# libvt. Exit status propagates, so a failing check fails the build.
-# ----------------------------------------------------------------------
-TEST_BIN := $(BUILDDIR)/test_gui
-
-.PHONY : test
-test : bd_vt
-	@mkdir -p $(BUILDDIR)
-	cc -Wall -W -Isrc/birdie-gui -Isrc/libvt -Isrc/thirdparty/stb \
-	    test/test_gui.c src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
-	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_asset.c \
-	    src/birdie-gui/bd_widget_value.c \
-	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
-	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
-	    src/birdie-gui/bd_widget_inventory.c src/birdie-gui/bd_widget_dock.c \
-	    src/birdie-gui/bd_widget_actionbar.c src/birdie-gui/bd_widget_tabview.c \
-	    src/birdie-gui/bd_widget_indicator.c \
-	    $(BUILDDIR)/bd_vt.a -lm -o $(TEST_BIN)
-	@echo "running headless GUI test:"
-	@$(TEST_BIN)
-
-# ----------------------------------------------------------------------
-# Widget gallery (src/guitest/). A standalone windowed sample on the raw
-# OpenGL ES 3 backend (src/guitest/bd_backend_gles.c + x11_window.c),
-# independent of ludica, that exhibits and exercises every working widget.
-# birdie runs on ludica, this runs on GLES, so both backends stay tested.
-# Linux/X11 only and opt-in (not built by `all`); run from the repo root so
-# the default BD_ASSET_* paths resolve. Links libvt for the terminal widget.
-# ----------------------------------------------------------------------
-GALLERY_BIN := $(BUILDDIR)/birdie-gui-gallery
-
-.PHONY : widget-test
-widget-test : bd_vt
-	@mkdir -p $(BUILDDIR)
-	cc -Wall -W -Isrc/birdie-gui -Isrc/guitest -Isrc/libvt -Isrc/thirdparty/stb \
-	    src/guitest/widget_test.c src/guitest/x11_window.c \
-	    src/guitest/bd_backend_gles.c src/birdie-gui/bd_backend_gles_core.c \
-	    src/birdie-gui/widget.c src/birdie-gui/bd_widget_vt.c \
-	    src/birdie-gui/bd_draw.c src/birdie-gui/bd_asset.c \
-	    src/birdie-gui/bd_widget_value.c \
-	    src/birdie-gui/bd_widget_explorer.c src/birdie-gui/bd_widget_editor.c \
-	    src/birdie-gui/bd_widget_canvas.c src/birdie-gui/bd_widget_table.c \
-	    src/birdie-gui/bd_widget_inventory.c src/birdie-gui/bd_widget_dock.c \
-	    src/birdie-gui/bd_widget_actionbar.c src/birdie-gui/bd_widget_tabview.c \
-	    src/birdie-gui/bd_widget_indicator.c \
-	    $(BUILDDIR)/bd_vt.a \
-	    -lX11 -lXi -lEGL -lGLESv2 -lm -o $(GALLERY_BIN)
-	@echo "built widget gallery: $(GALLERY_BIN)"
-	@echo "run it from the repo root: $(GALLERY_BIN)"

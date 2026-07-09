@@ -11,6 +11,10 @@
 #                      beside the toolkit but built separately so birdie_gui
 #                      stays backend-neutral. The birdie executable links this;
 #                      the SDL3 example pairs birdie_gui with bd_backend_sdl3.c.
+#   birdie_gui_gles_core  the shared OpenGL ES 3 GPU core (bd_backend_gles_core.c)
+#                      that backs both the raw X11/EGL/GLES gallery backend and
+#                      the SDL3 example. Built only when something links it, so
+#                      the backend-neutral toolkit build never pulls in GLES.
 #
 # The public headers (widget.h and friends) sit in this directory and are
 # exported to anything that lists a birdie_gui* library in its LIBS.
@@ -18,7 +22,7 @@
 # Made by a machine. PUBLIC DOMAIN (CC0-1.0)
 #
 
-LIBRARIES += birdie_gui birdie_gui_ludica
+LIBRARIES += birdie_gui birdie_gui_ludica birdie_gui_gles_core
 
 birdie_gui_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
@@ -50,3 +54,11 @@ birdie_gui_EXPORTED_CPPFLAGS = -I$(birdie_gui_DIR)
 birdie_gui_ludica_DIR := $(birdie_gui_DIR)
 birdie_gui_ludica_SRCS = bd_backend_ludica.c
 birdie_gui_ludica_LIBS = birdie_gui ludica
+
+# Shared GLES3 GPU core (shaders, quad batch, textures, scissor) used by the
+# raw X11/EGL/GLES gallery (src/guitest) and the SDL3 example; the windowing
+# and event glue live with each host. Needs stb_image for load_texture_mem.
+birdie_gui_gles_core_DIR := $(birdie_gui_DIR)
+birdie_gui_gles_core_SRCS = bd_backend_gles_core.c
+birdie_gui_gles_core_LIBS = birdie_gui
+birdie_gui_gles_core_CPPFLAGS = -I$(birdie_gui_DIR) -Isrc/thirdparty/stb
