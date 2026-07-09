@@ -59,10 +59,21 @@ int  bd_asset_lookup(const char *id, bd_asset *out);
 /* Forget every registered asset. */
 void bd_asset_clear(void);
 
+/* Resolve `rel` (an asset-root-relative sub-path, e.g. "fonts/DejaVuSans.ttf")
+ * through the backend's resolve_asset hook, writing the located absolute path
+ * into the caller-owned `buf` (of `bufsz` bytes) and returning `buf`. Returns
+ * `fallback` (unchanged, not copied into buf) when the backend has no hook or
+ * does not find the asset. The caller owns `buf`, so there is no shared state
+ * or lifetime to track. */
+const char *bd_asset_resolve(const bd_backend *be, const char *rel,
+    const char *fallback, char *buf, size_t bufsz);
+
 /* Resolve a texture asset and upload it through the backend: registered data
- * (decoded from memory), a registered file, or `default_path` when the id is
- * unregistered. Used by the toolkit for the pushpins and terminal atlas. */
+ * (decoded from memory), a registered file, or the default when the id is
+ * unregistered -- the default is `rel` located via the backend's resolve_asset
+ * hook, falling back to `default_path` (current-directory-relative). Used by
+ * the toolkit for the pushpins and terminal atlas. */
 bd_texture bd_asset_texture(const bd_backend *be, const char *id,
-    const char *default_path);
+    const char *rel, const char *default_path);
 
 #endif /* BD_ASSET_H */

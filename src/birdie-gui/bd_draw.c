@@ -124,6 +124,14 @@ static const char *const font_default_path[FONT_FACES] = {
 	BD_ASSET_GUI_FONT_MONO,  BD_ASSET_GUI_FONT_MONO_BOLD,
 	BD_ASSET_GUI_FONT_MONO_ITALIC, BD_ASSET_GUI_FONT_MONO_BOLDITALIC,
 };
+/* asset-root-relative names, for the backend's resolve_asset hook (installed
+ * apps); parallel to font_default_path (which is the current-dir fallback) */
+static const char *const font_rel_name[FONT_FACES] = {
+	"fonts/DejaVuSans.ttf",           "fonts/DejaVuSans-Bold.ttf",
+	"fonts/DejaVuSans-Oblique.ttf",   "fonts/DejaVuSans-BoldOblique.ttf",
+	"fonts/DejaVuSansMono.ttf",       "fonts/DejaVuSansMono-Bold.ttf",
+	"fonts/DejaVuSansMono-Oblique.ttf", "fonts/DejaVuSansMono-BoldOblique.ttf",
+};
 
 /* Resolve one face: an explicit caller face wins, else a registered source for
  * `id`, else the default file path. */
@@ -448,8 +456,15 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 		f[6] = &fonts->mono_italic;      f[7] = &fonts->mono_bold_italic;
 	}
 	for (int i = 0; i < FONT_FACES; i++) {
+		char pathbuf[4096];
 		bd_font_face face = resolve_face(f[i], font_asset_id[i],
 		    font_default_path[i]);
+		/* a built-in default (not a caller/registered face): let the backend
+		 * relocate it next to an installed executable, else keep the dev path.
+		 * pathbuf outlives bake_font's read within this iteration. */
+		if (face.path == font_default_path[i])
+			face.path = bd_asset_resolve(be, font_rel_name[i],
+			    font_default_path[i], pathbuf, sizeof pathbuf);
 		bake_font(&face, font_px, i, i == 0); /* regular sets metrics */
 	}
 	/* No usable regular face (missing/unreadable font): fall back to the

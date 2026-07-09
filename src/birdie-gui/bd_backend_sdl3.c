@@ -60,6 +60,21 @@ be_time(void)
 	return (double)SDL_GetTicksNS() / 1e9;
 }
 
+/* Locate an asset next to the executable (or, on macOS, the .app bundle's
+ * Resources) via SDL_GetBasePath. On a hit, writes the path into the caller's
+ * `buf` and returns it; returns NULL if not found there (the toolkit then uses
+ * its dev-tree path). */
+static const char *
+be_resolve_asset(const char *rel, char *buf, size_t bufsz)
+{
+	const char *base = SDL_GetBasePath();   /* SDL-owned, trailing slash */
+	if (!base)
+		return NULL;
+	snprintf(buf, bufsz, "%s%s", base, rel);
+	SDL_PathInfo info;
+	return SDL_GetPathInfo(buf, &info) ? buf : NULL;
+}
+
 /* Scissor needs the framebuffer height for the top-left/bottom-left flip; the
  * core takes it explicitly (a windowing concern), so wrap it with our height. */
 static void be_scissor(int x, int y, int w, int h)
@@ -133,6 +148,7 @@ const bd_backend bd_backend_sdl3 = {
 	.clipboard_get     = be_clipboard_get,
 	.ime_set_enabled     = be_ime_set_enabled,
 	.ime_set_cursor_rect = be_ime_set_cursor_rect,
+	.resolve_asset       = be_resolve_asset,
 };
 
 /* ------------------------------------------------------------------ */

@@ -3,6 +3,11 @@
 #include "ludica_gfx.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 
 /* stb_image lives in the ludica library (non-static), so we borrow its
  * from-memory decoder for embedded PNGs rather than owning a second copy. */
@@ -165,6 +170,43 @@ static void be_destroy_texture(bd_texture t)
 static void be_scissor(int x, int y, int w, int h) { lud_scissor(x, y, w, h); }
 static void be_scissor_off(void) { lud_scissor_off(); }
 
+/* ---- asset resolution ---- */
+
+#if defined(__linux__)
+/* Locate an asset for an installed Linux app: the executable's own directory,
+ * a sibling ../share/birdie data dir (FHS install layout), then
+ * $HOME/.local/share/birdie. Writes the first hit into the caller's `buf` and
+ * returns it; NULL if none exist (the toolkit then uses the cwd-relative dev
+ * path). ludica has no cross-platform base-path query, so this is done here. */
+static const char *
+be_resolve_asset(const char *rel, char *buf, size_t bufsz)
+{
+	char exe[4096];
+	ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+	if (n > 0) {
+		exe[n] = '\0';
+		char *slash = strrchr(exe, '/');
+		if (slash) {
+			int dir = (int)(slash - exe);
+			snprintf(buf, bufsz, "%.*s/%s", dir, exe, rel);
+			if (access(buf, R_OK) == 0)
+				return buf;
+			snprintf(buf, bufsz, "%.*s/../share/birdie/%s",
+			    dir, exe, rel);
+			if (access(buf, R_OK) == 0)
+				return buf;
+		}
+	}
+	const char *home = getenv("HOME");
+	if (home) {
+		snprintf(buf, bufsz, "%s/.local/share/birdie/%s", home, rel);
+		if (access(buf, R_OK) == 0)
+			return buf;
+	}
+	return NULL;
+}
+#endif /* __linux__ */
+
 const bd_backend bd_backend_ludica = {
 	.width            = be_width,
 	.height           = be_height,
@@ -189,6 +231,9 @@ const bd_backend bd_backend_ludica = {
 	.destroy_texture  = be_destroy_texture,
 	.scissor          = be_scissor,
 	.scissor_off      = be_scissor_off,
+#if defined(__linux__)
+	.resolve_asset    = be_resolve_asset,
+#endif
 };
 
 /* ------------------------------------------------------------------ */

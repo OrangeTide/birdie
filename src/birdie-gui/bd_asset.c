@@ -88,10 +88,24 @@ bd_asset_clear(void)
 	asset_count = 0;
 }
 
+const char *
+bd_asset_resolve(const bd_backend *be, const char *rel, const char *fallback,
+    char *buf, size_t bufsz)
+{
+	if (be && be->resolve_asset && rel && buf && bufsz) {
+		const char *r = be->resolve_asset(rel, buf, bufsz);
+		if (r)
+			return r;
+	}
+	return fallback;
+}
+
 bd_texture
-bd_asset_texture(const bd_backend *be, const char *id, const char *default_path)
+bd_asset_texture(const bd_backend *be, const char *id, const char *rel,
+    const char *default_path)
 {
 	bd_asset a;
+	char buf[4096];
 	if (bd_asset_lookup(id, &a)) {
 		if (a.data)
 			return be->load_texture_mem
@@ -100,5 +114,6 @@ bd_asset_texture(const bd_backend *be, const char *id, const char *default_path)
 		if (a.path)
 			return be->load_texture(a.path);
 	}
-	return be->load_texture(default_path);
+	return be->load_texture(
+	    bd_asset_resolve(be, rel, default_path, buf, sizeof buf));
 }

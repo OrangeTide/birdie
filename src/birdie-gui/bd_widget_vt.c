@@ -30,6 +30,7 @@
 #ifndef BD_ASSET_TERM_FONT
 #define BD_ASSET_TERM_FONT "src/birdie-gui/assets/font8x16.png"
 #endif
+#define BD_ASSET_TERM_REL  "font8x16.png"   /* asset-root-relative (installed) */
 
 struct vt_widget {
 	struct vt_state  *vt;
@@ -110,7 +111,7 @@ vt_init(bd_id id, void *state)
 
 	if (vt_live++ == 0) {
 		vt_font = bd_asset_texture(bd_backend_get(),
-		    BD_ASSET_TERMINAL_FONT, BD_ASSET_TERM_FONT);
+		    BD_ASSET_TERMINAL_FONT, BD_ASSET_TERM_REL, BD_ASSET_TERM_FONT);
 		if (vt_font.id == 0)
 			fprintf(stderr, "bd: failed to load terminal font atlas\n");
 	}

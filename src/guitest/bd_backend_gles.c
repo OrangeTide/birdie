@@ -19,6 +19,11 @@
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 /* The GPU vtable rows (shaders, draw, textures, viewport, clear) come from
  * bd_backend_gles_core; this file supplies only the windowing (multiple native
  * windows via window.h), clipboard, and IME. */
@@ -68,6 +73,39 @@ static void be_ime_set_enabled(int on) { win_ime_set_enabled(on); }
 static void be_ime_set_cursor_rect(int x, int y, int w, int h)
 { win_ime_set_cursor_rect(x, y, w, h); }
 
+/* Locate an asset for an installed Linux app. Searches, in order: the
+ * executable's own directory, a sibling ../share/birdie data dir (the usual
+ * FHS install layout), and $HOME/.local/share/birdie. On the first hit writes
+ * the absolute path into the caller's `buf` and returns it; NULL if none exist
+ * (the toolkit then uses the dev-tree path relative to the cwd). */
+static const char *
+be_resolve_asset(const char *rel, char *buf, size_t bufsz)
+{
+	char exe[4096];
+	ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+	if (n > 0) {
+		exe[n] = '\0';
+		char *slash = strrchr(exe, '/');
+		if (slash) {
+			int dir = (int)(slash - exe);
+			snprintf(buf, bufsz, "%.*s/%s", dir, exe, rel);
+			if (access(buf, R_OK) == 0)
+				return buf;
+			snprintf(buf, bufsz, "%.*s/../share/birdie/%s",
+			    dir, exe, rel);
+			if (access(buf, R_OK) == 0)
+				return buf;
+		}
+	}
+	const char *home = getenv("HOME");
+	if (home) {
+		snprintf(buf, bufsz, "%s/.local/share/birdie/%s", home, rel);
+		if (access(buf, R_OK) == 0)
+			return buf;
+	}
+	return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* vtable                                                             */
 /* ------------------------------------------------------------------ */
@@ -109,6 +147,7 @@ const bd_backend bd_backend_gles = {
 	.clipboard_get     = be_clipboard_get,
 	.ime_set_enabled     = be_ime_set_enabled,
 	.ime_set_cursor_rect = be_ime_set_cursor_rect,
+	.resolve_asset       = be_resolve_asset,
 };
 
 /* ------------------------------------------------------------------ */

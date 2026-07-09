@@ -1,6 +1,8 @@
 #ifndef BD_BACKEND_H
 #define BD_BACKEND_H
 
+#include <stddef.h>   /* size_t (resolve_asset) */
+
 /*
  * bd_backend — thin portability layer between the widget toolkit and the
  * underlying windowing/rendering library. The toolkit (widget.c) never
@@ -237,6 +239,25 @@ typedef struct bd_backend {
 	 * supported, in-progress text as BD_EV_TEXT_PREEDIT). */
 	void (*ime_set_enabled)(int on);
 	void (*ime_set_cursor_rect)(int x, int y, int w, int h);
+
+	/* ---- asset path resolution (optional; NULL = current-directory paths) ----
+	 * Locate a runtime asset given `rel`, its path relative to the app's asset
+	 * root (forward-slash separated, e.g. "fonts/DejaVuSans.ttf" or
+	 * "pushpin/pushpin-out-14.png"). The backend searches the locations that fit
+	 * its platform -- the executable's directory, a per-user data dir, the macOS
+	 * .app bundle, a virtual FS -- and, on a hit, writes the absolute path into
+	 * the caller's `buf` (of `bufsz` bytes) and returns `buf`; it returns NULL if
+	 * the asset is not found there. The caller owns the buffer, so there is no
+	 * shared state or lifetime to track.
+	 *
+	 * When this hook is NULL, or returns NULL, the toolkit falls back to the
+	 * asset's built-in default path resolved against the current working
+	 * directory (the historical behavior, which works when run from the source
+	 * tree). So a backend implements this to let an *installed* app find its
+	 * assets next to the executable instead of relative to where it was
+	 * launched. Registered assets (bd_asset_register_*) bypass this: an explicit
+	 * path or in-memory blob is used as given. */
+	const char *(*resolve_asset)(const char *rel, char *buf, size_t bufsz);
 } bd_backend;
 
 #endif

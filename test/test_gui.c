@@ -21,6 +21,7 @@
 #include "bd_widget_actionbar.h"
 #include "bd_widget_tabview.h"
 #include "bd_widget_indicator.h"
+#include "bd_asset.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
@@ -141,6 +142,18 @@ static const char *be_clip_get(void){ return be_clip; }
 static int be_ime_on = -1, be_ime_rects;
 static void be_ime_enable(int on){ be_ime_on = on; }
 static void be_ime_rect(int x,int y,int w,int h){ (void)x;(void)y;(void)w;(void)h; be_ime_rects++; }
+
+/* Resolver stub: "known.ttf" resolves under a fake install prefix (written into
+ * the caller's buf), anything else is not found. Exercises bd_asset_resolve. */
+static const char *
+be_resolve(const char *rel, char *buf, size_t bufsz)
+{
+	if (strcmp(rel, "known.ttf") == 0) {
+		snprintf(buf, bufsz, "/opt/birdie/%s", rel);
+		return buf;
+	}
+	return NULL;
+}
 
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
@@ -1968,6 +1981,26 @@ main(void)
 	check("fallback: unmapped codepoint falls back to '?'",
 	    bd_draw_text_width("\xEF\xBF\xBF") == wa);       /* U+FFFF */
 	bd_gui_cleanup();
+	}
+
+	/* ---- asset path resolution via the backend hook ---- */
+	{
+	char buf[256];
+	bd_backend rbe = stub;
+	rbe.resolve_asset = be_resolve;
+	const char *r = bd_asset_resolve(&rbe, "known.ttf", "fallback/path", buf,
+	    sizeof buf);
+	check("resolve: hit writes into caller buffer and returns it",
+	    r == buf && strcmp(buf, "/opt/birdie/known.ttf") == 0);
+	r = bd_asset_resolve(&rbe, "missing.ttf", "fallback/path", buf,
+	    sizeof buf);
+	check("resolve: miss returns the fallback unchanged",
+	    strcmp(r, "fallback/path") == 0);
+	/* a backend with no hook always yields the fallback */
+	r = bd_asset_resolve(&stub, "known.ttf", "fallback/path", buf,
+	    sizeof buf);
+	check("resolve: no hook returns the fallback",
+	    strcmp(r, "fallback/path") == 0);
 	}
 
 	printf("\n%d checks, %d failed\n", checks, fails);

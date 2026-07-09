@@ -35,6 +35,9 @@
 #ifndef BD_ASSET_PIN_IN
 #define BD_ASSET_PIN_IN      "src/birdie-gui/assets/pushpin/pushpin-in-14.png"
 #endif
+/* asset-root-relative names for the backend's resolve_asset hook (installed) */
+#define BD_ASSET_PIN_OUT_REL "pushpin/pushpin-out-14.png"
+#define BD_ASSET_PIN_IN_REL  "pushpin/pushpin-in-14.png"
 
 /* fallback intrinsic size for a child with no preferred dimension */
 #define DEFAULT_MIN_W   64
@@ -2561,8 +2564,10 @@ bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
 	 * bd_asset registry (by id) or the built-in defaults. */
 	if (!bd_draw_init_fonts(be, fonts, theme.font_size))
 		fprintf(stderr, "bd: renderer init failed\n");
-	pin_out_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_OUT, BD_ASSET_PIN_OUT);
-	pin_in_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_IN, BD_ASSET_PIN_IN);
+	pin_out_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_OUT,
+	    BD_ASSET_PIN_OUT_REL, BD_ASSET_PIN_OUT);
+	pin_in_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_IN,
+	    BD_ASSET_PIN_IN_REL, BD_ASSET_PIN_IN);
 }
 
 void
