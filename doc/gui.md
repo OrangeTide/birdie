@@ -202,6 +202,14 @@ What is built:
   split from the widgets: `bd_set_reduced_motion(mode)` forces or leaves it on
   AUTO, and in AUTO it is on when unfocused or when `bd_reduced_motion_hint()`
   is raised (an accessibility preference or a future low-framerate watchdog).
+- **Asset path resolution** — an optional `bd_backend.resolve_asset(rel, buf,
+  bufsz)` hook lets an *installed* app find its runtime assets next to the
+  executable instead of relative to the current directory. The backend writes
+  the located absolute path into the caller-owned buffer and returns it, or
+  `NULL` to fall back to the cwd-relative dev path. Resolvers: SDL3
+  (`SDL_GetBasePath`), GLES and ludica (Linux `/proc/self/exe` dir,
+  `../share/birdie`, `$HOME/.local/share/birdie`). See Rendering, "Custom and
+  embedded assets".
 
 The v0.3 input roadmap (multi-window, explorer, rich text, the full v1.0
 widget set, clipboard, key-up/repeat, IME, multitouch, pen) is complete on the
@@ -359,6 +367,24 @@ into every copy, and once every asset is registered by id nothing reads those
 paths. When embedding everything, override them to short strings to drop the
 `src/birdie-gui/assets/...` literals entirely. The `examples/embed/` example
 demonstrates the id-based embedding and this caveat.
+
+**Finding assets on disk (`resolve_asset`).** Registration covers "use my
+bytes/file"; the remaining case is an *installed* app whose assets sit next to
+the executable rather than in the current working directory. For that the
+toolkit asks the backend's optional `resolve_asset(rel, buf, bufsz)` hook to
+locate a runtime asset by its **asset-root-relative** sub-path (e.g.
+`"fonts/DejaVuSans.ttf"`, `"pushpin/pushpin-out-14.png"`, `"font8x16.png"`).
+The backend searches the locations that fit its platform, writes the located
+absolute path into the caller-owned `buf`, and returns it; it returns `NULL`
+when the asset is not found there, and the toolkit then uses the built-in
+default path resolved against the current directory (the historical dev-tree
+behavior). The buffer is caller-owned, so there is no shared state or lifetime
+to track. `bd_asset_resolve()` wraps the hook with the fallback. This runs only
+for *unregistered* assets built from their default file: an explicit
+`bd_asset_register_*` source (path or blob) is used as given and bypasses the
+hook. Reference resolvers: SDL3 uses `SDL_GetBasePath`; the GLES and ludica
+backends search, on Linux, the executable's own directory, a sibling
+`../share/birdie` (FHS install layout), then `$HOME/.local/share/birdie`.
 
 ## Pinnable menus (olvwm-style pushpins)
 
