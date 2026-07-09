@@ -1965,23 +1965,39 @@ main(void)
 	bd_gui_cleanup();
 	}
 
-	/* ---- embedded fallback font: forced when no TTF loads ---- */
+	/* ---- embedded bitmap font: forced when no TTF loads ---- */
 	{
 	bd_font_set bogus = {0};
-	bogus.regular.path = "/nonexistent/font.ttf";   /* force the fallback */
+	bogus.regular.path = "/nonexistent/font.ttf";   /* force the embedded face */
 	bd_gui_init_fonts(&stub, NULL, &bogus);
-	/* the fallback is a monospaced bitmap, so every mapped glyph shares one
-	 * advance; a resolved codepoint has that width, an unmapped one renders as
-	 * '?' (also that width) */
+	/* the embedded face is a monospaced bitmap, so every mapped glyph shares
+	 * one advance; a resolved codepoint has that width, an unmapped one renders
+	 * as '?' (also that width) */
 	float wa = bd_draw_text_width("A");
-	check("fallback: ASCII glyph has width", wa > 0.0f);
-	check("fallback: box-drawing U+2500 resolves via codepoint map",
+	check("embed: ASCII glyph has width", wa > 0.0f);
+	check("embed: box-drawing U+2500 resolves via codepoint map",
 	    bd_draw_text_width("\xE2\x94\x80") == wa);       /* U+2500 */
-	check("fallback: Latin-1 accent U+00E9 resolves",
+	check("embed: Latin-1 accent U+00E9 resolves",
 	    bd_draw_text_width("\xC3\xA9") == wa);           /* e-acute */
-	check("fallback: unmapped codepoint falls back to '?'",
+	check("embed: unmapped codepoint falls back to '?'",
 	    bd_draw_text_width("\xEF\xBF\xBF") == wa);       /* U+FFFF */
 	bd_gui_cleanup();
+	}
+
+	/* ---- embedded face size selection: 8x8 when px<=8, else 8x16 ---- */
+	{
+	bd_font_set bogus = {0};
+	bogus.regular.path = "/nonexistent/font.ttf";
+	bd_theme th8 = bd_theme_default();  th8.font_size = 8;
+	bd_gui_init_fonts(&stub, &th8, &bogus);
+	float a8 = bd_draw_ascent();          /* 8x8 at scale 1 -> ~8 px tall */
+	bd_gui_cleanup();
+	bd_theme th16 = bd_theme_default(); th16.font_size = 16;
+	bd_gui_init_fonts(&stub, &th16, &bogus);
+	float a16 = bd_draw_ascent();         /* 8x16 at scale 1 -> ~16 px tall */
+	bd_gui_cleanup();
+	check("embed: px<=8 picks the 8x8 face", a8 > 0.0f && a8 <= 8.0f);
+	check("embed: px>8 picks the taller 8x16 face", a16 > a8 && a16 >= 16.0f);
 	}
 
 	/* ---- asset path resolution via the backend hook ---- */

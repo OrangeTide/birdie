@@ -8,7 +8,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
-#include "bd_fallback_font.h"   /* embedded 8x8 fallback glyphs + codepoint map */
+#include "bd_embed_font.h"   /* embedded 8x8 + 8x16 bitmap faces + codepoint maps */
 
 /*
  * Toolkit renderer on the backend GPU interface. One shader (textured *
@@ -336,20 +336,33 @@ face_slot(const struct face *f, unsigned cp)
 }
 
 /*
- * Bake the embedded 8x8 fallback (FALLBACK_GLYPHS + FALLBACK_CMAP, see
- * bd_fallback_font.h) into a face, nearest-neighbor scaled to ~px, when no TTF
- * could be read. Fills the same atlas + packedchar data the normal text path
- * consumes and points the face at the codepoint map, so the UI stays legible
- * (across CP437 + Latin + box/block, not just ASCII) and nothing downstream
- * needs to know it is a fallback. Glyphs past the atlas are dropped.
+ * Bake an embedded bitmap face into `slot`, integer-scaled to fit `px`. Two
+ * native faces ship (bd_embed_font.h): an 8x8 and an 8x16 unscii subset. The
+ * request picks 8x8 when px <= 8, else 8x16, then nearest-integer scales the
+ * chosen cell (so a request that is a whole multiple of 8 or 16 is pixel
+ * perfect). Both faces are a fixed 8 columns. Fills the same atlas + packedchar
+ * data the TTF text path consumes and points the face at the codepoint map, so
+ * the UI/terminal stays legible across Latin + box/block/geometric and nothing
+ * downstream needs to know the glyphs are bitmaps. Glyphs past the atlas are
+ * dropped. Used both as the no-TTF fallback and, first-class, by the terminal.
  */
 static void
-bake_fallback_face(int slot, float px)
+bake_embedded_face(int slot, float px)
 {
-	int sc = (int)(px / 8.0f + 0.5f);
+	const unsigned char *glyphs;
+	const unsigned      *cmap;
+	int nglyphs, cellh;
+	if (px <= 8.0f) {
+		glyphs = (const unsigned char *)EMBED8_GLYPHS;
+		cmap = EMBED8_CMAP;  nglyphs = EMBED8_NGLYPHS;  cellh = 8;
+	} else {
+		glyphs = (const unsigned char *)EMBED16_GLYPHS;
+		cmap = EMBED16_CMAP; nglyphs = EMBED16_NGLYPHS; cellh = 16;
+	}
+	int sc = (int)(px / (float)cellh + 0.5f);
 	if (sc < 1)
 		sc = 1;
-	int gw = 8 * sc, gh = 8 * sc;
+	int gw = 8 * sc, gh = cellh * sc;
 	int per_row = ATLAS_DIM / gw;
 	if (per_row < 1)
 		per_row = 1;
@@ -358,14 +371,14 @@ bake_fallback_face(int slot, float px)
 	if (!rgba)
 		return;
 	int baked = 0;
-	for (int g = 0; g < FALLBACK_NGLYPHS && g < MAX_GLYPHS; g++) {
+	for (int g = 0; g < nglyphs && g < MAX_GLYPHS; g++) {
 		int cx = (g % per_row) * gw;
 		int cy = (g / per_row) * gh;
 		if (cy + gh > ATLAS_DIM)
 			break;                 /* atlas full; stop (rest unmapped) */
-		for (int r = 0; r < 8; r++)
+		for (int r = 0; r < cellh; r++)
 			for (int c = 0; c < 8; c++) {
-				if (!(FALLBACK_GLYPHS[g][r] & (1 << c)))
+				if (!(glyphs[(size_t)g * cellh + r] & (1 << c)))
 					continue;
 				for (int yy = 0; yy < sc; yy++)
 					for (int xx = 0; xx < sc; xx++) {
@@ -390,7 +403,7 @@ bake_fallback_face(int slot, float px)
 	}
 	faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
 	faces[slot].have = (faces[slot].atlas.id != 0);
-	faces[slot].cmap = FALLBACK_CMAP;   /* sorted codepoint -> slot map */
+	faces[slot].cmap = cmap;            /* sorted codepoint -> slot map */
 	faces[slot].nglyphs = baked;
 	faces[slot].ascent = (float)gh;
 	faces[slot].line_h = (float)(gh + sc);
@@ -441,12 +454,12 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 			    font_default_path[i], pathbuf, sizeof pathbuf);
 		bake_font(&face, font_px, i, i == 0); /* regular sets metrics */
 	}
-	/* No usable regular face (missing/unreadable font): fall back to the
-	 * embedded 8x8 bitmap so the UI stays legible. Variant styles resolve to
-	 * slot 0 through face_for(), so one fallback face covers them all. */
+	/* No usable regular face (missing/unreadable font): fall back to an
+	 * embedded bitmap face (8x8 or 8x16 by size) so the UI stays legible.
+	 * Variant styles resolve to slot 0 through face_for(), so one covers all. */
 	if (!faces[0].have) {
-		fprintf(stderr, "bd_draw: using embedded fallback font\n");
-		bake_fallback_face(0, font_px);
+		fprintf(stderr, "bd_draw: using embedded bitmap font\n");
+		bake_embedded_face(0, font_px);
 	}
 	return 1;
 }
