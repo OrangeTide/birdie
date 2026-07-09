@@ -18,7 +18,9 @@ this document is the design-level overview.
         birdie/                    # the MUD-client app + its module.mk
             module.mk
         birdie-gui/                # the birdie-gui toolkit (library) + backends
-            module.mk
+            module.mk              #   (host-neutral; ships verbatim as the bundle)
+            thirdparty/
+                stb/               # stb_truetype + stb_image (birdie-gui's only dep)
             bd_vt/                 # terminal library: VT engine + BD_TERMINAL widget
                 module.mk          #   (birdie_gui_vt; adopted from lumi's libvt)
         guitest/                   # standalone widget gallery (opt-in)
@@ -29,7 +31,6 @@ this document is the design-level overview.
             miniz/
             lua/
             lpeg/
-            stb/                   # stb_truetype + stb_image single-headers
     test/
         module.mk                  # headless toolkit test (test_gui)
     scripts/
@@ -89,9 +90,12 @@ libiox ships inside ludica. Each vendored dependency has an update script under
 tracking.
 
 The terminal engine (`src/birdie-gui/bd_vt/`, the `vt_*` sources — adopted from
-lumi's libvt), the UTF-8 codec (`bd_utf8.c`), and the embedded fallback font
-(`bd_fallback_font.h`) are adopted as first-class birdie-gui code, not tracked
-as external dependencies (no update script, no upstream tracking).
+lumi's libvt), the UTF-8 codec (`bd_utf8.c`), and the embedded bitmap fonts
+(`bd_embed_font.h`, generated from unscii by `tools/bdf2font.c`) are adopted as
+first-class birdie-gui code, not tracked as external dependencies (no update
+script, no upstream tracking). stb (`src/birdie-gui/thirdparty/stb/`) is
+birdie-gui's only vendored third-party dependency, kept inside the toolkit dir
+so it ships self-contained in the bundle.
 
 ## Release artifacts
 

@@ -16,10 +16,8 @@ TEST_TARGETS += test_gui
 test_gui_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 test_gui_SRCS  = test_gui.c
 # The test exercises the terminal widget, so it links birdie_gui_vt, which drags
-# in birdie_gui (its public-header dir + bd_utf8) transitively. It also reaches
-# for the vendored stb single-headers via bd_draw.h.
+# in birdie_gui (its public-header dir + bd_utf8) transitively.
 test_gui_LIBS  = birdie_gui_vt birdie_gui
-test_gui_CPPFLAGS = -Isrc/thirdparty/stb
 test_gui_LDLIBS = -lm
 
 define test_gui_TESTCMD

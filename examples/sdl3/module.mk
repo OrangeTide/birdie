@@ -38,6 +38,6 @@ sdl3_example_VT := \
 sdl3_example_SRCS  = sdl3_example.c $(sdl3_example_TOOLKIT) $(sdl3_example_VT)
 sdl3_example_CPPFLAGS = -I$(sdl3_example_DIR)../../src/birdie-gui \
                         -I$(sdl3_example_DIR)../../src/birdie-gui/bd_vt \
-                        -I$(sdl3_example_DIR)../../src/thirdparty/stb \
+                        -I$(sdl3_example_DIR)../../src/birdie-gui/thirdparty/stb \
                         $(shell pkg-config --cflags sdl3)
 sdl3_example_LDLIBS = $(shell pkg-config --libs sdl3) -lGLESv2 -lm

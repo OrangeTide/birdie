@@ -59,7 +59,7 @@ embed_example_CPPFLAGS = \
     -I$(embed_example_DIR)../../src/birdie-gui \
     -I$(embed_example_DIR)../../src/birdie-gui/bd_vt \
     -I$(embed_example_DIR)../../src/guitest \
-    -I$(embed_example_DIR)../../src/thirdparty/stb \
+    -I$(embed_example_DIR)../../src/birdie-gui/thirdparty/stb \
     -DEMBED_FONT_UI='"$(embed_ASSETS)/fonts/DejaVuSans.ttf"' \
     -DEMBED_PIN_OUT='"$(embed_ASSETS)/pushpin/pushpin-out-14.png"' \
     -DEMBED_PIN_IN='"$(embed_ASSETS)/pushpin/pushpin-in-14.png"' \

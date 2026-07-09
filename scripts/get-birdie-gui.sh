@@ -124,7 +124,7 @@ if [ -n "${BIRDIE_GUI_SHA256:-}" ]; then
 fi
 
 # Unpack. The bundle wraps everything in a single birdie-gui-<version>/ dir;
-# we strip that so dest holds include/, src/, ... directly.
+# we strip that so dest holds module.mk, the sources, bd_vt/, ... directly.
 command -v unzip >/dev/null 2>&1 || die "need unzip to unpack the bundle"
 unzip -q "$zip" -d "$tmp/unpacked" || die "corrupt or unreadable ZIP: $src"
 top=$(find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -name 'birdie-gui-*' \
