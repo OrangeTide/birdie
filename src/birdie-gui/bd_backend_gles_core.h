@@ -20,6 +20,18 @@
 
 #include "bd_backend.h"
 
+/*
+ * Load OpenGL ES function pointers from a getproc callback. Required only if
+ * birdie-gui was built with BD_GL_LOADER_BUILTIN (the default on Windows);
+ * if BD_GL_LOADER_EXTERNAL, this is a no-op returning 0 (the application is
+ * responsible for making glGenVertexArrays, glCreateShader, etc., available).
+ *
+ * Call once, after creating and making the GL context current, before any draw.
+ * Returns 0 on success, -1 if any required function is missing.
+ * Safe to call multiple times (second and later calls are no-ops).
+ */
+int        bd_gles_load_gl(void *(*getproc)(const char *name));
+
 /* Set 2D UI viewport; thin wrapper over glViewport. */
 void       bd_gles_viewport(int x, int y, int w, int h);
 

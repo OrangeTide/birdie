@@ -189,6 +189,22 @@ bd_backend_sdl3_open(const char *title, int w, int h)
 	}
 	SDL_GL_MakeCurrent(S.win, S.ctx);
 	SDL_GL_SetSwapInterval(1);   /* vsync */
+
+	/* Load GL function pointers from SDL_GL_GetProcAddress. This is required
+	 * for Windows (where opengl32.dll exports only GL 1.1, so runtime loading
+	 * of ES 3.0 entry points is mandatory) and portable on Linux. On other
+	 * platforms it's a no-op if BD_GL_LOADER_EXTERNAL is set (the app is
+	 * responsible for making gl* available). SDL_GL_GetProcAddress returns an
+	 * SDL_FunctionPointer (void (*)(void)), so cast it to the getproc type. */
+	if (bd_gles_load_gl((void *(*)(const char *))SDL_GL_GetProcAddress) != 0) {
+		fprintf(stderr, "sdl3: GL function loader failed\n");
+		SDL_GL_DestroyContext(S.ctx);
+		SDL_DestroyWindow(S.win);
+		S.ctx = NULL;
+		S.win = NULL;
+		return NULL;
+	}
+
 	return S.win;
 }
 

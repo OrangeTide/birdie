@@ -36,6 +36,19 @@ ifdef WIDGET_TEST
 SUBDIRS += src/guitest
 endif
 
+# GL Loader configuration:
+#
+#   BD_GL_LOADER=builtin (default)  — birdie-gui provides a built-in GLES loader.
+#                                      All GL entry points are resolved at runtime
+#                                      via bd_gles_load_gl(getproc). No link-time
+#                                      GL libs needed. Portable across Linux/Windows.
+#   BD_GL_LOADER=external           — birdie-gui assumes GL entry points are
+#                                      already available (GLEW, GLAD, Galogen,
+#                                      direct linking, or a custom loader).
+#                                      bd_gles_load_gl() becomes a no-op.
+#
+BD_GL_LOADER ?= builtin
+
 # ----------------------------------------------------------------------
 # Reference bd_backend bindings, declared here rather than in
 # src/birdie-gui/module.mk on purpose. Because `all` builds compile_commands.json
@@ -61,6 +74,20 @@ birdie_gui_gles_core_DIR := $(BD_GUI)/
 birdie_gui_gles_core_SRCS = bd_backend_gles_core.c
 birdie_gui_gles_core_LIBS = birdie_gui
 birdie_gui_gles_core_CPPFLAGS = -I$(BD_GUI) -I$(BD_GUI)/thirdparty/stb
+
+# GL loader configuration. Conditional bodies must not be tab-indented: a
+# leading tab makes make treat the line as a recipe, which mangles the $(error)
+# diagnostic below into a cryptic "recipe commences before first target".
+ifeq ($(BD_GL_LOADER), builtin)
+# Built-in loader: compile bd_gl.c and add the shim include dir to the path
+birdie_gui_gles_core_SRCS += bd_gl.c
+birdie_gui_gles_core_CPPFLAGS += -DBD_GL_LOADER_BUILTIN -I$(BD_GUI)
+else ifeq ($(BD_GL_LOADER), external)
+# External loader: define the flag but don't compile bd_gl.c
+birdie_gui_gles_core_CPPFLAGS += -DBD_GL_LOADER_EXTERNAL
+else
+$(error BD_GL_LOADER must be 'builtin' (default) or 'external', got: $(BD_GL_LOADER))
+endif
 
 # Shader-to-C generation using the vendored glsl2h.
 $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h

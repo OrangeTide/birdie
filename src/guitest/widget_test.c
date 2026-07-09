@@ -24,6 +24,7 @@
 #include "bd_widget_inventory.h"
 #include "bd_widget_indicator.h"
 #include "bd_backend_gles.h"
+#include "bd_backend_gles_core.h"
 #include "window.h"
 
 #include <stdint.h>
@@ -31,6 +32,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+
+#include <EGL/egl.h>
 
 static bd_id status;
 static bd_id term;
@@ -611,6 +614,14 @@ main(void)
 {
 	if (win_open("birdie-gui widget gallery", 1024, 928) != 0) {
 		fprintf(stderr, "widget_test: cannot open window\n");
+		return 1;
+	}
+
+	/* Load GL function pointers from eglGetProcAddress. Required for Windows
+	 * and portable on Linux. Fails gracefully if the loader is disabled. */
+	if (bd_gles_load_gl((void *(*)(const char *))eglGetProcAddress) != 0) {
+		fprintf(stderr, "widget_test: GL function loader failed\n");
+		win_close();
 		return 1;
 	}
 

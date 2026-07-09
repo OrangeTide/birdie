@@ -19,6 +19,13 @@
 #include <stddef.h>
 #include <stdio.h>
 
+/* When BD_GL_LOADER_BUILTIN is set (the default), include the GL loader header
+ * so we can resolve function pointers at runtime. When BD_GL_LOADER_EXTERNAL,
+ * this is omitted and bd_gles_load_gl becomes a no-op. */
+#ifdef BD_GL_LOADER_BUILTIN
+#include "bd_gl.h"
+#endif
+
 /* stb_image decodes PNGs for the backend's load_texture / load_texture_mem
  * (app-supplied textures; the toolkit's own fonts and pushpins are baked from
  * embedded bitmaps, not PNGs). It is bundled with birdie-gui; this core owns the
@@ -36,6 +43,21 @@ static struct {
 	GLuint cur_program;      /* program bound by use_shader */
 	int    ready;
 } gl;
+
+/* Load GL function pointers from a getproc callback (e.g., SDL_GL_GetProcAddress,
+ * eglGetProcAddress, or a custom shim). Required only when BD_GL_LOADER_BUILTIN
+ * is set (the default); when BD_GL_LOADER_EXTERNAL, this is a no-op (the
+ * application is responsible for making gl* available). */
+int
+bd_gles_load_gl(void *(*getproc)(const char *name))
+{
+#ifdef BD_GL_LOADER_BUILTIN
+	return bd_gl_load(getproc);
+#else
+	(void)getproc;
+	return 0;
+#endif
+}
 
 static void
 gl_lazy_init(void)
