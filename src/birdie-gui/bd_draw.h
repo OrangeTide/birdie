@@ -121,4 +121,15 @@ float bd_draw_text_width_styled(const char *s, int style);
 float bd_draw_line_height_styled(int style); /* per-face line height, px */
 float bd_draw_ascent_styled(int style);      /* per-face ascent, px */
 
+/* Embedded fixed-cell bitmap font, for terminals and other monospaced grids.
+ * Independent of the UI font: it bakes the unscii 8x8 / 8x16 subset sized so a
+ * cell is cell_h pixels tall (integer scaled, so pass a multiple of 8 or 16 for
+ * pixel-perfect output; cell_h <= 8 uses the 8x8 face, else 8x16), caching one
+ * baked size. bd_draw_cell_w returns the matching cell width for that height.
+ * bd_draw_cell draws one glyph by codepoint filling its cell with top-left at
+ * (x,y), tinted rgba, transparent elsewhere (the caller fills the background).
+ * A codepoint the subset lacks renders as '?'. */
+int   bd_draw_cell_w(int cell_h);
+void  bd_draw_cell(uint32_t cp, float x, float y, int cell_h, uint32_t rgba);
+
 #endif

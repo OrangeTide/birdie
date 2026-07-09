@@ -83,6 +83,12 @@ static struct face faces[FONT_FACES];
 static float        font_ascent;   /* regular proportional face (back-compat) */
 static float        font_line_h;
 
+/* Private embedded fixed-cell face for the terminal, baked on demand at the
+ * requested cell height (independent of the UI font). embed_baked_h is the
+ * cell_h it currently holds, 0 = not yet baked. */
+static struct face embed_face;
+static int         embed_baked_h;
+
 /* default face paths; override with -DBD_ASSET_GUI_FONT_* at build time, or
  * replace a face at runtime by id (BD_ASSET_FONT_*) via bd_asset_register_*. */
 #ifndef BD_ASSET_GUI_FONT
@@ -336,32 +342,46 @@ face_slot(const struct face *f, unsigned cp)
 }
 
 /*
- * Bake an embedded bitmap face into `slot`, integer-scaled to fit `px`. Two
- * native faces ship (bd_embed_font.h): an 8x8 and an 8x16 unscii subset. The
- * request picks 8x8 when px <= 8, else 8x16, then nearest-integer scales the
- * chosen cell (so a request that is a whole multiple of 8 or 16 is pixel
- * perfect). Both faces are a fixed 8 columns. Fills the same atlas + packedchar
- * data the TTF text path consumes and points the face at the codepoint map, so
- * the UI/terminal stays legible across Latin + box/block/geometric and nothing
- * downstream needs to know the glyphs are bitmaps. Glyphs past the atlas are
- * dropped. Used both as the no-TTF fallback and, first-class, by the terminal.
+ * Pick the embedded face and integer scale for a requested pixel height. Two
+ * native faces ship (bd_embed_font.h): an 8x8 and an 8x16 unscii subset. A
+ * request of 8 or less selects the 8x8 cell, else the 8x16 cell, then the cell
+ * is nearest-integer scaled (so a whole multiple of 8 or 16 is pixel perfect).
+ * Both faces are a fixed 8 columns, so the scaled cell is 8*sc x cellh*sc.
  */
 static void
-bake_embedded_face(int slot, float px)
+embed_geom(float px, int *cellh, int *sc)
 {
+	int ch = px <= 8.0f ? 8 : 16;
+	int s = (int)(px / (float)ch + 0.5f);
+	if (s < 1)
+		s = 1;
+	*cellh = ch;
+	*sc = s;
+}
+
+/*
+ * Bake an embedded bitmap face into `f`, integer-scaled to fit `px`. Fills the
+ * same atlas + packedchar data the TTF text path consumes and points the face
+ * at its codepoint map, so the UI/terminal stays legible across Latin +
+ * box/block/geometric and nothing downstream needs to know the glyphs are
+ * bitmaps. Glyphs past the atlas are dropped. Used both as the no-TTF fallback
+ * (into faces[0]) and, first-class, by the terminal (a private cell face).
+ */
+static void
+bake_embedded(struct face *f, float px)
+{
+	int cellh, sc;
+	embed_geom(px, &cellh, &sc);
 	const unsigned char *glyphs;
 	const unsigned      *cmap;
-	int nglyphs, cellh;
-	if (px <= 8.0f) {
+	int nglyphs;
+	if (cellh == 8) {
 		glyphs = (const unsigned char *)EMBED8_GLYPHS;
-		cmap = EMBED8_CMAP;  nglyphs = EMBED8_NGLYPHS;  cellh = 8;
+		cmap = EMBED8_CMAP;  nglyphs = EMBED8_NGLYPHS;
 	} else {
 		glyphs = (const unsigned char *)EMBED16_GLYPHS;
-		cmap = EMBED16_CMAP; nglyphs = EMBED16_NGLYPHS; cellh = 16;
+		cmap = EMBED16_CMAP; nglyphs = EMBED16_NGLYPHS;
 	}
-	int sc = (int)(px / (float)cellh + 0.5f);
-	if (sc < 1)
-		sc = 1;
 	int gw = 8 * sc, gh = cellh * sc;
 	int per_row = ATLAS_DIM / gw;
 	if (per_row < 1)
@@ -389,7 +409,7 @@ bake_embedded_face(int slot, float px)
 						p[0] = p[1] = p[2] = p[3] = 255;
 					}
 			}
-		stbtt_packedchar *pc = &faces[slot].packed[g];
+		stbtt_packedchar *pc = &f->packed[g];
 		pc->x0 = (unsigned short)cx;
 		pc->y0 = (unsigned short)cy;
 		pc->x1 = (unsigned short)(cx + gw);
@@ -401,13 +421,20 @@ bake_embedded_face(int slot, float px)
 		pc->yoff2 = 0.0f;
 		baked++;
 	}
-	faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
-	faces[slot].have = (faces[slot].atlas.id != 0);
-	faces[slot].cmap = cmap;            /* sorted codepoint -> slot map */
-	faces[slot].nglyphs = baked;
-	faces[slot].ascent = (float)gh;
-	faces[slot].line_h = (float)(gh + sc);
+	f->atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
+	f->have = (f->atlas.id != 0);
+	f->cmap = cmap;                     /* sorted codepoint -> slot map */
+	f->nglyphs = baked;
+	f->ascent = (float)gh;
+	f->line_h = (float)(gh + sc);
 	free(rgba);
+}
+
+/* Bake the embedded face into a numbered UI slot (the no-TTF fallback path). */
+static void
+bake_embedded_face(int slot, float px)
+{
+	bake_embedded(&faces[slot], px);
 	if (slot == 0) {
 		font_ascent = faces[slot].ascent;
 		font_line_h = faces[slot].line_h;
@@ -487,6 +514,11 @@ bd_draw_shutdown(void)
 			be->destroy_texture(faces[i].atlas);
 			faces[i].have = 0;
 		}
+	if (embed_face.have) {
+		be->destroy_texture(embed_face.atlas);
+		embed_face.have = 0;
+		embed_baked_h = 0;
+	}
 	be->destroy_texture(white);
 	be->destroy_shader(shader);
 	be = NULL;
@@ -691,6 +723,49 @@ bd_draw_text_width_styled(const char *s, int style)
 
 void  bd_draw_text(const char *s, float x, float y, uint32_t rgba)
 { bd_draw_text_styled(s, x, y, rgba, 0); }
+
+/* Ensure the private embedded cell face is baked for cell height `cell_h`. */
+static void
+ensure_embed(int cell_h)
+{
+	if (!be || cell_h < 1)
+		return;
+	if (embed_face.have && embed_baked_h == cell_h)
+		return;
+	if (embed_face.have) {
+		be->destroy_texture(embed_face.atlas);
+		embed_face.have = 0;
+	}
+	bake_embedded(&embed_face, (float)cell_h);
+	embed_baked_h = embed_face.have ? cell_h : 0;
+}
+
+int
+bd_draw_cell_w(int cell_h)
+{
+	int cellh, sc;
+	embed_geom((float)cell_h, &cellh, &sc);
+	return 8 * sc;
+}
+
+void
+bd_draw_cell(uint32_t cp, float x, float y, int cell_h, uint32_t rgba)
+{
+	ensure_embed(cell_h);
+	if (!embed_face.have)
+		return;
+	int slot = face_slot(&embed_face, cp);
+	if (slot < 0)
+		slot = face_slot(&embed_face, '?');
+	if (slot < 0)
+		return;
+	const stbtt_packedchar *pc = &embed_face.packed[slot];
+	float w = (float)(pc->x1 - pc->x0);
+	float h = (float)(pc->y1 - pc->y0);
+	quad(embed_face.atlas, x, y, w, h,
+	    pc->x0 / (float)ATLAS_DIM, pc->y0 / (float)ATLAS_DIM,
+	    pc->x1 / (float)ATLAS_DIM, pc->y1 / (float)ATLAS_DIM, rgba);
+}
 float bd_draw_text_width(const char *s)
 { return bd_draw_text_width_styled(s, 0); }
 

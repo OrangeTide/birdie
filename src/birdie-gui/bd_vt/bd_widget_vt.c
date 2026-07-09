@@ -1,7 +1,6 @@
 #include "bd_widget_vt.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
-#include "bd_asset.h"
 #include "vt_state.h"
 #include "vt_parse.h"
 #include "vt_ops.h"
@@ -12,25 +11,20 @@
 #include <stdio.h>
 
 /*
- * VT terminal widget, implemented as a toolkit extension. All terminal state,
- * the CP437 bitmap-font atlas, and the 256-color/truecolor resolver live here,
- * not in core widget.c.
+ * VT terminal widget, implemented as a toolkit extension. All terminal state
+ * and the 256-color/truecolor resolver live here, not in core widget.c. Cells
+ * are drawn with birdie-gui's embedded fixed-cell bitmap font (bd_draw_cell),
+ * so the terminal carries no texture of its own.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
-#define GLYPH_W   8
+/* Cell size. GLYPH_H selects the embedded face (16 -> the 8x16 unscii subset);
+ * GLYPH_W is the matching cell width bd_draw_cell renders at that height. */
 #define GLYPH_H   16
-#define FONT_COLS 32
-#define ATLAS_W   (FONT_COLS * GLYPH_W)   /* CP437 atlas: 32*8  = 256 px wide */
-#define ATLAS_H   128                     /* 256 glyphs / 32 cols = 8 rows * 16 */
+#define GLYPH_W   8               /* == bd_draw_cell_w(GLYPH_H) for cell_h 16 */
 
 #define TERM_SCROLLBACK 2000
-
-#ifndef BD_ASSET_TERM_FONT
-#define BD_ASSET_TERM_FONT "src/birdie-gui/assets/font8x16.png"
-#endif
-#define BD_ASSET_TERM_REL  "font8x16.png"   /* asset-root-relative (installed) */
 
 struct vt_widget {
 	struct vt_state  *vt;
@@ -41,8 +35,6 @@ struct vt_widget {
 };
 
 static int        vt_type;      /* registered type id (0 = not yet registered) */
-static bd_texture vt_font;      /* shared CP437 atlas */
-static int        vt_live;      /* live terminal count, governs font lifetime */
 
 /* ------------------------------------------------------------------ */
 /* drawing helpers (via the backend)                                  */
@@ -56,17 +48,12 @@ fill(int x, int y, int w, int h, uint32_t color)
 }
 
 static void
-glyph(int ch, float dx, float dy, uint32_t fg, uint32_t bg)
+glyph(uint32_t cp, float dx, float dy, uint32_t fg, uint32_t bg)
 {
-	int sx = (ch % FONT_COLS) * GLYPH_W;
-	int sy = (ch / FONT_COLS) * GLYPH_H;
-
 	if (bg & 0xFF)
 		bd_draw_rect(dx, dy, GLYPH_W, GLYPH_H, bg);
-	bd_draw_sprite(vt_font, dx, dy, GLYPH_W, GLYPH_H,
-	    sx / (float)ATLAS_W, sy / (float)ATLAS_H,
-	    (sx + GLYPH_W) / (float)ATLAS_W, (sy + GLYPH_H) / (float)ATLAS_H,
-	    fg);
+	if (cp != ' ')
+		bd_draw_cell(cp, dx, dy, GLYPH_H, fg);
 }
 
 /* Resolve a vt_color (default / 256-indexed / truecolor) to RGBA8. */
@@ -109,13 +96,6 @@ vt_init(bd_id id, void *state)
 {
 	struct vt_widget *t = state;
 
-	if (vt_live++ == 0) {
-		vt_font = bd_asset_texture(bd_backend_get(),
-		    BD_ASSET_TERMINAL_FONT, BD_ASSET_TERM_REL, BD_ASSET_TERM_FONT);
-		if (vt_font.id == 0)
-			fprintf(stderr, "bd: failed to load terminal font atlas\n");
-	}
-
 	t->cols = 80;
 	t->rows = 24;
 	t->vt = vt_state_new(t->rows, t->cols, TERM_SCROLLBACK);
@@ -138,11 +118,6 @@ vt_destroy(bd_id id, void *state)
 		vt_parse_free(t->vt_parser);
 	if (t->vt)
 		vt_state_free(t->vt);
-
-	if (--vt_live == 0 && vt_font.id != 0) {
-		bd_backend_get()->destroy_texture(vt_font);
-		vt_font.id = 0;
-	}
 }
 
 static void
@@ -193,12 +168,11 @@ vt_render(bd_id id, void *state)
 			if (cell->attrs & VT_ATTR_REVERSE) {
 				uint32_t tmp = fg; fg = bg; bg = tmp;
 			}
-			int ch = cell->codepoint < 256
-			    ? (int)cell->codepoint : '?';
-			if (ch == 0)
-				ch = ' ';
+			uint32_t cp = cell->codepoint;
+			if (cp == 0)
+				cp = ' ';
 			float dx = (float)(ox + c * GLYPH_W);
-			glyph(ch, dx, dy, fg, bg);
+			glyph(cp, dx, dy, fg, bg);
 		}
 	}
 

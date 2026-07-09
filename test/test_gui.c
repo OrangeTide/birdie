@@ -2000,6 +2000,23 @@ main(void)
 	check("embed: px>8 picks the taller 8x16 face", a16 > a8 && a16 >= 16.0f);
 	}
 
+	/* ---- embedded fixed-cell font (bd_draw_cell), the terminal's glyph path ---- */
+	{
+	bd_gui_init_fonts(&stub, NULL, NULL);
+	/* cell width is the 8-column face integer-scaled: 8 at h=8/16, 16 at h=32 */
+	check("cell: width tracks the requested height",
+	    bd_draw_cell_w(8) == 8 && bd_draw_cell_w(16) == 8 &&
+	    bd_draw_cell_w(32) == 16);
+	n_drawverts = 0;
+	bd_draw_begin(200, 100);
+	bd_draw_cell('A', 0, 0, 16, 0xFFFFFFFFu);          /* mapped ASCII */
+	bd_draw_cell(0x2500, 8, 0, 16, 0xFFFFFFFFu);       /* box drawing */
+	bd_draw_cell(0xFFFF, 16, 0, 16, 0xFFFFFFFFu);      /* unmapped -> '?' */
+	bd_draw_end();
+	check("cell: rendering embedded glyphs issues GPU draws", n_drawverts > 0);
+	bd_gui_cleanup();
+	}
+
 	/* ---- asset path resolution via the backend hook ---- */
 	{
 	char buf[256];
