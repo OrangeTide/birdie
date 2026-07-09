@@ -35,9 +35,9 @@ grep lumi only to cherry-pick a specific later fix). The stack:
 
 UTF-8 decode is birdie-gui's own `bd_utf8` (the toolkit's single codec,
 shared with the renderer), which the engine calls instead of carrying a
-second copy. The CP437 glyph-atlas rendering path (seeded from ludica's
-`ansiview` sample) now lives in the widget (`bd_widget_vt.c`) drawing
-through `bd_draw`, not a bundled renderer.
+second copy. Cell rendering lives in the widget (`bd_widget_vt.c`), which
+draws each cell through `bd_draw`'s embedded bitmap font (`bd_draw_cell`),
+not a bundled renderer or a texture atlas.
 
 ## What `libvt` already handles
 
@@ -97,23 +97,24 @@ against the `text` extraction (not raw cells). Plain substring in v1.0;
 regex later. Search results dirty the matching rows so highlighting
 falls out of the existing redraw path.
 
-### Glyph atlas
+### Glyph rendering
 
-From `ludica/samples/ansiview`. One texture atlas per font; the
-renderer looks up `codepoint` → atlas cell, then emits a textured quad
-with fg/bg colors. Fallback glyph for missing codepoints is the CP437
-replacement block.
+The widget draws each cell through `bd_draw_cell`, birdie-gui's embedded
+fixed-cell bitmap font: an 8x8 / 8x16 unscii subset (public domain)
+compiled into the toolkit, looked up by real codepoint and drawn with
+fg/bg colors. The terminal carries no font texture of its own. A
+codepoint outside the subset renders as `?`.
 
-- v1.0 ships a bundled VGA-style CP437 font (public domain) for the
-  MUDs that still expect DOS aesthetics, plus a Unicode coverage font
-  (proposed: **Cozette** or **Unifont** — final pick at build time)
-  for everything else.
+- The embedded subset covers Basic Latin, Latin-1, punctuation, arrows,
+  box drawing, block elements, and geometric shapes — the glyphs MUD
+  output actually uses. Wider Unicode coverage (a profile-selectable
+  font) is future work.
 - Per-profile font override is a `font` column on the profile plist
   (`doc/profiles.md`). It is a **custom column** — not in the v1.0
   title schema — so that font preferences do not leak across users
   via CSV export.
-- Font fallback chain: profile font → Unicode font → CP437 font →
-  replacement block.
+- Font fallback: embedded bitmap font → `?` for an unmapped codepoint
+  (a profile / Unicode coverage font would extend the chain).
 
 ### Copy / paste
 

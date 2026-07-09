@@ -63,7 +63,7 @@ be_time(void)
 /* Locate an asset next to the executable (or, on macOS, the .app bundle's
  * Resources) via SDL_GetBasePath. On a hit, writes the path into the caller's
  * `buf` and returns it; returns NULL if not found there (the toolkit then uses
- * its dev-tree path). */
+ * the plain relative name, read from the cwd). */
 static const char *
 be_resolve_asset(const char *rel, char *buf, size_t bufsz)
 {

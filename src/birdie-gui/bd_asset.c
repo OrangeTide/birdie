@@ -101,8 +101,7 @@ bd_asset_resolve(const bd_backend *be, const char *rel, const char *fallback,
 }
 
 bd_texture
-bd_asset_texture(const bd_backend *be, const char *id, const char *rel,
-    const char *default_path)
+bd_asset_texture(const bd_backend *be, const char *id, const char *rel)
 {
 	bd_asset a;
 	char buf[4096];
@@ -114,6 +113,8 @@ bd_asset_texture(const bd_backend *be, const char *id, const char *rel,
 		if (a.path)
 			return be->load_texture(a.path);
 	}
+	/* built-in sprite: locate `rel` next to the executable (resolve_asset),
+	 * else fall back to the same relative name (found in $(BINDIR) or cwd). */
 	return be->load_texture(
-	    bd_asset_resolve(be, rel, default_path, buf, sizeof buf));
+	    bd_asset_resolve(be, rel, rel, buf, sizeof buf));
 }

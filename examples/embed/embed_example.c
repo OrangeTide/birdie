@@ -27,12 +27,11 @@
  *
  * No build-machine path leaks into the binary: the .incbin source paths are a
  * build-time detail that never reaches the output, and this example passes them
- * relative. Never point them (or BD_ASSET_*) at an $(abspath ...) -- that would
- * bake the build machine's directory layout and username into every shipped
- * copy. The toolkit's default file paths ("src/birdie-gui/assets/...") still
- * appear as unused fallback strings because this example shares compiled toolkit
- * objects with the SDL3 example; a standalone consumer strips them by overriding
- * the BD_ASSET_GUI_FONT* / _TERM_FONT / _PIN_* defaults. See README.md.
+ * relative. Never point an .incbin path at an $(abspath ...) -- that would bake
+ * the build machine's directory layout and username into every shipped copy.
+ * The toolkit's built-in asset names are short relative sub-paths
+ * ("fonts/DejaVuSans.ttf", "pushpin/...") that this build never reads because
+ * every asset is registered by id; they are machine-independent. See README.md.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

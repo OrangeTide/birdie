@@ -31,10 +31,10 @@
  * parent tree):
  *
  *   cd examples && make
- *   cd .. && examples/_out/<triplet>/bin/sdl3_example
+ *   examples/_out/<triplet>/bin/sdl3_example
  *
- * Run it from the repo root so the compiled-in BD_ASSET_* font/pushpin paths
- * resolve against src/birdie-gui/assets/.
+ * The examples build stages the fonts/pushpin assets next to the binary (the
+ * SDL3 backend finds them via SDL_GetBasePath), so it runs from any directory.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

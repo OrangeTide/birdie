@@ -22,20 +22,11 @@
 #define TYPE_B      6
 
 /*
- * Asset paths — compile-time configurable. Override any of these with
- * -DBD_ASSET_xxx='"path"' at build time; the defaults assume the source
- * tree layout.
+ * Pushpin sprites, named by their asset-root-relative sub-path. The backend's
+ * resolve_asset hook locates them next to the installed executable; the build
+ * copies them into $(BINDIR) so a plain `make` run finds them there. Register a
+ * source under BD_ASSET_PUSHPIN_OUT / _IN (bd_asset.h) to override at runtime.
  */
-#ifndef BD_ASSET_GUI_FONT
-#define BD_ASSET_GUI_FONT    "src/birdie-gui/assets/fonts/DejaVuSans.ttf"
-#endif
-#ifndef BD_ASSET_PIN_OUT
-#define BD_ASSET_PIN_OUT     "src/birdie-gui/assets/pushpin/pushpin-out-14.png"
-#endif
-#ifndef BD_ASSET_PIN_IN
-#define BD_ASSET_PIN_IN      "src/birdie-gui/assets/pushpin/pushpin-in-14.png"
-#endif
-/* asset-root-relative names for the backend's resolve_asset hook (installed) */
 #define BD_ASSET_PIN_OUT_REL "pushpin/pushpin-out-14.png"
 #define BD_ASSET_PIN_IN_REL  "pushpin/pushpin-in-14.png"
 
@@ -2565,9 +2556,9 @@ bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
 	if (!bd_draw_init_fonts(be, fonts, theme.font_size))
 		fprintf(stderr, "bd: renderer init failed\n");
 	pin_out_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_OUT,
-	    BD_ASSET_PIN_OUT_REL, BD_ASSET_PIN_OUT);
+	    BD_ASSET_PIN_OUT_REL);
 	pin_in_tex = bd_asset_texture(be, BD_ASSET_PUSHPIN_IN,
-	    BD_ASSET_PIN_IN_REL, BD_ASSET_PIN_IN);
+	    BD_ASSET_PIN_IN_REL);
 }
 
 void

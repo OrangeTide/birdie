@@ -10,8 +10,8 @@
 #
 # Linux/X11 only and opt-in: the top-level module.mk adds this directory to
 # SUBDIRS only when WIDGET_TEST is set, so a plain `make` never builds it. Use
-# the top-level `make widget-test` alias, and run the binary from the repo root
-# so the default BD_ASSET_* asset paths resolve.
+# the top-level `make widget-test` alias, which also stages the fonts/pushpin
+# assets next to the binary, so it runs from any directory.
 #
 # Made by a machine. PUBLIC DOMAIN (CC0-1.0)
 #

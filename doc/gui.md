@@ -206,7 +206,7 @@ What is built:
   bufsz)` hook lets an *installed* app find its runtime assets next to the
   executable instead of relative to the current directory. The backend writes
   the located absolute path into the caller-owned buffer and returns it, or
-  `NULL` to fall back to the cwd-relative dev path. Resolvers: SDL3
+  `NULL` to fall back to the plain relative name (read from the cwd). Resolvers: SDL3
   (`SDL_GetBasePath`), GLES and ludica (Linux `/proc/self/exe` dir,
   `../share/birdie`, `$HOME/.local/share/birdie`). See Rendering, "Custom and
   embedded assets".
@@ -360,15 +360,14 @@ only one for the texture assets. `bd_draw_set_font_reader` remains as a
 lower-level per-path hook for a host with its own resolver.
 
 **Keeping build paths out of the binary.** The registry keys are the fixed
-`BD_ASSET_*` id strings (short, generic) and expose nothing. The only paths that
-get baked in are the toolkit's **default fallback** file paths (the
-`BD_ASSET_GUI_FONT*` / `BD_ASSET_PIN_*` macros, compiled
-in as literals). Never set one (or an `.incbin` source path) to an
-`$(abspath ...)`: that bakes the build machine's directory layout and username
-into every copy, and once every asset is registered by id nothing reads those
-paths. When embedding everything, override them to short strings to drop the
-`src/birdie-gui/assets/...` literals entirely. The `examples/embed/` example
-demonstrates the id-based embedding and this caveat.
+`BD_ASSET_*` id strings (short, generic) and expose nothing. The only file
+names baked in are the built-in assets' short **relative sub-paths**
+(`fonts/DejaVuSans.ttf`, `pushpin/…`) — no absolute paths, nothing
+machine-specific, identical in every build. The build copies those assets into
+`$(BINDIR)` next to the executable, where `resolve_asset` finds them; keep any
+`.incbin` source path (a build-time detail) machine-independent and it never
+reaches the binary either. The `examples/embed/` example registers every asset
+by id so a self-contained binary reads no files at all.
 
 **Finding assets on disk (`resolve_asset`).** Registration covers "use my
 bytes/file"; the remaining case is an *installed* app whose assets sit next to
@@ -460,8 +459,8 @@ raw OpenGL ES 3 backend plus a standalone widget gallery:
   GLES3 (shader compile, streaming vertex buffer, textures, scissor).
 - `src/guitest/widget_test.c` — the gallery: menus (incl. a pinnable one),
   terminal, input line, every value widget, sliders, buttons, with an event
-  readout. Built by `make widget-test` (Linux/X11, opt-in), run from the
-  repo root.
+  readout. Built by `make widget-test` (Linux/X11, opt-in); the build stages
+  the fonts/pushpin assets next to the binary, so it runs from any directory.
 
 Owning this backend means birdie-gui has a non-ludica reference
 implementation. The plan is to **bundle both the GLES backend and the

@@ -446,22 +446,11 @@ gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
 example. Its GPU code (shaders, quad batch, textures, scissor) lives in the
 shared `src/bd_backend_gles_core.{c,h}`, which `src/bd_backend_sdl3.c` uses too;
 compile `src/bd_backend_gles_core.c` alongside whichever GLES backend you pick.
-Build it (Linux) with the bundled `bd_vt/` on the include path and the
-asset paths pointed at the bundle's `assets/` (the compiled-in defaults assume
-birdie's source tree). `bd_vt/*.c` supplies the terminal (VT engine + widget):
+Build it (Linux) with the bundled `bd_vt/` on the include path. `bd_vt/*.c`
+supplies the terminal (VT engine + widget):
 
 ```sh
 cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
-   -DBD_ASSET_GUI_FONT='"assets/fonts/DejaVuSans.ttf"' \
-   -DBD_ASSET_GUI_FONT_BOLD='"assets/fonts/DejaVuSans-Bold.ttf"' \
-   -DBD_ASSET_GUI_FONT_ITALIC='"assets/fonts/DejaVuSans-Oblique.ttf"' \
-   -DBD_ASSET_GUI_FONT_BOLDITALIC='"assets/fonts/DejaVuSans-BoldOblique.ttf"' \
-   -DBD_ASSET_GUI_FONT_MONO='"assets/fonts/DejaVuSansMono.ttf"' \
-   -DBD_ASSET_GUI_FONT_MONO_BOLD='"assets/fonts/DejaVuSansMono-Bold.ttf"' \
-   -DBD_ASSET_GUI_FONT_MONO_ITALIC='"assets/fonts/DejaVuSansMono-Oblique.ttf"' \
-   -DBD_ASSET_GUI_FONT_MONO_BOLDITALIC='"assets/fonts/DejaVuSansMono-BoldOblique.ttf"' \
-   -DBD_ASSET_PIN_OUT='"assets/pushpin/pushpin-out-14.png"' \
-   -DBD_ASSET_PIN_IN='"assets/pushpin/pushpin-in-14.png"' \
    backend-gles/widget_test.c backend-gles/x11_window.c \
    backend-gles/bd_backend_gles.c src/bd_backend_gles_core.c \
    src/widget.c src/bd_draw.c src/bd_asset.c src/bd_utf8.c \
@@ -469,10 +458,13 @@ cc -Iinclude -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
    src/bd_widget_canvas.c src/bd_widget_table.c src/bd_widget_inventory.c \
    src/bd_widget_dock.c src/bd_widget_actionbar.c src/bd_widget_tabview.c \
    src/bd_widget_indicator.c bd_vt/*.c \
-   -lX11 -lXi -lEGL -lGLESv2 -lm -o gallery
+   -lX11 -lXi -lEGL -lGLESv2 -lm -o assets/gallery
 ```
 
-Run `./gallery` from the bundle root so those relative asset paths resolve.
+The toolkit finds its fonts and pushpin sprites by their relative sub-path
+(`fonts/…`, `pushpin/…`), located next to the executable or in the current
+directory. The bundle keeps them under `assets/`, so build the binary into
+`assets/` (as above) and run it from there: `cd assets && ./gallery`.
 
 ## Dependencies
 
@@ -490,19 +482,19 @@ Run `./gallery` from the bundle root so those relative asset paths resolve.
   selects a face; a missing variant TTF falls back to regular. The editor uses
   the mono family by default (`bd_editor_set_monospace`).
 
-The assets the toolkit loads (`assets/` — the chrome TTFs, the terminal's CP437
-atlas, the pushpin sprites) must be reachable at the paths in `widget.c` /
-`bd_draw.c` / `bd_widget_vt.c`, or overridden with `-DBD_ASSET_*` (the eight font faces are
-`BD_ASSET_GUI_FONT`[`_BOLD`/`_ITALIC`/`_BOLDITALIC`] and the same with a
-`_MONO` prefix on the suffix, e.g. `BD_ASSET_GUI_FONT_MONO_BOLD`). Or compile
-them into the binary and register them so no files are read at all -- see
+The assets the toolkit loads on disk (the chrome TTFs and the pushpin sprites)
+are named only by their asset-root-relative sub-path (`fonts/…`, `pushpin/…`;
+the terminal needs none — its bitmap font is compiled in). The backend's
+`resolve_asset` hook locates them next to the executable (an installed layout),
+and otherwise they are read relative to the current directory. Stage the
+`assets/` tree next to your binary, or compile the fonts into it and register
+them so no files are read at all -- see "Using your own fonts" and
 "Embedding assets" below.
 
 ## Using your own fonts
 
-The `-DBD_ASSET_*` macros above set the *defaults*, but you do not have to
-override eight macros (and risk silently missing one) to ship a custom family.
-Fill a `bd_font_set` and pass it once. Each of the eight faces is a
+You do not have to place font files on disk at all to ship a custom family:
+fill a `bd_font_set` and pass it once. Each of the eight faces is a
 `bd_font_face` that is either a filesystem path or an in-memory TTF/OTF buffer;
 a face left zeroed falls back to `regular` at draw time.
 
@@ -546,8 +538,8 @@ bd_gui_init(backend, theme);   /* faces given by path now go through my_reader *
 The lower-level renderer entry points (`bd_draw_init_fonts`,
 `bd_draw_set_font_reader`) are in `bd_draw.h` if you are not using the widget
 layer. `bd_draw_init(be, path, px)` remains and is unchanged: it bakes `path`
-as the regular face and the seven variants from the `BD_ASSET_GUI_FONT_*`
-macros.
+as the regular face and resolves the seven variants by id / built-in
+relative name.
 
 ## Embedding assets (fonts and images), and custom fonts
 
@@ -604,27 +596,16 @@ font_ui:     .incbin "assets/fonts/MyFont.otf"
 font_ui_end:
 ```
 
-### Keeping build paths out of the binary
+### Build paths stay out of the binary
 
-The registry keys are the fixed `BD_ASSET_*` id strings (short, generic), so
-they expose nothing. The only paths that get baked in are the **default file
-paths** the toolkit falls back to (the `BD_ASSET_GUI_FONT*` and
-`BD_ASSET_PIN_*` macros -- string literals compiled in). Two rules keep those
-clean:
-
-- **Never set a default path (or an `.incbin` source path) to an `$(abspath ...)`.**
-  That bakes the build machine's directory layout and username into every
-  shipped copy. It is also pointless: those paths are only a fallback, and once
-  you register every asset by id nothing reads them.
-- **When embedding everything, override the default paths to short strings** (or
-  drop them): `-DBD_ASSET_GUI_FONT='"font.ttf"'` and the like. Then the binary
-  carries no `src/birdie-gui/assets/...` at all.
-
-The default relative paths are otherwise harmless -- identical in every build,
-nothing machine-specific. The bundled `examples/embed/` demonstrates the
-id-based embedding; because it shares compiled toolkit objects with the SDL3
-example it keeps the default fallback paths, but a standalone build overrides
-them as above.
+There is nothing to configure here. The registry keys are the fixed `BD_ASSET_*`
+id strings (short, generic), and the only file names baked in are the built-in
+assets' short relative sub-paths (`fonts/DejaVuSans.ttf`, `pushpin/…`) -- no
+absolute paths, no build-machine layout, identical in every build. The backend's
+`resolve_asset` hook locates those next to the executable at runtime; keep an
+`.incbin` source path (a build-time detail) machine-independent and it never
+reaches the binary either. The bundled `examples/embed/` demonstrates registering
+every asset by id so a fully self-contained binary reads no files at all.
 
 ## License
 

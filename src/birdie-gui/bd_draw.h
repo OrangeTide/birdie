@@ -45,11 +45,11 @@ typedef unsigned char *(*bd_font_reader)(const char *path, long *len);
 void bd_draw_set_font_reader(bd_font_reader fn);
 
 /* Create the renderer on a backend. font_path is a TTF/OTF baked at font_px
- * for the regular chrome face; the seven bold/italic/mono variants come from
- * the BD_ASSET_GUI_FONT_* build-time macros. Pass NULL to run without text
+ * for the regular chrome face; the seven bold/italic/mono variants resolve by
+ * their generic id or built-in relative name. Pass NULL to run without text
  * (text calls become no-ops). Returns 1 on success, 0 if the shader or mesh
  * could not be created. Equivalent to bd_draw_init_fonts with a face set built
- * from font_path plus the macro defaults. */
+ * from font_path plus the built-in defaults. */
 int  bd_draw_init(const bd_backend *be, const char *font_path, float font_px);
 
 /* Create the renderer baking an explicit face set at font_px. Faces left

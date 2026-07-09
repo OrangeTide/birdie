@@ -7,7 +7,8 @@
  * stay exercised. It also doubles as the place to grow interactive widget
  * tests as new widgets land.
  *
- * Run from the repo root so the default BD_ASSET_* paths resolve.
+ * The build stages the fonts/pushpin assets next to the binary, so it runs
+ * from any directory.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

@@ -69,17 +69,11 @@ point `BD_ASSET_*` or an `.incbin` path at an `$(abspath ...)`, which would bake
 the build machine's directory layout and username into every shipped copy.
 
 The registry keys are the fixed `BD_ASSET_*` id strings (short, generic), so
-they leak nothing. The only paths that appear in `strings embed_example` are the
-toolkit's **default fallback** file paths (`src/birdie-gui/assets/...`), which
-this build never reads because every asset is registered by id. They show up
-because this example shares its compiled toolkit objects (`widget.o`,
-`bd_draw.o`, ...) with the SDL3 example in the same modular-make project, so it
-cannot recompile them with its own macro overrides. A real consumer compiles
-birdie-gui as its own single executable and overrides those default paths to
-short strings (`-DBD_ASSET_GUI_FONT='"font.ttf"'`, and the same for the variants
-and `BD_ASSET_PIN_*`), leaving no `src/birdie-gui/assets/...`
-in the binary at all. See the toolkit README's "Keeping build paths out of the
-binary".
+they leak nothing. The only file names in `strings embed_example` are the
+toolkit's built-in **relative sub-paths** (`fonts/DejaVuSans.ttf`, `pushpin/…`),
+which this build never reads because every asset is registered by id. They are
+short and machine-independent by construction — nothing to strip. See the
+toolkit README's "Build paths stay out of the binary".
 
 ## Build and run
 

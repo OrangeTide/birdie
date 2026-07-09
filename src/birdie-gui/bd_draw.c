@@ -25,8 +25,8 @@
 #define FONT_FIRST  0x20
 #define FONT_COUNT  0xE0        /* 0x20..0xFF: Basic Latin + Latin-1 (TTF bake) */
 #define MAX_GLYPHS  1024        /* packed-glyph capacity per face; the embedded
-                                   fallback maps a large codepoint set (CP437 +
-                                   Latin + box/block), more than the contiguous
+                                   font maps a large codepoint set (Latin +
+                                   box/block/geometric), more than the contiguous
                                    FONT_COUNT the TTF path bakes */
 
 static const char *VERT_SRC =
@@ -89,51 +89,19 @@ static float        font_line_h;
 static struct face embed_face;
 static int         embed_baked_h;
 
-/* default face paths; override with -DBD_ASSET_GUI_FONT_* at build time, or
- * replace a face at runtime by id (BD_ASSET_FONT_*) via bd_asset_register_*. */
-#ifndef BD_ASSET_GUI_FONT
-#define BD_ASSET_GUI_FONT            "src/birdie-gui/assets/fonts/DejaVuSans.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_BOLD
-#define BD_ASSET_GUI_FONT_BOLD       "src/birdie-gui/assets/fonts/DejaVuSans-Bold.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_ITALIC
-#define BD_ASSET_GUI_FONT_ITALIC     "src/birdie-gui/assets/fonts/DejaVuSans-Oblique.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_BOLDITALIC
-#define BD_ASSET_GUI_FONT_BOLDITALIC "src/birdie-gui/assets/fonts/DejaVuSans-BoldOblique.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_MONO
-#define BD_ASSET_GUI_FONT_MONO           "src/birdie-gui/assets/fonts/DejaVuSansMono.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_MONO_BOLD
-#define BD_ASSET_GUI_FONT_MONO_BOLD      "src/birdie-gui/assets/fonts/DejaVuSansMono-Bold.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_MONO_ITALIC
-#define BD_ASSET_GUI_FONT_MONO_ITALIC    "src/birdie-gui/assets/fonts/DejaVuSansMono-Oblique.ttf"
-#endif
-#ifndef BD_ASSET_GUI_FONT_MONO_BOLDITALIC
-#define BD_ASSET_GUI_FONT_MONO_BOLDITALIC "src/birdie-gui/assets/fonts/DejaVuSansMono-BoldOblique.ttf"
-#endif
-
 /* Per-face parallel arrays, indexed by BD_FONT_BOLD|ITALIC|MONO. Each face is
  * resolved as: an explicit bd_font_face from the caller, else a source
- * registered under its generic id, else its default file. */
+ * registered under its generic id, else its built-in file. The built-in file is
+ * named only by its asset-root-relative sub-path (font_rel): the backend's
+ * resolve_asset hook locates it next to the installed executable, and the build
+ * copies these fonts into $(BINDIR) so a plain `make` run finds them there. */
 static const char *const font_asset_id[FONT_FACES] = {
 	BD_ASSET_FONT_REGULAR,   BD_ASSET_FONT_BOLD,
 	BD_ASSET_FONT_ITALIC,    BD_ASSET_FONT_BOLD_ITALIC,
 	BD_ASSET_FONT_MONO,      BD_ASSET_FONT_MONO_BOLD,
 	BD_ASSET_FONT_MONO_ITALIC, BD_ASSET_FONT_MONO_BOLD_ITALIC,
 };
-static const char *const font_default_path[FONT_FACES] = {
-	BD_ASSET_GUI_FONT,       BD_ASSET_GUI_FONT_BOLD,
-	BD_ASSET_GUI_FONT_ITALIC, BD_ASSET_GUI_FONT_BOLDITALIC,
-	BD_ASSET_GUI_FONT_MONO,  BD_ASSET_GUI_FONT_MONO_BOLD,
-	BD_ASSET_GUI_FONT_MONO_ITALIC, BD_ASSET_GUI_FONT_MONO_BOLDITALIC,
-};
-/* asset-root-relative names, for the backend's resolve_asset hook (installed
- * apps); parallel to font_default_path (which is the current-dir fallback) */
-static const char *const font_rel_name[FONT_FACES] = {
+static const char *const font_rel[FONT_FACES] = {
 	"fonts/DejaVuSans.ttf",           "fonts/DejaVuSans-Bold.ttf",
 	"fonts/DejaVuSans-Oblique.ttf",   "fonts/DejaVuSans-BoldOblique.ttf",
 	"fonts/DejaVuSansMono.ttf",       "fonts/DejaVuSansMono-Bold.ttf",
@@ -141,9 +109,9 @@ static const char *const font_rel_name[FONT_FACES] = {
 };
 
 /* Resolve one face: an explicit caller face wins, else a registered source for
- * `id`, else the default file path. */
+ * `id`, else the built-in file named by its relative sub-path `rel`. */
 static bd_font_face
-resolve_face(const bd_font_face *given, const char *id, const char *default_path)
+resolve_face(const bd_font_face *given, const char *id, const char *rel)
 {
 	if (given && (given->data || given->path))
 		return *given;
@@ -155,7 +123,7 @@ resolve_face(const bd_font_face *given, const char *id, const char *default_path
 		if (a.path)
 			return (bd_font_face){ .path = a.path };
 	}
-	return (bd_font_face){ .path = default_path };
+	return (bd_font_face){ .path = rel };
 }
 
 static inline void
@@ -472,13 +440,14 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 	for (int i = 0; i < FONT_FACES; i++) {
 		char pathbuf[4096];
 		bd_font_face face = resolve_face(f[i], font_asset_id[i],
-		    font_default_path[i]);
+		    font_rel[i]);
 		/* a built-in default (not a caller/registered face): let the backend
-		 * relocate it next to an installed executable, else keep the dev path.
+		 * locate it next to the installed executable, else keep the relative
+		 * name (found in $(BINDIR) after the build's asset copy, or cwd).
 		 * pathbuf outlives bake_font's read within this iteration. */
-		if (face.path == font_default_path[i])
-			face.path = bd_asset_resolve(be, font_rel_name[i],
-			    font_default_path[i], pathbuf, sizeof pathbuf);
+		if (face.path == font_rel[i])
+			face.path = bd_asset_resolve(be, font_rel[i],
+			    font_rel[i], pathbuf, sizeof pathbuf);
 		bake_font(&face, font_px, i, i == 0); /* regular sets metrics */
 	}
 	/* No usable regular face (missing/unreadable font): fall back to an

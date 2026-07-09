@@ -77,7 +77,7 @@ static void be_ime_set_cursor_rect(int x, int y, int w, int h)
  * executable's own directory, a sibling ../share/birdie data dir (the usual
  * FHS install layout), and $HOME/.local/share/birdie. On the first hit writes
  * the absolute path into the caller's `buf` and returns it; NULL if none exist
- * (the toolkit then uses the dev-tree path relative to the cwd). */
+ * (the toolkit then uses the plain relative name, read from the cwd). */
 static const char *
 be_resolve_asset(const char *rel, char *buf, size_t bufsz)
 {

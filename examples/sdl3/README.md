@@ -58,14 +58,14 @@ toolkit does not consume (over the 3D background) rotate the tetrahedron.
 ## Build and run
 
 The examples are a **separate modular-make project** (this directory has its own
-copy of `GNUmakefile`), so the main birdie build never depends on SDL3. Build
-from `examples/`, then run the binary **from the repo root** so the compiled-in
-`BD_ASSET_*` font and atlas paths resolve against `src/birdie-gui/assets/`:
+copy of `GNUmakefile`), so the main birdie build never depends on SDL3. The build
+stages the toolkit's fonts and pushpin sprites next to the example binaries (the
+SDL3 backend locates them there via `SDL_GetBasePath`), so it runs from any
+directory:
 
 ```sh
 cd examples && make                             # builds under examples/_out/
-cd ..                                           # back to the repo root
-examples/_out/x86_64-linux-gnu/bin/sdl3_example
+_out/x86_64-linux-gnu/bin/sdl3_example          # runs from anywhere
 ```
 
 Requires **SDL3** (found via `pkg-config sdl3`) and an OpenGL ES 3 loader

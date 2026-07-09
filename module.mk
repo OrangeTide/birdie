@@ -41,6 +41,30 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 	$(LUDICA)/tools/glsl2h $< > $@
 
 # ----------------------------------------------------------------------
+# Runtime assets staged next to the built executables.
+#
+# The toolkit names its built-in fonts and pushpin sprites only by their
+# asset-root-relative sub-path (e.g. "fonts/DejaVuSans.ttf"); the backend's
+# resolve_asset hook looks for them beside the executable. Copy the assets into
+# $(BINDIR) so a plain `make` run finds them there and the binary runs from any
+# working directory, no compile-time dev-path defaults needed.
+# ----------------------------------------------------------------------
+BD_ASSET_DIR := src/birdie-gui/assets
+BD_FONT_OUT  := $(patsubst $(BD_ASSET_DIR)/fonts/%,$(BINDIR)/fonts/%,\
+                  $(wildcard $(BD_ASSET_DIR)/fonts/*.ttf))
+BD_PIN_OUT   := $(patsubst $(BD_ASSET_DIR)/pushpin/%,$(BINDIR)/pushpin/%,\
+                  $(wildcard $(BD_ASSET_DIR)/pushpin/*.png))
+
+$(BINDIR)/fonts/% : $(BD_ASSET_DIR)/fonts/% | $(BINDIR)/fonts
+	cp $< $@
+$(BINDIR)/pushpin/% : $(BD_ASSET_DIR)/pushpin/% | $(BINDIR)/pushpin
+	cp $< $@
+$(BINDIR)/fonts $(BINDIR)/pushpin :
+	mkdir -p $@
+
+all :: $(BD_FONT_OUT) $(BD_PIN_OUT)
+
+# ----------------------------------------------------------------------
 # Convenience aliases for the modular-make targets declared in the
 # module.mk files above, so the documented entry points keep working:
 #
@@ -51,10 +75,10 @@ $(BUILDDIR)/%.c : %.glsl $(LUDICA)/tools/glsl2h
 test : run-test-test_gui
 
 .PHONY : widget-test
-widget-test :
+widget-test : $(BD_FONT_OUT) $(BD_PIN_OUT)
 	@$(MAKE) WIDGET_TEST=1 birdie-gui-gallery
 	@echo "built widget gallery: $(BINDIR)/birdie-gui-gallery"
-	@echo "run it from the repo root: $(BINDIR)/birdie-gui-gallery"
+	@echo "run it from anywhere: $(BINDIR)/birdie-gui-gallery"
 
 # ----------------------------------------------------------------------
 # Source distribution of the GUI toolkit (birdie-gui).

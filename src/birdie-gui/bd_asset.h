@@ -68,11 +68,11 @@ const char *bd_asset_resolve(const bd_backend *be, const char *rel,
     const char *fallback, char *buf, size_t bufsz);
 
 /* Resolve a texture asset and upload it through the backend: registered data
- * (decoded from memory), a registered file, or the default when the id is
- * unregistered -- the default is `rel` located via the backend's resolve_asset
- * hook, falling back to `default_path` (current-directory-relative). Used by
- * the toolkit for the pushpin sprites. */
+ * (decoded from memory), a registered file, or the built-in when the id is
+ * unregistered -- the built-in is the asset-root-relative `rel`, located via
+ * the backend's resolve_asset hook (next to the executable) and otherwise used
+ * as-is (relative to the cwd). Used by the toolkit for the pushpin sprites. */
 bd_texture bd_asset_texture(const bd_backend *be, const char *id,
-    const char *rel, const char *default_path);
+    const char *rel);
 
 #endif /* BD_ASSET_H */

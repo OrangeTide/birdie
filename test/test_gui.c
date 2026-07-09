@@ -26,6 +26,7 @@
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ---- table model: deliberately unsorted, with string!=numeric port order ---- */
 static const char *tbl_data[3][2] = {
@@ -156,6 +157,17 @@ be_resolve(const char *rel, char *buf, size_t bufsz)
 	return NULL;
 }
 
+/* Dev-tree resolver for the general stubs: maps an asset-root-relative name to
+ * the in-tree assets dir, standing in for the build's copy-next-to-the-binary.
+ * `make test` runs from the repo root, so the real TTFs load and the font path
+ * is exercised (without it every init would fall back to the embedded font). */
+static const char *
+be_resolve_dev(const char *rel, char *buf, size_t bufsz)
+{
+	snprintf(buf, bufsz, "src/birdie-gui/assets/%s", rel);
+	return access(buf, R_OK) == 0 ? buf : NULL;
+}
+
 static const bd_backend stub = {
 	.width=be_width, .height=be_height, .time=be_time, .viewport=be_viewport,
 	.clear=be_clear,
@@ -169,6 +181,7 @@ static const bd_backend stub = {
 	.scissor=be_scissor, .scissor_off=be_scissor_off,
 	.clipboard_set=be_clip_set, .clipboard_get=be_clip_get,
 	.ime_set_enabled=be_ime_enable, .ime_set_cursor_rect=be_ime_rect,
+	.resolve_asset=be_resolve_dev,
 };
 
 /* ---- multi-window stub: like `stub` but advertises native windows ---- */
@@ -199,6 +212,7 @@ static const bd_backend mwstub = {
 	.window_begin=mw_begin, .window_swap=mw_swap,
 	.window_width=mw_w, .window_height=mw_h, .window_set_title=mw_title,
 	.window_minimize=mw_minimize, .window_restore=mw_restore,
+	.resolve_asset=be_resolve_dev,
 };
 
 static int text_committed;
