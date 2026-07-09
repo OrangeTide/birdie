@@ -28,18 +28,22 @@ thread.
 
 | module           | owns                                      | docs                |
 |------------------|-------------------------------------------|---------------------|
-| `src/net/`       | libiox, TLS, telopt wrapper over MTH      | `doc/network.md`    |
-| `src/vt/`        | libvt + UTF-8 transcode + line retirement | `doc/terminal.md`   |
+| `src/net/`       | libiox, TLS (mbedTLS), telopt wrapper     | `doc/network.md`    |
+| `src/vt/`        | the VT engine (`bd_vt`) + `bd_utf8` + line retirement | `doc/terminal.md`   |
 | `src/triggers/`  | trigger table, classes, dispatch          | `doc/triggers.md`   |
 | `src/vm/`        | `bd_vm` abstraction, Lua 5.4 + LPeg back  | `doc/triggers.md`   |
 | `src/log/`       | NDJSON + plaintext sinks                  | `doc/logging.md`    |
 | `src/profile/`   | property-list storage, CSV I/O            | `doc/profiles.md`   |
 | `src/core/`      | session glue: wires the above together    | this doc            |
 
-`src/core/` is the only place that knows about all of the others. No
-front-end source file includes anything from `src/net/`, `src/vt/`,
-`src/triggers/`, `src/vm/`, or `src/log/` directly — they go through
-`bd_session` (below).
+These are **logical modules**, not directories: the app code is currently
+flat under `src/birdie/` (`bd_net.c`, `bd_session.c`, `bd_vm.c`,
+`bd_trigger.c`, `bd_log.c`, `bd_profile.c`, ...) and the VT engine is
+embedded in the GUI toolkit at `src/birdie-gui/bd_vt/`. The table names the
+seams the code keeps, not a folder layout. `src/core/` (the session glue) is
+the only place that knows about all of the others. No front-end source file
+reaches into the net / vt / triggers / vm / log internals directly — they go
+through `bd_session` (below).
 
 ## `bd_session`: the front-end seam
 
@@ -197,8 +201,8 @@ The seam is sized so these three front-ends are tractable:
   `bd_session_send_line`.
 - **curses / stdout+stdin** — consumes `vt_buf` via a redraw loop
   that walks dirty rows and emits ANSI; reads stdin line by line into
-  `bd_session_send_line`. Zero ludica dependency; links against
-  everything under `src/` except `src/gui/`.
+  `bd_session_send_line`. Zero ludica dependency; links the core
+  (`src/birdie/`) without the GUI toolkit (`src/birdie-gui/`).
 - **accessibility front-end** — ignores cells, subscribes to
   `line_retired` events, exposes the line buffer through AT-SPI
   (Linux) or UIA (Windows). Also zero ludica dependency.

@@ -1,38 +1,43 @@
 # Terminal rendering
 
-The terminal widget is the heart of a MUD client. Birdie gets it by
-**reusing `lumi/libvt`** — the VT engine inside `lumimux`, a production
+The terminal widget is the heart of a MUD client. Birdie gets its VT
+engine from **lumi's `libvt`** — the parser inside `lumimux`, a production
 terminal emulator/multiplexor — rather than writing a parser, cell grid,
 or scrollback from scratch. That code represents hard-won work on edge
 cases (wide chars, combining marks, scroll regions, reflow on resize)
-that is expensive to redo and easy to get subtly wrong.
+that is expensive to redo and easy to get subtly wrong. It is now
+**adopted as first-class birdie code** (see below), not tracked upstream.
 
-## Reusable code
+## The VT engine (embedded)
 
-- **`~/DEVEL/lumi/src/libvt/`** — the whole VT stack:
-  - `vt_parse.[ch]` — state-machine parser for ANSI / VT escape
-    sequences, OSC, DCS. Handles 256-color and 24-bit truecolor.
-  - `vt_cell.[ch]` — per-cell record: codepoint, fg/bg color (default
-    / indexed / RGB union), attribute bitmask (bold, underline,
-    italic, reverse, blink, undercurl, dim, hidden, strike,
-    predicted-echo), width (1 or 2 for wide chars).
-  - `vt_buf.[ch]` — grid buffer **plus scrollback**. Rows carry
-    flags (`VT_ROW_WRAPPED`, `VT_ROW_DIRTY`). Resize reflows. Scroll
-    regions, row clears, dirty-tracking, and scrollback access are
-    all first-class operations.
-  - `vt_ops.[ch]` — cursor movement, SGR apply, erase-in-display /
-    erase-in-line, scroll-region ops.
-  - `vt_state.[ch]` — terminal modes, DEC private modes, tab stops,
-    saved-cursor state.
-  - `test_vt.c` — conformance tests worth running against any change.
-- **`~/DEVEL/lumi/src/libutf8/`** — UTF-8 decode / width. `libvt`
-  already calls into it; birdie ships the same way.
-- **`~/DEVEL/ludica/samples/ansiview/`** — the CP437 glyph-atlas
-  renderer. We swap its bundled parser for `libvt` and keep the
-  atlas-drawing path.
+The engine lives in **`src/birdie-gui/bd_vt/`**, adopted from lumi's
+`libvt` and built as the `birdie_gui_vt` library together with the
+terminal widget. The cord to lumi is cut: it is edited in place, not
+re-vendored (a final hand-merge from upstream landed with the embed;
+grep lumi only to cherry-pick a specific later fix). The stack:
 
-Vendor both under `src/thirdparty/libvt/` and `src/thirdparty/libutf8/`
-per `doc/vendoring.md`. The `UPSTREAM` file points at `~/DEVEL/lumi`.
+- `vt_parse.[ch]` — state-machine parser for ANSI / VT escape
+  sequences, OSC, DCS. Handles 256-color and 24-bit truecolor.
+- `vt_cell.[ch]` — per-cell record: codepoint, fg/bg color (default
+  / indexed / RGB union), attribute bitmask (bold, underline,
+  italic, reverse, blink, undercurl, dim, hidden, strike,
+  predicted-echo), width (1 or 2 for wide chars).
+- `vt_buf.[ch]` — grid buffer **plus scrollback**. Rows carry
+  flags (`VT_ROW_WRAPPED`, `VT_ROW_DIRTY`). Resize reflows. Scroll
+  regions, row clears, dirty-tracking, and scrollback access are
+  all first-class operations.
+- `vt_ops.[ch]` — cursor movement, SGR apply, erase-in-display /
+  erase-in-line, scroll-region ops.
+- `vt_state.[ch]` — terminal modes, DEC private modes, tab stops,
+  saved-cursor state.
+- `rune_width.[ch]` + `width_tables.c` — Unicode display-width tables
+  for wide-character cells.
+
+UTF-8 decode is birdie-gui's own `bd_utf8` (the toolkit's single codec,
+shared with the renderer), which the engine calls instead of carrying a
+second copy. The CP437 glyph-atlas rendering path (seeded from ludica's
+`ansiview` sample) now lives in the widget (`bd_widget_vt.c`) drawing
+through `bd_draw`, not a bundled renderer.
 
 ## What `libvt` already handles
 
@@ -49,19 +54,21 @@ This list matters because it is the set of things we do **not** write:
   later for latency-hiding on high-ping MUDs.
 - Cursor save/restore, tab stops, DEC private modes.
 
-Do not reinvent any of these. If `libvt` is missing something, extend
-it upstream in `lumi` rather than forking the API inside Birdie.
+Do not reinvent any of these. If the engine is missing something, extend
+it in place under `src/birdie-gui/bd_vt/` — it is birdie's code now.
+(Historically the guidance was to upstream to lumi; that ended when the
+engine was embedded and the cord cut.)
 
 ## What Birdie adds on top
 
 ### `bd_terminal` widget
 
-The retained-mode widget (`BD_TERMINAL` — `doc/gui.md`) wraps a
-`struct vt_buf *` and a glyph-atlas renderer. Incoming bytes arrive
-from the network thread (`doc/network.md`), are handed to
-`vt_parse_feed()`, and mutate the `vt_buf`. The widget's redraw path
-iterates visible rows, skips ones not marked `VT_ROW_DIRTY`, and emits
-textured quads through `ludica`.
+The retained-mode widget (`BD_TERMINAL` — `doc/gui.md`) is built in
+`bd_widget_vt.c`: it wraps a `struct vt_state`/`vt_buf` and a glyph-atlas
+renderer. Incoming bytes arrive from the network thread (`doc/network.md`),
+are handed to `vt_parse_feed()`, and mutate the buffer. The widget's redraw
+path iterates visible rows and emits textured quads through `bd_draw` (the
+backend-neutral renderer), so it works on any backend, not just ludica.
 
 Dirty-region redraw (not 60 Hz full repaint) is the reason retained
 mode was chosen; `VT_ROW_DIRTY` is the signal that makes it cheap.
@@ -121,10 +128,10 @@ replacement block.
 
 URL auto-detection runs over the `text` projection of each line as it
 is retired from the live cursor. Matched spans get a `VT_ATTR_*`
-(proposed: `VT_ATTR_HYPERLINK` — upstream `libvt` change) so the
+(proposed: `VT_ATTR_HYPERLINK`, added directly in `bd_vt`) so the
 renderer can draw underlines and the hit-test layer can open the
 default browser on click. An alternative is an overlay layer in the
-widget that does not touch `libvt`; decide at implementation time based
+widget that does not touch the VT engine; decide at implementation time based
 on how many other overlays we need (search highlights, trigger
 highlights) and whether one general mechanism is cheaper.
 
@@ -155,8 +162,9 @@ should claim the "a line arrived" semantics.
 
 ## Open questions
 
-- Upstream the hyperlink attribute to `libvt` vs. keep it in a birdie
-  overlay. Lean upstream — the attribute has general terminal value.
+- Add the hyperlink attribute to the embedded `bd_vt` engine vs. keep it
+  in a birdie overlay. Lean engine — the attribute has general terminal
+  value and the engine is birdie's to extend now.
 - Default scrollback size. 10000 lines is generous for a MUD and cheap
   on modern RAM; revisit if Pi Zero profiling says otherwise.
 - Ligatures / HarfBuzz. Out of scope; MUD output is overwhelmingly
