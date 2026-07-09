@@ -27,17 +27,17 @@ the canonical GitHub release assets, so no configuration is needed):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/OrangeTide/birdie/main/scripts/get-birdie-gui.sh \
-    | sh -s -- 0.6.0 third_party/birdie-gui
+    | sh -s -- 0.7.0 third_party/birdie-gui
 ```
 
-That vendors birdie-gui 0.6.0 into `third_party/birdie-gui/`. Re-run it with a
+That vendors birdie-gui 0.7.0 into `third_party/birdie-gui/`. Re-run it with a
 newer version to update in place; it refuses to overwrite a directory that is
 not a prior birdie-gui checkout unless you pass `--force`. To pull from a fork
 or mirror, set `BIRDIE_GUI_REPO`. Commit the script to your repo so updates are
 a one-liner:
 
 ```sh
-scripts/get-birdie-gui.sh 0.6.0            # into third_party/birdie-gui by default
+scripts/get-birdie-gui.sh 0.7.0            # into third_party/birdie-gui by default
 scripts/get-birdie-gui.sh --help           # options and environment variables
 ```
 
