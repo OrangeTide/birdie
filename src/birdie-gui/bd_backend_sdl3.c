@@ -53,6 +53,13 @@ be_height(void)
 	return h;
 }
 
+/* Monotonic seconds from SDL's high-resolution clock. */
+static double
+be_time(void)
+{
+	return (double)SDL_GetTicksNS() / 1e9;
+}
+
 /* Scissor needs the framebuffer height for the top-left/bottom-left flip; the
  * core takes it explicitly (a windowing concern), so wrap it with our height. */
 static void be_scissor(int x, int y, int w, int h)
@@ -100,6 +107,7 @@ be_ime_set_cursor_rect(int x, int y, int w, int h)
 const bd_backend bd_backend_sdl3 = {
 	.width             = be_width,
 	.height            = be_height,
+	.time              = be_time,
 	.viewport          = bd_gles_viewport,
 	.clear             = NULL,       /* host owns the frame clear */
 	.make_shader       = bd_gles_make_shader,
