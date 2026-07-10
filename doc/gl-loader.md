@@ -112,7 +112,9 @@ The built-in loader's `GLES3/gl3.h` shim needs a real Khronos `GLES3/gl3.h`
 underneath (via `#include_next`) for the GL types, enums, and `PFNGL*PROC`
 typedefs. Windows/mingw ships `KHR/khrplatform.h` but no `GLES3/gl3.h`, so the
 Khronos ES 3.0 headers are vendored under `src/birdie-gui/thirdparty/khronos/`
-(MIT / Apache-2.0; see its `UPSTREAM`). The builtin build adds that directory to
+(MIT / Apache-2.0; see its `UPSTREAM`), refreshed with
+`scripts/update-khronos.sh` (`gl3.h` + `gl3platform.h` from the OpenGL registry,
+`khrplatform.h` from the EGL registry). The builtin build adds that directory to
 the include path after the shim dir, so the shim resolves to it on every target.
 On Linux these mirror the system headers; only the core `gl3.h` is vendored (the
 backend uses no extensions).

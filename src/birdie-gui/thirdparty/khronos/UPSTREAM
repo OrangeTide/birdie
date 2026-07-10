@@ -12,10 +12,14 @@ Files:
   GLES3/gl3platform.h  platform typedefs           (SPDX: Apache-2.0)
   KHR/khrplatform.h    Khronos platform typedefs   (Khronos MIT-style notice)
 
-Source: Khronos OpenGL-Registry
-  https://github.com/KhronosGroup/OpenGL-Registry/tree/main/api
+Source: the Khronos registries (fetch with scripts/update-khronos.sh)
+  gl3.h, gl3platform.h  https://github.com/KhronosGroup/OpenGL-Registry (api/GLES3/)
+  khrplatform.h         https://github.com/KhronosGroup/EGL-Registry (api/KHR/)
 Copyright 2008-2020 The Khronos Group Inc. Unmodified; original license
 notices are preserved in each file.
+
+ref:       main
+synced_at: 2026-07-10T20:44:17Z
 
 Only the core gl3.h is vendored (the backend uses no extensions, so gl2ext.h
 is intentionally omitted).

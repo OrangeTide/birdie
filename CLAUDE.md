@@ -48,11 +48,13 @@ Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each
 - `src/birdie-gui/assets/` — chrome TTF (DejaVuSans) only; the terminal font and the pushpins are 1-bit bitmaps compiled into the toolkit (`bd_embed_font.h` from unscii, `bd_embed_pushpin.h` from the `pushpin_*.xbm` sources)
 - `src/thirdparty/ludica/` — vendored ludica (rendering, input, audio, networking)
 - `src/birdie-gui/thirdparty/stb/` — vendored stb_truetype + stb_image (birdie-gui's only third-party dep; kept inside the toolkit dir so it ships self-contained in the bundle)
+- `src/birdie-gui/thirdparty/khronos/` — vendored Khronos GLES3 headers (`GLES3/gl3.h`, `gl3platform.h`, `KHR/khrplatform.h`) that the built-in GL loader's shim needs to compile where the system ships none (Windows); ships in the bundle. Re-vendor with `scripts/update-khronos.sh`
 - `test/test_gui.c` — headless toolkit test (recording stub backend); its `module.mk` declares the `test_gui` executable + `TEST_TARGET`, run by `make test`
 - `module.mk` — top-level build wiring (SUBDIRS, shader-gen rule, the `dist` packaging recipe, and the `test` / `widget-test` aliases)
 - `GNUmakefile` — modular-make entry point (fetched, not hand-written)
 - `scripts/update-ludica.sh` — re-vendor ludica from upstream git
 - `scripts/update-gnumakefile.sh` — fetch GNUmakefile from modular-make
+- `scripts/update-khronos.sh` — re-vendor the Khronos GLES3 headers from the registries
 - `doc/` — design documents (network, terminal, GUI, triggers, etc.)
 - `concept.md` — original requirements and open design questions
 
@@ -62,8 +64,9 @@ Birdie vendors its dependencies rather than linking to sibling repos. **Never sy
 
 - `scripts/update-ludica.sh [ref]` — shallow-clones ludica from GitHub, copies into `src/thirdparty/ludica/`, and merges ludica's Claude Code skills into `.claude/skills/`. Default ref: `main`.
 - `scripts/update-gnumakefile.sh [ref]` — fetches GNUmakefile from modular-make GitHub releases.
+- `scripts/update-khronos.sh [ref]` — fetches the Khronos GLES3 headers (`GLES3/gl3.h` + `gl3platform.h` from OpenGL-Registry, `KHR/khrplatform.h` from EGL-Registry) into `src/birdie-gui/thirdparty/khronos/`. Default ref: `main`.
 
-Provenance is recorded in `src/thirdparty/ludica/UPSTREAM`.
+Provenance is recorded in each dependency's `UPSTREAM` file (`src/thirdparty/ludica/UPSTREAM`, `src/birdie-gui/thirdparty/khronos/UPSTREAM`).
 
 ## Top-level module.mk
 
