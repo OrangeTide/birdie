@@ -106,6 +106,26 @@ In `CPPFLAGS`:
 - **Windows**: Builtin mode (recommended) works with any ES 3.0 loader (GLEW, GLAD, Galogen, or custom). External mode requires linking static GLES libs or manual symbol provision (non-standard).
 - **macOS**: Builtin mode works with any getproc the host provides (e.g. `SDL_GL_GetProcAddress`, or a custom loader over the OpenGL framework); external mode requires system framework linking. (macOS GL is deprecated and only a stretch-goal target.)
 
+## Vendored Khronos headers
+
+The built-in loader's `GLES3/gl3.h` shim needs a real Khronos `GLES3/gl3.h`
+underneath (via `#include_next`) for the GL types, enums, and `PFNGL*PROC`
+typedefs. Windows/mingw ships `KHR/khrplatform.h` but no `GLES3/gl3.h`, so the
+Khronos ES 3.0 headers are vendored under `src/birdie-gui/thirdparty/khronos/`
+(MIT / Apache-2.0; see its `UPSTREAM`). The builtin build adds that directory to
+the include path after the shim dir, so the shim resolves to it on every target.
+On Linux these mirror the system headers; only the core `gl3.h` is vendored (the
+backend uses no extensions).
+
+## Verifying the Windows target
+
+`make windows-check` cross-compiles the GUI libraries with mingw-w64 as a
+compile+archive check of the Windows target (no `.exe`, no GL runtime, since the
+loader resolves `gl*` at runtime). It runs in CI (`.github/workflows/ci.yml`)
+and needs only the toolchain, no X11/GL dev libs. This is the honest validation
+of the loader's reason to exist; the Linux gallery is the runtime exercise of the
+loaded pointers.
+
 ## Contract for Vendorers
 
 When vendoring birdie-gui:

@@ -1,0 +1,21 @@
+Khronos OpenGL ES 3.0 API headers
+=================================
+
+Vendored so birdie-gui's built-in GL loader (BD_GL_LOADER=builtin) can compile
+on platforms that do not ship GLES headers, notably Windows/mingw (which
+provides KHR/khrplatform.h but no GLES3/gl3.h). On Linux these mirror the
+system headers; vendoring them makes the toolkit self-contained and keeps the
+same header across every target.
+
+Files:
+  GLES3/gl3.h          OpenGL ES 3.0 core API      (SPDX: MIT)
+  GLES3/gl3platform.h  platform typedefs           (SPDX: Apache-2.0)
+  KHR/khrplatform.h    Khronos platform typedefs   (Khronos MIT-style notice)
+
+Source: Khronos OpenGL-Registry
+  https://github.com/KhronosGroup/OpenGL-Registry/tree/main/api
+Copyright 2008-2020 The Khronos Group Inc. Unmodified; original license
+notices are preserved in each file.
+
+Only the core gl3.h is vendored (the backend uses no extensions, so gl2ext.h
+is intentionally omitted).

@@ -79,9 +79,12 @@ birdie_gui_gles_core_CPPFLAGS = -I$(BD_GUI) -I$(BD_GUI)/thirdparty/stb
 # leading tab makes make treat the line as a recipe, which mangles the $(error)
 # diagnostic below into a cryptic "recipe commences before first target".
 ifeq ($(BD_GL_LOADER), builtin)
-# Built-in loader: compile bd_gl.c and add the shim include dir to the path
+# Built-in loader: compile bd_gl.c and add the shim include dir to the path. The
+# vendored Khronos headers come *after* $(BD_GUI) so the shim's #include_next
+# resolves to them; this is what lets the loader compile on Windows/mingw, which
+# ships no GLES3/gl3.h. On Linux they simply mirror the system headers.
 birdie_gui_gles_core_SRCS += bd_gl.c
-birdie_gui_gles_core_CPPFLAGS += -DBD_GL_LOADER_BUILTIN -I$(BD_GUI)
+birdie_gui_gles_core_CPPFLAGS += -DBD_GL_LOADER_BUILTIN -I$(BD_GUI) -I$(BD_GUI)/thirdparty/khronos
 else ifeq ($(BD_GL_LOADER), external)
 # External loader: define the flag but don't compile bd_gl.c
 birdie_gui_gles_core_CPPFLAGS += -DBD_GL_LOADER_EXTERNAL
@@ -128,6 +131,21 @@ widget-test : $(BD_FONT_OUT)
 	@$(MAKE) WIDGET_TEST=1 birdie-gui-gallery
 	@echo "built widget gallery: $(BINDIR)/birdie-gui-gallery"
 	@echo "run it from anywhere: $(BINDIR)/birdie-gui-gallery"
+
+# Windows cross-compile smoke check. Builds the GUI libraries (the toolkit plus
+# the GLES-core backend with the built-in loader) with the mingw-w64 toolchain.
+# This is a compile+archive check of the actual Windows target the loader exists
+# for: opengl32.dll exports only GL 1.1, so the ES 3.0 entry points must be
+# resolved at runtime, which the built-in loader does. No GL runtime or import
+# lib is needed (the loader defers gl* to runtime), so this catches Windows-only
+# compile breaks that the Linux build cannot. Override the toolchain with
+# WIN_CC=... (e.g. i686-w64-mingw32-gcc for 32-bit).
+WIN_CC ?= x86_64-w64-mingw32-gcc
+.PHONY : windows-check
+windows-check :
+	@triplet=`$(WIN_CC) -dumpmachine` && \
+	    $(MAKE) CC=$(WIN_CC) _build/$$triplet/birdie_gui_gles_core.a && \
+	    echo "windows cross-compile OK: _build/$$triplet/birdie_gui_gles_core.a"
 
 # ----------------------------------------------------------------------
 # Source distribution of the GUI toolkit (birdie-gui).

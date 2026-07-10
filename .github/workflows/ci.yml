@@ -49,3 +49,18 @@ jobs:
         run: make
       - name: Build dist bundle
         run: make dist
+
+  # Windows cross-compile of the GUI libraries with the built-in GL loader.
+  # A compile+archive check of the actual target the loader exists for
+  # (opengl32.dll exports only GL 1.1, so ES 3.0 entry points must load at
+  # runtime). Needs only mingw-w64: no GL/X11 dev libs, since the loader
+  # resolves gl* at runtime and the Khronos headers are vendored.
+  windows-cross:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mingw-w64 toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Cross-compile GUI libraries for Windows
+        run: make windows-check

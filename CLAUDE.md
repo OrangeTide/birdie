@@ -20,8 +20,11 @@ make RELEASE=1      # optimized (-O2, LTO)
 make clean
 make test           # headless GUI toolkit test (no window/ludica/X11)
 make widget-test    # standalone widget gallery on the raw X11/GLES backend
+make windows-check  # cross-compile the GUI libs for Windows (mingw-w64)
 make dist           # bundle the GUI toolkit into a versioned ZIP
 ```
+
+`make windows-check` cross-compiles the GUI libraries (`birdie_gui` + `birdie_gui_gles_core`, built with the default built-in GL loader `BD_GL_LOADER=builtin`) with mingw-w64, validating the actual Windows target the loader exists for: `opengl32.dll` exports only GL 1.1, so the ES 3.0 entry points must be resolved at runtime (`bd_gl_load` via a getproc). It is a **compile+archive check only** (no `.exe`, no GL runtime, no import lib, since the loader defers `gl*` to runtime), so it needs no X11/GL dev libs, only the toolchain (`apt install gcc-mingw-w64-x86-64`). It catches Windows-only compile breaks the Linux build cannot. The Khronos GLES3 headers are vendored (`src/birdie-gui/thirdparty/khronos/`) because mingw ships `KHR/khrplatform.h` but no `GLES3/gl3.h`; the built-in loader's `GLES3/gl3.h` shim `#include_next`s them. It scopes the sub-make to the library archive, so ludica and the app are not cross-built. Override the toolchain with `make windows-check WIN_CC=i686-w64-mingw32-gcc`. The Linux gallery remains the loader's runtime exercise. See `doc/gl-loader.md`.
 
 Output: `_out/<triplet>/bin/birdie` (e.g. `_out/x86_64-linux-gnu/bin/birdie`). Also builds ludica tools: `ludica-launcher`, `ludica-mcp`, `ludica-mcp-bridge`, `font2slug`.
 
