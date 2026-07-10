@@ -14,12 +14,13 @@ Files:
 
 Source: the Khronos registries (fetch with scripts/update-khronos.sh)
   gl3.h, gl3platform.h  https://github.com/KhronosGroup/OpenGL-Registry (api/GLES3/)
+                        ref 9d527dbc81bb76e35ba284fe385ed8a5ddb90cbc
   khrplatform.h         https://github.com/KhronosGroup/EGL-Registry (api/KHR/)
+                        ref 3d7796b3721d93976b6bfe536aa97bbc4bce8667
 Copyright 2008-2020 The Khronos Group Inc. Unmodified; original license
 notices are preserved in each file.
 
-ref:       main
-synced_at: 2026-07-10T20:44:17Z
+synced_at: 2026-07-10T23:42:35Z
 
 Only the core gl3.h is vendored (the backend uses no extensions, so gl2ext.h
 is intentionally omitted).

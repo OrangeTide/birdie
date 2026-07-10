@@ -64,7 +64,7 @@ Birdie vendors its dependencies rather than linking to sibling repos. **Never sy
 
 - `scripts/update-ludica.sh [ref]` — shallow-clones ludica from GitHub, copies into `src/thirdparty/ludica/`, and merges ludica's Claude Code skills into `.claude/skills/`. Default ref: `main`.
 - `scripts/update-gnumakefile.sh [ref]` — fetches GNUmakefile from modular-make GitHub releases.
-- `scripts/update-khronos.sh [ref]` — fetches the Khronos GLES3 headers (`GLES3/gl3.h` + `gl3platform.h` from OpenGL-Registry, `KHR/khrplatform.h` from EGL-Registry) into `src/birdie-gui/thirdparty/khronos/`. Default ref: `main`.
+- `scripts/update-khronos.sh [gl_ref] [egl_ref]` — fetches the Khronos GLES3 headers (`GLES3/gl3.h` + `gl3platform.h` from OpenGL-Registry, `KHR/khrplatform.h` from EGL-Registry) into `src/birdie-gui/thirdparty/khronos/`. Two separate repos: neither publishes tags, so an immutable pin is a commit SHA and you must give both refs (a GL SHA doesn't resolve in the EGL repo). Default both: `main`.
 
 Provenance is recorded in each dependency's `UPSTREAM` file (`src/thirdparty/ludica/UPSTREAM`, `src/birdie-gui/thirdparty/khronos/UPSTREAM`).
 

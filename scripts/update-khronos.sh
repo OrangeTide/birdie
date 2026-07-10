@@ -2,8 +2,15 @@
 # scripts/update-khronos.sh — refresh the vendored Khronos GLES3 headers.
 #
 # Usage:
-#   scripts/update-khronos.sh          # tip of the registry default branch (main)
-#   scripts/update-khronos.sh <ref>    # specific tag, branch, or commit
+#   scripts/update-khronos.sh                  # tip of both registries (main)
+#   scripts/update-khronos.sh <gl_ref>         # pin OpenGL registry; EGL = same
+#   scripts/update-khronos.sh <gl_ref> <egl_ref>  # pin each registry separately
+#
+# gl3.h + gl3platform.h come from the OpenGL registry, khrplatform.h from the
+# EGL registry — two separate repos with independent histories. Neither
+# publishes tags/releases, so an immutable pin is a commit SHA, and because a
+# SHA only exists in one repo you must give both refs to pin (a GL SHA does not
+# resolve in the EGL registry). Branch names like `main` work for both.
 #
 # Environment variables:
 #   GL_REGISTRY_REPO    OpenGL registry (default: KhronosGroup/OpenGL-Registry)
@@ -12,9 +19,8 @@
 # The built-in GL loader's GLES3/gl3.h shim #include_next's these headers for
 # the GL types, enums, and PFNGL*PROC typedefs. Windows/mingw ships
 # KHR/khrplatform.h but no GLES3/gl3.h, so we vendor the Khronos ES 3.0 core
-# headers under src/birdie-gui/thirdparty/khronos/. gl3.h and gl3platform.h
-# come from the OpenGL registry; khrplatform.h lives in the EGL registry. Only
-# the core gl3.h is vendored (the backend uses no extensions).
+# headers under src/birdie-gui/thirdparty/khronos/. Only the core gl3.h is
+# vendored (the backend uses no extensions).
 
 set -eu
 
@@ -23,7 +29,8 @@ EGL_REGISTRY_REPO="${EGL_REGISTRY_REPO:-KhronosGroup/EGL-Registry}"
 HERE=$(cd -- "$(dirname "$0")/.." && pwd)
 DEST=$HERE/src/birdie-gui/thirdparty/khronos
 
-REF="${1:-main}"
+GL_REF="${1:-main}"
+EGL_REF="${2:-$GL_REF}"
 
 if command -v curl >/dev/null 2>&1; then
 	fetch() { curl -fsSL "$1"; }
@@ -34,8 +41,8 @@ else
 	exit 1
 fi
 
-GL_RAW="https://raw.githubusercontent.com/${GL_REGISTRY_REPO}/${REF}/api"
-EGL_RAW="https://raw.githubusercontent.com/${EGL_REGISTRY_REPO}/${REF}/api"
+GL_RAW="https://raw.githubusercontent.com/${GL_REGISTRY_REPO}/${GL_REF}/api"
+EGL_RAW="https://raw.githubusercontent.com/${EGL_REGISTRY_REPO}/${EGL_REF}/api"
 
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
@@ -80,15 +87,16 @@ Files:
 
 Source: the Khronos registries (fetch with scripts/update-khronos.sh)
   gl3.h, gl3platform.h  https://github.com/${GL_REGISTRY_REPO} (api/GLES3/)
+                        ref ${GL_REF}
   khrplatform.h         https://github.com/${EGL_REGISTRY_REPO} (api/KHR/)
+                        ref ${EGL_REF}
 Copyright 2008-2020 The Khronos Group Inc. Unmodified; original license
 notices are preserved in each file.
 
-ref:       ${REF}
 synced_at: ${synced_at}
 
 Only the core gl3.h is vendored (the backend uses no extensions, so gl2ext.h
 is intentionally omitted).
 EOF
 
-echo "update-khronos: vendored GLES3 headers (ref: $REF) into $DEST"
+echo "update-khronos: vendored GLES3 headers (gl:$GL_REF egl:$EGL_REF) into $DEST"
