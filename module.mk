@@ -172,7 +172,7 @@ DIST_STB    := src/birdie-gui/thirdparty/stb
 # same layout as src/birdie-gui). bd_widget_vt.h ships in bd_vt/ with its
 # library, so a terminal-free consumer needn't see it.
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
-                bd_asset.h bd_utf8.h bd_backend_gles_core.h \
+                bd_asset.h bd_utf8.h bd_backend_gles_core.h bd_gl.h \
                 bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_canvas.h bd_widget_table.h \
                 bd_widget_inventory.h bd_widget_dock.h bd_widget_actionbar.h \
@@ -189,7 +189,7 @@ DIST_SOURCES := widget.c bd_draw.c bd_embed_font.h bd_asset.c bd_utf8.c bd_widge
                 bd_embed_pushpin.h \
                 pushpin_out_10.xbm pushpin_in_10.xbm \
                 pushpin_out_14.xbm pushpin_in_14.xbm \
-                bd_backend_gles_core.c \
+                bd_backend_gles_core.c bd_gl.c \
                 bd_backend_ludica.c bd_backend_ludica.h \
                 bd_backend_sdl3.c bd_backend_sdl3.h
 # raw X11/EGL/GLES reference backend + widget gallery (Linux)
@@ -197,6 +197,10 @@ DIST_GLES_FILES := window.h x11_window.c bd_backend_gles.c bd_backend_gles.h \
                    widget_test.c
 # vendored single-file libraries the toolkit includes (its own thirdparty/)
 DIST_STB_FILES := stb_truetype.h stb_image.h
+# vendored Khronos GLES3 headers + the loader's GLES3/gl3.h shim, so a consumer
+# can build the GLES-core backend with the default built-in loader on a platform
+# without system GLES headers (notably Windows). Mirrors the in-tree layout.
+DIST_KHRONOS := src/birdie-gui/thirdparty/khronos
 # the terminal library (VT engine + widget) — bundled so BD_TERMINAL compiles
 DIST_VT     := src/birdie-gui/bd_vt
 
@@ -204,12 +208,19 @@ DIST_VT     := src/birdie-gui/bd_vt
 dist :
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
 	@mkdir -p $(DIST_STAGE)/backend-gles $(DIST_STAGE)/bd_vt \
-	    $(DIST_STAGE)/thirdparty/stb $(DIST_STAGE)/assets/fonts
+	    $(DIST_STAGE)/thirdparty/stb $(DIST_STAGE)/GLES3 \
+	    $(DIST_STAGE)/thirdparty/khronos/GLES3 \
+	    $(DIST_STAGE)/thirdparty/khronos/KHR $(DIST_STAGE)/assets/fonts
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_HEADERS)) $(DIST_STAGE)/
 	@cp $(addprefix $(DIST_SRC)/,$(DIST_SOURCES)) $(DIST_STAGE)/
 	@cp $(DIST_SRC)/module.mk $(DIST_STAGE)/module.mk
 	@cp $(addprefix $(DIST_GLES)/,$(DIST_GLES_FILES)) $(DIST_STAGE)/backend-gles/
 	@cp $(addprefix $(DIST_STB)/,$(DIST_STB_FILES)) $(DIST_STAGE)/thirdparty/stb/
+	@cp $(DIST_SRC)/GLES3/gl3.h $(DIST_STAGE)/GLES3/
+	@cp $(DIST_KHRONOS)/GLES3/gl3.h $(DIST_KHRONOS)/GLES3/gl3platform.h \
+	    $(DIST_STAGE)/thirdparty/khronos/GLES3/
+	@cp $(DIST_KHRONOS)/KHR/khrplatform.h $(DIST_STAGE)/thirdparty/khronos/KHR/
+	@cp $(DIST_KHRONOS)/UPSTREAM $(DIST_STAGE)/thirdparty/khronos/
 	@cp $(DIST_VT)/*.c $(DIST_VT)/*.h $(DIST_VT)/module.mk $(DIST_STAGE)/bd_vt/
 	@cp $(DIST_SRC)/assets/fonts/DejaVuSans.ttf \
 	    $(DIST_SRC)/assets/fonts/DejaVuSans-Bold.ttf \
@@ -233,9 +244,12 @@ dist :
 	    '  module.mk       modular-make build of the birdie_gui library' \
 	    '  *.c *.h         toolkit implementation + public headers (flat)' \
 	    '  bd_backend_*.c  reference ludica / SDL3 / GLES-core backends (source)' \
+	    '  bd_gl.c GLES3/  built-in GLES3 loader + its GLES3/gl3.h shim (runtime' \
+	    '                  gl* resolution; needed on Windows, see README)' \
 	    '  bd_vt/          terminal sublibrary: VT engine + BD_TERMINAL widget' \
 	    '  backend-gles/   raw X11/EGL/GLES backend + standalone widget gallery' \
 	    '  thirdparty/stb/ vendored stb_truetype + stb_image (bundled)' \
+	    '  thirdparty/khronos/ vendored Khronos GLES3 headers for the loader' \
 	    '  assets/         chrome TTF (+ license)' \
 	    '  LICENSE.txt     CC0 dedication + bundled third-party licenses' \
 	    '  get-birdie-gui.sh  vendoring updater (fetch a release into your project)' \

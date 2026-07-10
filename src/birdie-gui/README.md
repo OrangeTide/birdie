@@ -451,13 +451,15 @@ gallery (`widget_test.c`) that exhibits every widget — a working non-ludica
 example. Its GPU code (shaders, quad batch, textures, scissor) lives in the
 shared `bd_backend_gles_core.{c,h}` (bundle root), which `bd_backend_sdl3.c`
 uses too; compile `bd_backend_gles_core.c` alongside whichever GLES backend you
-pick. Build it (Linux) from the bundle root, with the toolkit sources and
+pick, plus `bd_gl.c` for the built-in GL loader (see "Built-in GL loader"
+below). Build it (Linux) from the bundle root, with the toolkit sources and
 `bd_vt/` on the include path (`bd_vt/*.c` supplies the terminal):
 
 ```sh
-cc -I. -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
+cc -I. -Ibackend-gles -Ithirdparty/stb -Ithirdparty/khronos -Ibd_vt \
+   -DBD_GL_LOADER_BUILTIN \
    backend-gles/widget_test.c backend-gles/x11_window.c \
-   backend-gles/bd_backend_gles.c bd_backend_gles_core.c \
+   backend-gles/bd_backend_gles.c bd_backend_gles_core.c bd_gl.c \
    widget.c bd_draw.c bd_asset.c bd_utf8.c \
    bd_widget_value.c bd_widget_explorer.c bd_widget_editor.c \
    bd_widget_canvas.c bd_widget_table.c bd_widget_inventory.c \
@@ -466,11 +468,44 @@ cc -I. -Ibackend-gles -Ithirdparty/stb -Ibd_vt \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o assets/gallery
 ```
 
+For the external-loader variant (link GL symbols directly instead of loading
+them at runtime), drop `bd_gl.c` and `-Ithirdparty/khronos`, and swap
+`-DBD_GL_LOADER_BUILTIN` for `-DBD_GL_LOADER_EXTERNAL`.
+
 The toolkit finds its fonts by their relative sub-path (`fonts/…`), located
 next to the executable or in the current directory. The bundle keeps them under
 `assets/`, so build the binary into `assets/` (as above) and run it from there:
 `cd assets && ./gallery`. (The pushpins are 1-bit glyphs compiled into the
 toolkit, no file needed.)
+
+## Built-in GL loader
+
+The GLES-core backend (`bd_backend_gles_core.c`, shared by the SDL3 and X11
+backends) calls OpenGL ES 3.0 entry points. How those `gl*` symbols are made
+available is a compile-time choice, because it differs by platform. On Windows
+`opengl32.dll` exports only GL 1.1, so ES 3.0 entry points **must** be resolved
+at runtime; you cannot link them.
+
+Two modes, selected by a preprocessor define:
+
+- **`-DBD_GL_LOADER_BUILTIN`** (recommended, and the in-tree default) — compile
+  `bd_gl.c` too. It resolves every `gl*` the backend uses through a getproc
+  callback (`SDL_GL_GetProcAddress`, `eglGetProcAddress`, or your own). The
+  backend's `GLES3/gl3.h` shim redirects the unchanged `gl*` call sites to the
+  loaded pointers, so no GL library is linked. Call `bd_gles_load_gl(getproc)`
+  once after making the GL context current, before any draw (the SDL3 and X11
+  backends already do this; a custom backend must). Put `-Ithirdparty/khronos`
+  on the include path **after** `-I.` so the shim's `#include_next` finds the
+  vendored Khronos headers — this is what lets it compile on Windows, which
+  ships no `GLES3/gl3.h`.
+- **`-DBD_GL_LOADER_EXTERNAL`** — you already have the `gl*` symbols (GLEW,
+  GLAD, Galogen, or direct linking such as `-lGLESv2` on Linux). `bd_gl.c` is
+  not compiled, the shim passes through to the real header, and
+  `bd_gles_load_gl()` is a no-op returning success, so call sites stay
+  unconditional.
+
+The vendored `thirdparty/khronos/` holds the Khronos ES 3.0 core headers
+(MIT / Apache-2.0; see its `UPSTREAM`), needed only by builtin mode.
 
 ## Dependencies
 
