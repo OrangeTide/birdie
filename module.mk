@@ -160,7 +160,7 @@ windows-check :
 # `make dist GUI_VERSION=x.y.z`. Each backend still needs its host (ludica /
 # SDL3 / X11+EGL).
 # ----------------------------------------------------------------------
-GUI_VERSION ?= 0.8.1
+GUI_VERSION ?= 0.8.2
 DIST_NAME   := birdie-gui-$(GUI_VERSION)
 DIST_STAGE  := $(OUTDIR)/$(DIST_NAME)
 DIST_ZIP    := $(OUTDIR)/$(DIST_NAME).zip

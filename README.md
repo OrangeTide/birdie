@@ -96,7 +96,7 @@ release assets):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/OrangeTide/birdie/main/scripts/get-birdie-gui.sh \
-    | sh -s -- 0.8.1 third_party/birdie-gui
+    | sh -s -- 0.8.2 third_party/birdie-gui
 ```
 
 Commit the script into your repo and re-run it with a newer version to update
