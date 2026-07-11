@@ -360,10 +360,17 @@ render_vu(struct meter *m, int x, int y, int w, int h)
 	bd_draw_rect(x + in, y + in, w - 2*in, (h - 2*in) / 2, 0xF3EEDDFFu);
 	bd_draw_rect_lines(x, y, w, h, th->border);
 
-	float cx = x + w * 0.5f;
-	float cy = y + h * 0.92f;                 /* pivot low on the face */
-	float R  = (h - 2*in) * 0.82f;
 	const float SPAN = 2.0f;                  /* ~115 deg total sweep */
+	const float A = SPAN * 0.5f;              /* half sweep from vertical */
+	/* Size the arc so the widest marks (at +-A) stay inside the cream face,
+	 * then center the needle sweep (hub at cy, tip reach at cy-R) vertically.
+	 * The old fixed R/pivot overshot the face and spilled ticks/red band
+	 * past the panel edges. */
+	float R = ((w * 0.5f) - in - 1.0f) / sinf(A);   /* width-limited */
+	float Rv = (h - 2*in) - 2.0f;                    /* height-limited */
+	if (R > Rv) R = Rv;
+	float cx = x + w * 0.5f;
+	float cy = y + h * 0.5f + R * 0.5f;       /* center the sweep vertically */
 	float redStart = (m->nbrk > 0) ? m->brk[m->nbrk - 1] : 0.85f;
 
 	/* red danger band, a filled arc annulus from redStart..1 */
