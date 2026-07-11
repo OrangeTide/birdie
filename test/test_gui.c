@@ -1296,6 +1296,44 @@ main(void)
 	bd_editor_text(ed, rb, sizeof rb);
 	check("styled render leaves text intact + draws",
 	    n_drawverts > 0 && strcmp(rb, "ZT:Song\nK:G\nCDEF") == 0);
+
+	/* submit-on-Enter hook. default multi-line: plain Enter inserts a
+	 * newline, Ctrl+Enter fires the hook; enter-submits mode swaps them. */
+	int ec = clicked;
+	bd_editor_set_text(ed, "hello");
+	bd_editor_on_submit(ed, on_click, NULL);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("default: plain Enter inserts a newline, no submit",
+	    clicked == ec && strcmp(rb, "\nhello") == 0);
+
+	bd_editor_set_text(ed, "hello");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER,
+	    .mods=BD_MOD_CTRL });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("default: Ctrl+Enter submits without inserting",
+	    clicked == ec + 1 && strcmp(rb, "hello") == 0);
+
+	bd_editor_set_enter_submits(ed, 1);
+	check("enter_submits reads back", bd_editor_enter_submits(ed) == 1);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("enter_submits: plain Enter submits without inserting",
+	    clicked == ec + 2 && strcmp(rb, "hello") == 0);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER,
+	    .mods=BD_MOD_SHIFT });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("enter_submits: Shift+Enter inserts a newline",
+	    clicked == ec + 2 && strcmp(rb, "\nhello") == 0);
+
+	/* no hook installed: Enter always falls back to inserting a newline */
+	bd_editor_on_submit(ed, NULL, NULL);
+	bd_editor_set_text(ed, "hi");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	bd_editor_text(ed, rb, sizeof rb);
+	check("enter_submits with no hook inserts a newline",
+	    strcmp(rb, "\nhi") == 0);
 	bd_gui_cleanup();
 
 	/* ---- BD_LIST scrolling/selectable list ---- */
