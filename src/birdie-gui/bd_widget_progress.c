@@ -23,11 +23,70 @@ struct progress {
 	float    value;
 	int      indeterminate;
 	int      show_percent;
+	int      glass;
 	int      orient;
 	uint32_t color;
 };
 
 static int prog_type;
+
+/* ------------------------------------------------------------------ */
+/* glass liquid-tube shader (matches BD_METER_VIAL)                   */
+/* ------------------------------------------------------------------ */
+
+static const char *TUBE_FRAG =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"out vec4 frag;\n"
+	"uniform vec3  u_color;\n"
+	"uniform float u_value;\n"
+	"uniform float u_aspect;\n"   /* main length / cross thickness */
+	"uniform int   u_vert;\n"
+	"void main(){\n"
+	"    float mn = (u_vert==1) ? (1.0 - v_uv.y) : v_uv.x;\n"  /* along fill */
+	"    float cr = (u_vert==1) ? v_uv.x : v_uv.y;\n"          /* across tube */
+	"    /* rounded-capsule SDF in a space where the cross axis spans 1.0 */\n"
+	"    vec2 q = vec2((mn-0.5)*u_aspect, cr-0.5);\n"
+	"    vec2 dd = abs(q) - vec2(u_aspect*0.5 - 0.5, 0.0);\n"
+	"    float sd = length(max(dd,0.0)) + min(max(dd.x,dd.y),0.0) - 0.5;\n"
+	"    float aa = fwidth(sd)*1.2;\n"
+	"    float body = smoothstep(aa, -aa, sd);\n"
+	"    if (body <= 0.001) { frag = vec4(0.0); return; }\n"
+	"    float on = step(0.004, u_value);\n"
+	"    float liquid = smoothstep(-0.02, 0.02, u_value - mn) * on;\n"
+	"    float men = exp(-pow((mn - u_value)/0.03, 2.0)) * on;\n"  /* meniscus */
+	"    float vol = 1.0 - pow(abs(cr-0.5)*2.0, 2.0);\n"           /* tube volume */
+	"    vec3 lc = u_color * (0.72 + 0.5*vol);\n"
+	"    lc += (u_color*0.6 + vec3(0.4))*men*0.7;\n"
+	"    vec3 empty = mix(vec3(0.05,0.06,0.08), u_color*0.10, 0.35);\n"
+	"    vec3 col = mix(empty, lc, liquid);\n"
+	"    col += vec3(1.0)*smoothstep(0.18,0.0,cr)*0.16;\n"        /* top gloss */
+	"    float rim = smoothstep(-0.07, 0.0, sd);\n"
+	"    col = mix(col, vec3(0.60,0.68,0.80)*0.7, rim*0.5);\n"    /* glass rim */
+	"    frag = vec4(col, body);\n"
+	"}\n";
+
+static bd_shader tube_shader;
+
+static void
+draw_glass_tube(uint32_t color, float value, int vert,
+    int x, int y, int w, int h)
+{
+	const bd_backend *be = bd_backend_get();
+	if (tube_shader.id == 0)
+		tube_shader = be->make_shader(BD_SHADER_QUAD_VERT, TUBE_FRAG);
+	float cr = ((color>>24)&0xFF)/255.0f, cg = ((color>>16)&0xFF)/255.0f,
+	      cb = ((color>>8)&0xFF)/255.0f;
+	float aspect = vert ? (h > 0 ? (float)h / w : 1.0f)
+	                    : (h > 0 ? (float)w / h : 1.0f);
+	if (aspect < 1.0f) aspect = 1.0f;
+	be->set_uniform_vec3(tube_shader, "u_color", cr, cg, cb);
+	be->set_uniform_float(tube_shader, "u_value", value);
+	be->set_uniform_float(tube_shader, "u_aspect", aspect);
+	be->set_uniform_int(tube_shader, "u_vert", vert);
+	bd_draw_shader_quad(tube_shader, x, y, w, h);
+}
 
 static struct progress *
 prog_of(bd_id id)
@@ -54,10 +113,25 @@ prog_render(bd_id id, void *state)
 		bd_draw_text(label, (float)x, (float)(y + (h - lh) * 0.5f), th->text);
 	}
 
+	int vert = (p->orient == BD_VERTICAL);
+
+	/* glass liquid tube: a self-contained shader (its own body + rim) */
+	if (p->glass) {
+		draw_glass_tube(p->color, p->value, vert, bx, y, bw, h);
+		if (p->show_percent) {
+			char buf[8];
+			snprintf(buf, sizeof buf, "%d%%",
+			    (int)lroundf(p->value * 100.0f));
+			float tw = bd_draw_text_width(buf);
+			bd_draw_text(buf, (float)bx + (bw - tw) * 0.5f,
+			    (float)(y + (h - lh) * 0.5f), th->text_hi);
+		}
+		return;
+	}
+
 	bd_draw_rect(bx, y, bw, h, th->press);          /* track */
 	bd_draw_rect_lines(bx, y, bw, h, th->border);
 
-	int vert = (p->orient == BD_VERTICAL);
 	int len = vert ? h : bw;
 
 	if (p->indeterminate) {
@@ -114,6 +188,7 @@ bd_progress_create(bd_id parent, const bd_progress_desc *desc, ...)
 			p->value = desc->value < 0 ? 0 : (desc->value > 1 ? 1 : desc->value);
 			p->indeterminate = desc->indeterminate;
 			p->show_percent = desc->show_percent;
+			p->glass = desc->glass;
 			p->orient = desc->orient;
 			if (desc->color) p->color = desc->color;
 			if (desc->label) bd_set(id, BD_LABEL_S, desc->label, BD_END);

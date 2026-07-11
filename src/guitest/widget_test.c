@@ -46,6 +46,7 @@ static int   desktop_tab;     /* index of the "Desktop" MDI pane */
 static bd_id desk_logwin;     /* a Desktop-pane frame (auto-minimize for a shot) */
 /* animated meters, driven from the main loop to show ballistics/peak/fill */
 static bd_id m_vu, m_eye, m_load, m_sig, m_hp, m_mp, m_disk, m_prog;
+static bd_id m_hpbar, m_mpbar;   /* glass liquid tubes (bar-form BD_METER_VIAL) */
 static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
 
@@ -595,6 +596,19 @@ build_ui(void)
 		.zones = "green green amber red", .stops = "0.4 0.6 0.85",
 		.peak = 1, .size = 26, .label = "Sig" }, BD_END);
 
+	/* glass liquid tubes: the horizontal bar form of the BD_METER_VIAL orb,
+	 * a life/mana bar (bd_progress with .glass) */
+	bd_id grow = section(meters, "Glass liquid tubes (bar-form vials)",
+		BD_LAYOUT_ROW, 64);
+	bd_id gcol = bd_create(grow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_GROW_I, 1, BD_GAP_I, 8, BD_END);
+	m_hpbar = bd_progress_create(gcol, &(bd_progress_desc){ .value = 0.7f,
+		.glass = 1, .show_percent = 1, .color = 0xD2233BFFu,
+		.label = "Health" }, BD_GROW_I, 1, BD_END);
+	m_mpbar = bd_progress_create(gcol, &(bd_progress_desc){ .value = 0.4f,
+		.glass = 1, .show_percent = 1, .color = 0x2E7DE0FFu,
+		.label = "Mana" }, BD_GROW_I, 1, BD_END);
+
 	/* -- Paint & Layout: the sketch pad and the layout demos -- */
 	bd_id paint = bd_tabview_add_pane(tabs, "Paint & Layout");
 	bd_set(paint, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
@@ -814,6 +828,8 @@ main(void)
 			bd_meter_set(m_sig, 0.5 + 0.5 * sin(t * 1.3 + 1.0));
 			bd_meter_set(m_hp,  0.5 + 0.5 * sin(t * 0.35));      /* drains/heals */
 			bd_meter_set(m_mp,  0.5 + 0.5 * sin(t * 0.5 + 2.0));
+			bd_progress_set(m_hpbar, 0.5 + 0.5 * sin(t * 0.35)); /* tube twins */
+			bd_progress_set(m_mpbar, 0.5 + 0.5 * sin(t * 0.5 + 2.0));
 			bd_progress_set(m_prog, fmod(t, 4.0) / 4.0);          /* 0..100% ramp */
 		}
 

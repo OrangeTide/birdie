@@ -325,14 +325,15 @@ void  bd_meter_reset_peak(bd_id);
 ### Progress bar (`bd_widget_progress.h`)
 
 The simple sibling of `BD_METER_BAR`: a determinate fill, an optional `NN%`
-readout, or an indeterminate marquee. (A round "ball" progress is
-`BD_METER_VIAL`.)
+readout, or an indeterminate marquee. Set `glass` for a liquid-in-glass tube
+matching `BD_METER_VIAL` (the bar-form life/mana bar). (A round "ball" progress
+is `BD_METER_VIAL` itself.)
 
 ```c
 bd_id bd_progress_create(bd_id parent, const bd_progress_desc *desc, ...);
 void  bd_progress_set(bd_id, float value);       float bd_progress_get(bd_id);
 void  bd_progress_set_indeterminate(bd_id, int on);
-/* desc: value, indeterminate, show_percent, orient, color, label */
+/* desc: value, indeterminate, show_percent, glass, orient, color, label */
 ```
 
 ## Theme (`bd_theme.h`)

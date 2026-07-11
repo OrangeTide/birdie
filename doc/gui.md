@@ -181,7 +181,9 @@ What is built:
   color the moving element, an optional peak-hold marker tracks the recent max,
   and optional VU / peak-hold ballistics ease the needle over ~300 ms.
   `bd_widget_meter.{c,h}`. A plain determinate/indeterminate progress bar is the
-  simpler sibling `bd_widget_progress.{c,h}`.
+  simpler sibling `bd_widget_progress.{c,h}`; its `glass` flag renders a
+  horizontal liquid-in-glass tube matching `BD_METER_VIAL` (the bar-form of the
+  round life/mana orb).
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
   runs: fg/bg/underline/strike/bold/super-sub) for code or ABC-notation music.
 - **Explorer widget** (extension) — model-driven icon grid with selection

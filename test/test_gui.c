@@ -2273,6 +2273,17 @@ main(void)
 	bd_progress_set_indeterminate(pb, 1);
 	bd_gui_render();
 	check("progress renders indeterminate without crashing", 1);
+	bd_id gtube = bd_progress_create(proot, &(bd_progress_desc){
+	    .value = 0.6f, .glass = 1, .color = 0xD2233BFFu,
+	    .label = "HP" }, BD_END);
+	bd_id gvert = bd_progress_create(proot, &(bd_progress_desc){
+	    .value = 0.3f, .glass = 1, .orient = BD_VERTICAL }, BD_END);
+	bd_gui_layout(400, 80);
+	bd_gui_render();
+	check("glass progress tube renders without crashing",
+	    fabsf(bd_progress_get(gtube) - 0.6f) < 0.001f);
+	check("vertical glass tube renders without crashing",
+	    fabsf(bd_progress_get(gvert) - 0.3f) < 0.001f);
 	}
 	bd_gui_cleanup();
 
