@@ -23,6 +23,8 @@
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
 #include "bd_widget_indicator.h"
+#include "bd_widget_tabview.h"
+#include "bd_widget_dock.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
 #include "window.h"
@@ -37,6 +39,9 @@
 
 static bd_id status;
 static bd_id term;
+static bd_id tab_view;        /* the gallery's BD_TAB_VIEW (for auto-select) */
+static int   desktop_tab;     /* index of the "Desktop" MDI pane */
+static bd_id desk_logwin;     /* a Desktop-pane frame (auto-minimize for a shot) */
 static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
 
@@ -399,43 +404,42 @@ build_ui(void)
 	bd_create(m_view, BD_BUTTON, BD_LABEL_S, "Toggle B",
 		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"View > B", BD_END);
 
-	/* session tabs (skeuomorphic folder tabs) */
-	bd_create(frame, BD_TAB_BAR, BD_PREF_H_I, 26,
-		BD_LABEL_S, "Aardwolf\nBatMUD\nlocalhost", BD_END);
+	/* ---- tab view: the gallery split into folder-tab panes ---- */
+	bd_id tabs = bd_tabview_create(frame, BD_GROW_I, 1, BD_END);
+	tab_view = tabs;
 
-	/* ---- body: terminal/input on the left, widget exhibits on the right ---- */
-	bd_id body = bd_create(frame, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1,
-		BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
-
-	bd_id left = bd_create(body, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_GAP_I, 4, BD_END);
+	/* -- Session: the MUD-client surface (terminal, command line, MUD list) -- */
+	bd_id session = bd_tabview_add_pane(tabs, "Session");
+	bd_set(session, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
 	/* terminal with a standalone scrollbar beside it */
-	bd_id termrow = bd_create(left, BD_PANEL,
+	bd_id termrow = bd_create(session, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1, BD_GAP_I, 2, BD_END);
 	term = bd_terminal_create(termrow, BD_GROW_I, 1, BD_END);
 	bd_id sbar = bd_create(termrow, BD_SCROLLBAR, BD_PREF_W_I, 14, BD_END);
 	bd_scrollbar_set(sbar, 0.25f, 0.4f);
 	bd_terminal_write(term,
 		"\033[1mbirdie-gui widget gallery\033[0m\r\n"
-		"GLES backend. Interact with the widgets; events log here.\r\n", -1);
-	bd_create(left, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_PAD_I, 4, BD_END);
+		"GLES backend. Interact with the widgets; events log here.\r\n"
+		"Each folder tab holds a different group of widgets.\r\n", -1);
+	bd_create(session, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_PAD_I, 4, BD_END);
 
 	/* MUD list: a sortable multi-column table (click a header to sort) */
-	bd_create(left, BD_LABEL, BD_LABEL_S, "MUD list (BD_TABLE -- click a header to sort):",
+	bd_create(session, BD_LABEL, BD_LABEL_S, "MUD list (BD_TABLE -- click a header to sort):",
 		BD_PREF_H_I, 16, BD_END);
 	static const bd_table_column gcols[] = {
 		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
 		{ "Host", 170, BD_TABLE_LEFT,  0 },
 		{ "Port", 56,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
 	};
-	bd_table_create(left, gcols, 3,
+	bd_table_create(session, gcols, 3,
 		&(bd_table_model){ gtbl_rows, gtbl_cell, NULL },
 		&(bd_table_cb){ .activate = gtbl_activate },
-		BD_PREF_H_I, 120, BD_END);
+		BD_PREF_H_I, 160, BD_END);
 
-	/* inventory grid: an RPG bag (drag between slots, right-click, wheel to
-	 * scroll, stack-count badges, hover tooltips) */
+	/* -- Inventory: an RPG bag (drag between slots, right-click, wheel to
+	 * scroll, stack-count badges, hover tooltips) + a recent-connections list -- */
+	bd_id invpane = bd_tabview_add_pane(tabs, "Inventory");
+	bd_set(invpane, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
 	static const uint32_t pal[6] = { 0x9AA4B0FFu, 0xC08A3EFFu, 0xD24B4BFFu,
 	    0xE8C24AFFu, 0x6FB36FFFu, 0x8A6FC0FFu };
 	for (int i = 0; i < 6; i++)
@@ -450,19 +454,26 @@ build_ui(void)
 	inv_bag[11] = (struct game_item){ "Old Map",1, 1  };
 	inv_bag[14] = (struct game_item){ "Bow",    5, 1  };
 
-	bd_create(left, BD_LABEL,
+	bd_create(invpane, BD_LABEL,
 		BD_LABEL_S, "Inventory (BD_INVENTORY -- drag between slots, wheel to scroll):",
 		BD_PREF_H_I, 16, BD_END);
-	inv_widget = bd_inventory_create(left, 6, 8,
+	inv_widget = bd_inventory_create(invpane, 6, 8,
 		&(bd_inventory_model){ .get = inv_get },
 		&(bd_inventory_cb){ .activate = inv_activate, .context = inv_context,
 		    .move = inv_move },
-		BD_PREF_H_I, 176, BD_END);
+		BD_GROW_I, 1, BD_END);
 	bd_inventory_set_cell_size(inv_widget, 40);
+	bd_create(invpane, BD_LABEL, BD_LABEL_S, "Recent (BD_LIST):",
+		BD_PREF_H_I, 16, BD_END);
+	bd_create(invpane, BD_LIST, BD_PREF_H_I, 84,
+		BD_LABEL_S, "Aardwolf  (yesterday)\nBatMUD  (last week)\n"
+		"Discworld  (last month)\nLensmoor  (2 months ago)",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"connect to recent",
+		BD_END);
 
-	bd_id right = bd_create(body, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 420,
-		BD_GAP_I, 6, BD_END);
+	/* -- Controls: knobs, switches, indicator lamps -- */
+	bd_id right = bd_tabview_add_pane(tabs, "Controls");
+	bd_set(right, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
 
 	/* knobs: every dial style + a stepped N-way rotary switch */
 	bd_id krow = section(right, "Knobs & dials", BD_LAYOUT_ROW, 96);
@@ -516,8 +527,12 @@ build_ui(void)
 		.clickable = 1, .diameter = 18, .label = "STATUS",
 		.cb = on_indicator, .arg = (void *)"Status" }, BD_END);
 
+	/* -- Pads: X-Y pads and sliders -- */
+	bd_id pads = bd_tabview_add_pane(tabs, "Pads");
+	bd_set(pads, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
+
 	/* X-Y pads: bounded square + spring-return joystick circle */
-	bd_id xrow = section(right, "X-Y pads", BD_LAYOUT_ROW, 120);
+	bd_id xrow = section(pads, "X-Y pads", BD_LAYOUT_ROW, 120);
 	bd_xypad_create(xrow, &(bd_xypad_desc){
 		.shape = BD_XY_SQUARE, .x = 0.5f, .y = 0.5f,
 		.cb = on_xy, .arg = (void *)"Pad" }, BD_PREF_W_I, 90, BD_END);
@@ -529,7 +544,7 @@ build_ui(void)
 	 * fader keeps a fixed width (it fills the row height); the horizontal
 	 * slider sits in a column wrapper so it keeps a short, fixed height
 	 * instead of stretching its thumb to fill the tall row. */
-	bd_id vrow = section(right, "Sliders", BD_LAYOUT_ROW, 150);
+	bd_id vrow = section(pads, "Sliders", BD_LAYOUT_ROW, 150);
 	bd_slider_create(vrow, BD_VERTICAL, 0.6f, on_slider, (void *)"Fader",
 		BD_PREF_W_I, 28, BD_END);
 	bd_id hwrap = bd_create(vrow, BD_PANEL,
@@ -537,9 +552,13 @@ build_ui(void)
 	bd_slider_create(hwrap, BD_HORIZONTAL, 0.4f, on_slider, (void *)"Wet",
 		BD_PREF_H_I, 24, BD_END);
 
+	/* -- Paint & Layout: the drawing canvas and the layout demos -- */
+	bd_id paint = bd_tabview_add_pane(tabs, "Paint & Layout");
+	bd_set(paint, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
+
 	/* ---- pressure-sensitive drawing canvas ---- */
-	bd_id crow = section(right, "Drawing canvas (pen: pressure / tilt / "
-		"barrel = red / eraser)", BD_LAYOUT_ROW, 170);
+	bd_id crow = section(paint, "Drawing canvas (pen: pressure / tilt / "
+		"barrel = red / eraser)", BD_LAYOUT_ROW, 220);
 	canvas = bd_canvas_create(crow, BD_GROW_I, 1, BD_END);
 	bd_canvas_set_nib(canvas, 10.0f);
 	bd_id ccol = bd_create(crow, BD_PANEL,
@@ -548,7 +567,7 @@ build_ui(void)
 		BD_ON_CLICK_F, on_canvas_clear, BD_END);
 
 	/* ---- layout: anchor (cell alignment) and packing (main-axis) ---- */
-	bd_id lrow = section(right, "Anchor & packing "
+	bd_id lrow = section(paint, "Anchor & packing "
 		"(BD_ANCHOR_I / BD_PACK_I)", BD_LAYOUT_ROW, 150);
 
 	/* cross-axis anchor: fixed-width buttons align L / center / R in a column */
@@ -592,6 +611,54 @@ build_ui(void)
 			BD_X_I, 4, BD_Y_I, 4,
 			BD_BG_C, 0x3C6E8FFFu, BD_FG_C, 0xEAF0F4FFu, BD_END);
 
+	/* -- Desktop: an embedded window manager (BD_MANAGED_CANVAS) hosting
+	 * floating frames plus a BD_DOCK, on the GLES multi_window backend. Each
+	 * frame is a real top-level BD_FRAME parented to the canvas: drag its title
+	 * bar to move it, snap it to a canvas edge, minimize (_) it to the dock, and
+	 * click a dock tile to restore. This is the same in-surface WM the toolkit
+	 * uses on a single-surface backend, now scoped to a widget. -- */
+	bd_id deskpane = bd_tabview_add_pane(tabs, "Desktop");
+	desktop_tab = bd_tabview_count(tabs) - 1;
+	bd_set(deskpane, BD_PAD_I, 6, BD_GAP_I, 4, BD_END);
+	bd_create(deskpane, BD_LABEL, BD_LABEL_S,
+		"BD_MANAGED_CANVAS: drag the frame title bars; minimize (_) a frame to "
+		"the dock; click a dock tile to restore.",
+		BD_PREF_H_I, 16, BD_FG_C, 0x9DA3AAFFu, BD_END);
+	bd_id cv = bd_managed_canvas_create(deskpane, BD_GROW_I, 1,
+		BD_BG_C, 0x1E2024FFu, BD_END);
+
+	/* a left-edge dock scoped to this canvas (empty until a frame is minimized) */
+	bd_id dk = bd_dock_create(cv, NULL, BD_END);
+	bd_dock_set_gravity(dk, BD_GRAVITY_LEFT);
+	bd_dock_set_tile_size(dk, 40);
+
+	/* Servers: the icon-browser explorer, floating (drag to arrange, F2 rename) */
+	bd_id srvwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Servers",
+		BD_PREF_W_I, 250, BD_PREF_H_I, 230, BD_X_I, 90, BD_Y_I, 24,
+		BD_BG_C, 0x2B2D30FFu, BD_END);
+	bd_explorer_create(srvwin,
+		&(bd_explorer_model){ .count = srv_count, .get = srv_get,
+			.set_pos = srv_set_pos, .set_name = srv_set_name },
+		&(bd_explorer_cb){ .activate = srv_activate }, BD_GROW_I, 1, BD_END);
+
+	/* Notes: the rich-text editor, floating (its text survives tab switches) */
+	bd_id noteswin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Notes",
+		BD_PREF_W_I, 260, BD_PREF_H_I, 150, BD_X_I, 380, BD_Y_I, 54,
+		BD_BG_C, 0x2B2D30FFu, BD_END);
+	bd_id ned = bd_editor_create(noteswin, BD_GROW_I, 1, BD_END);
+	bd_editor_set_text(ned,
+		"A floating editor pane.\nDrag my title bar, or\nminimize me to the dock.");
+
+	/* Log: a BD_LIST, floating */
+	bd_id logwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Log",
+		BD_PREF_W_I, 240, BD_PREF_H_I, 140, BD_X_I, 210, BD_Y_I, 240,
+		BD_BG_C, 0x2B2D30FFu, BD_END);
+	desk_logwin = logwin;
+	bd_create(logwin, BD_LIST, BD_GROW_I, 1,
+		BD_LABEL_S, "* connected to Aardwolf\n* MOTD received\n"
+		"> look\nYou are in a small room.\n> north\nYou cannot go that way.",
+		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"log line", BD_END);
+
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
@@ -627,6 +694,11 @@ main(void)
 
 	bd_gui_init(&bd_backend_gles, NULL);
 	build_ui();
+	if (getenv("GALLERY_AUTODESK")) { /* open the Desktop (MDI) tab for a shot */
+		bd_tabview_set_active(tab_view, desktop_tab);
+		if (getenv("GALLERY_AUTOMIN"))   /* minimize a frame to show the dock */
+			bd_window_minimize(desk_logwin);
+	}
 	if (getenv("GALLERY_AUTODLG"))   /* open a second window for testing */
 		on_new_window(BD_NONE, NULL);
 	if (getenv("GALLERY_AUTONOTICE"))   /* show a modal notice for a shot */
