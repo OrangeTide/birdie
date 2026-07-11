@@ -207,7 +207,9 @@ What is built:
   type-ahead) and the twisty toggles; nodes keyed by an app `uint64_t`. First
   of the Smalltalk-IDE primitives from `doc/gui/smalltalk-ide.md`.
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
-- **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
+- **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`
+  reads it and `bd_focus(id)` sets it (e.g. focus an input line the app just
+  opened, so the user types without clicking it first).
 - **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`
   (X11 CLIPBOARD on the GLES backend; ludica backend NULL for now).
 - **IME / compose** — `BD_EV_TEXT_COMMIT`/`BD_EV_TEXT_PREEDIT` + backend

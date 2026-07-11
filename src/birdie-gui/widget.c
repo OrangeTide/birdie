@@ -3612,6 +3612,20 @@ bd_focused(void)
 	return focus_id;
 }
 
+void
+bd_focus(bd_id id)
+{
+	if (id == BD_NONE) {
+		focus_id = BD_NONE;
+		canvas_kbd_focus = BD_NONE;
+		return;
+	}
+	if (!is_focusable(id))
+		return;                  /* not a focusable widget: leave focus as is */
+	focus_id = id;
+	canvas_kbd_focus = BD_NONE;      /* mutual exclusion with canvas key focus */
+}
+
 int
 bd_window_focused(bd_id frame)
 {

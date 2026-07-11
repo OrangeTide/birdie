@@ -185,6 +185,15 @@ const bd_theme *bd_gui_theme(void);
  * click and on Tab / Shift-Tab traversal. */
 bd_id bd_focused(void);
 
+/* Move keyboard focus to `id` programmatically, the counterpart to click / Tab
+ * focus (e.g. focus an input line the app just opened, so the user can type
+ * without clicking it first). No-op unless `id` is a focusable widget (alive,
+ * visible, enabled, and a type that takes focus -- text fields, lists, tab bars,
+ * clickable buttons, and event()-handling extension widgets). Pass BD_NONE to
+ * clear focus. Focusing a widget also drops any GLES-background canvas key
+ * focus. Does not move the caret; a focused text field keeps its position. */
+void bd_focus(bd_id id);
+
 /* Window (OS input) focus. The host translates its native focus/blur events
  * into BD_EV_FOCUS_IN / BD_EV_FOCUS_OUT and feeds them to bd_gui_event; the
  * toolkit records which top-level windows currently hold focus. Applications

@@ -1344,7 +1344,8 @@ main(void)
 	    BD_ON_CLICK_F, on_click, BD_PREF_H_I, 24, BD_END);
 	bd_explorer_model em2 = { .count = exp_count, .get = exp_get };
 	bd_id tex = bd_explorer_create(tf, &em2, NULL, BD_GROW_I, 1, BD_END);
-	bd_create(tf, BD_LABEL, BD_LABEL_S, "not focusable", BD_PREF_H_I, 18, BD_END);
+	bd_id tlbl = bd_create(tf, BD_LABEL, BD_LABEL_S, "not focusable",
+	    BD_PREF_H_I, 18, BD_END);
 	bd_gui_layout(800, 600);
 
 	bd_event tab  = { .type=BD_EV_KEY_DOWN, .key=BD_KEY_TAB };
@@ -1362,6 +1363,19 @@ main(void)
 	check("Enter activates the focused button", clicked == before + 1);
 	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint=' ' });
 	check("Space activates the focused button", clicked == before + 2);
+
+	/* ---- programmatic focus (bd_focus): the counterpart to click / Tab ---- */
+	bd_focus(ti);
+	check("bd_focus moves focus to a widget", bd_focused() == ti);
+	int fclicks = clicked;
+	bd_focus(ba);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("keys route to a programmatically focused widget",
+	    bd_focused() == ba && clicked == fclicks + 1);
+	bd_focus(tlbl);
+	check("bd_focus ignores a non-focusable widget", bd_focused() == ba);
+	bd_focus(BD_NONE);
+	check("bd_focus(BD_NONE) clears focus", bd_focused() == BD_NONE);
 	bd_gui_cleanup();
 
 	/* ---- BD_TEXT_FIELD single-line field ---- */
