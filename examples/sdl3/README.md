@@ -12,10 +12,14 @@ the frame loop, and the 3D scene, and drives the toolkit through
 
 The window shows a **rotatable 3D tetrahedron** drawn with raw GLES3 as the
 background, and a birdie-gui UI composited on top: a **floating terminal
-subwindow** you can drag by its title bar and **minimize**, and an **inventory
-grid** (`bd_widget_inventory`) whose "Relic" cell shows the same spinning model.
-Drag anywhere over the 3D background to rotate the tetrahedron; the mouse wheel
-zooms; drag inventory items between slots.
+subwindow** you can drag by its title bar and **minimize**, an **inventory
+grid** (`bd_widget_inventory`) whose "Relic" cell shows the same spinning model,
+and a **CRPG action bar** (`bd_widget_actionbar`) along the bottom. Drag
+anywhere over the 3D background to rotate the tetrahedron; the mouse wheel
+zooms; drag inventory items between slots, or onto an action-bar slot to bind
+it (then press its hotkey 1..6 to fire).
+
+![The birdie-gui SDL3 example: a rotating 3D tetrahedron behind a floating terminal, an inventory grid whose Relic cell shows the same model rendered to a texture, a palette window, and a CRPG action bar at the bottom filled by dragging inventory items onto it](../../doc/images/sdl3-example.png)
 
 The Relic cell demonstrates the **"host renders to a texture"** path a
 backend-neutral widget relies on: each frame the example renders the spinning
