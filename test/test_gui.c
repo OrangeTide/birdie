@@ -381,6 +381,27 @@ static void tr_on_select(bd_id w, uint64_t k, void *u)   { (void)w; (void)u; tr_
 static void tr_on_activate(bd_id w, uint64_t k, void *u) { (void)w; (void)u; tr_act_key = k; tr_act_n++; }
 static void tr_on_expand(bd_id w, uint64_t k, int o, void *u) { (void)w; (void)u; tr_exp_key = k; tr_exp_open = o; tr_exp_n++; }
 
+/* ---- an autocomplete provider over a fixed vocabulary ---- */
+static const char *ac_vocab[] = { "connect", "connection", "connected",
+	"disconnect", "cancel" };
+static int
+ac_provider(bd_id ed, const char *prefix, bd_completion *out, int max, void *user)
+{
+	(void)ed; (void)user;
+	int n = 0, pl = (int)strlen(prefix);
+	for (int i = 0; i < (int)(sizeof ac_vocab / sizeof ac_vocab[0]); i++)
+		if (n < max && strncmp(ac_vocab[i], prefix, (size_t)pl) == 0)
+			out[n++] = (bd_completion){ .text = ac_vocab[i], .detail = "kw" };
+	return n;
+}
+static void
+ed_type(bd_id ed, const char *s)
+{
+	(void)ed;
+	for (; *s; s++)
+		bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = (unsigned)*s });
+}
+
 int
 main(void)
 {
@@ -2370,6 +2391,51 @@ main(void)
 	/* Left again collapses the expanded parent */
 	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_LEFT });
 	check("tree Left collapses an expanded node", !bd_tree_is_expanded(tr, 2));
+	}
+	bd_gui_cleanup();
+
+	/* ---- editor autocomplete: auto-popup, filter, navigate, accept ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id eroot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_id ed = bd_editor_create(eroot, BD_GROW_I, 1, BD_END);
+	bd_editor_set_completer(ed, ac_provider, NULL);
+	bd_gui_layout(320, 200);
+	bd_gui_render();
+	int ex, ey, ew, eh;
+	bd_widget_rect(ed, &ex, &ey, &ew, &eh);
+	bd_event ecd = mouse(BD_EV_MOUSE_DOWN, ex + 10, ey + 8);
+	bd_event ecu = mouse(BD_EV_MOUSE_UP,   ex + 10, ey + 8);
+	bd_gui_event(&ecd); bd_gui_event(&ecu);   /* focus the editor */
+
+	char tb[64];
+	ed_type(ed, "con");   /* prefix len 3 >= min -> popup opens */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	bd_editor_text(ed, tb, sizeof tb);
+	check("autocomplete Enter accepts the first match", strcmp(tb, "connect") == 0);
+
+	bd_editor_set_text(ed, "");
+	ed_type(ed, "conn");  /* matches connect, connection, connected */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_DOWN });
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	bd_editor_text(ed, tb, sizeof tb);
+	check("autocomplete Down selects the next match",
+	    strcmp(tb, "connection") == 0);
+
+	bd_editor_set_text(ed, "");
+	ed_type(ed, "con");
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ESCAPE });
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	bd_editor_text(ed, tb, sizeof tb);
+	check("autocomplete Esc dismisses (Enter then inserts a newline)",
+	    strcmp(tb, "con\n") == 0);
+
+	bd_editor_set_text(ed, "");
+	ed_type(ed, "zz");    /* no vocab matches -> no popup; Enter inserts newline */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	bd_editor_text(ed, tb, sizeof tb);
+	check("autocomplete stays closed with no matches", strcmp(tb, "zz\n") == 0);
 	}
 	bd_gui_cleanup();
 

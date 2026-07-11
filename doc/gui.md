@@ -856,6 +856,12 @@ one-off highlight channel.
   programmatically while the user only views, e.g. during playback.
 - highlight: apply a style to a whole row, or to a `[row, col0..col1]` span;
   `clear_highlights()`. Highlighting is just setting style runs (below).
+- autocomplete: `set_completer(fn, user)` installs a completion provider and a
+  popup auto-appears under the caret as an identifier is typed (once the prefix
+  reaches `set_complete_min`, default 2). The provider returns text+detail
+  items; Up/Down move the highlight and Enter accepts (Tab is reserved by the
+  toolkit for focus traversal). Esc, a caret move, or a non-word char dismiss
+  it. First of the editor IDE extensions from `doc/gui/smalltalk-ide.md`.
 
 **Rich-text model.** Styles are a small set — bold, italic, underline,
 strikeout, superscript, subscript, foreground color, background color — encoded

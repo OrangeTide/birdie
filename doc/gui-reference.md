@@ -255,7 +255,9 @@ void  bd_explorer_set_icon_size(bd_id, int px);               void bd_explorer_b
 
 ### Editor (`bd_widget_editor.h`)
 
-Row-oriented rich-text with per-span styles.
+Row-oriented rich-text with per-span styles, an optional submit hook, and an
+autocomplete popup (install a completer; a floating list of text+detail
+suggestions appears under the caret as you type, Up/Down + Enter to accept).
 
 ```c
 bd_id bd_editor_create(bd_id parent, ...);
@@ -265,6 +267,9 @@ void  bd_editor_insert_row(bd_id, int row, const char *);   void bd_editor_repla
 void  bd_editor_delete_row(bd_id, int row);
 void  bd_editor_on_submit(bd_id, bd_callback_fn, void *data);
 void  bd_editor_set_enter_submits(bd_id, int);    int bd_editor_enter_submits(bd_id);
+/* autocomplete: a popup appears as you type; completer returns text+detail items */
+void  bd_editor_set_completer(bd_id, bd_completer_fn, void *user);  /* fn NULL = off */
+void  bd_editor_set_complete_min(bd_id, int chars);   /* auto-trigger prefix len (default 2) */
 void  bd_editor_set_locked(bd_id, int);           int bd_editor_locked(bd_id);
 void  bd_editor_set_monospace(bd_id, int);
 void  bd_editor_clear_styles(bd_id);

@@ -18,6 +18,10 @@
 
 struct erun { int start, end; bd_rich_style style; };
 
+#define AC_MAX     10   /* max completions shown at once */
+#define AC_TEXTLEN 64
+#define AC_DETLEN  24
+
 struct editor {
 	char  *buf;
 	int    len, cap;
@@ -31,6 +35,17 @@ struct editor {
 	void  *on_submit_data;
 	struct erun *runs;
 	int    nrun, runcap;
+
+	/* autocomplete */
+	bd_completer_fn ac_fn;
+	void  *ac_user;
+	int    ac_min;          /* auto-trigger prefix length (default 2) */
+	int    ac_open;
+	int    ac_anchor;       /* byte offset where the current word starts */
+	int    ac_sel;          /* highlighted item */
+	int    ac_n;            /* item count */
+	char   ac_text[AC_MAX][AC_TEXTLEN];
+	char   ac_detail[AC_MAX][AC_DETLEN];
 };
 
 static int editor_type;
@@ -291,6 +306,7 @@ editor_init(bd_id id, void *state)
 {
 	struct editor *e = state;
 	e->mono = 1;            /* a code/music editor wants fixed-width by default */
+	e->ac_min = 2;          /* auto-complete after this many word chars */
 	bd_set(id, BD_PREF_W_I, 280, BD_PREF_H_I, 140, BD_PAD_I, 4, BD_END);
 }
 
@@ -400,6 +416,51 @@ editor_render(bd_id id, void *state)
 
 	bd_draw_flush();
 	be->scissor_off();
+
+	/* autocomplete popup: a floating list anchored under the word, drawn
+	 * after the text scissor so it can overlay the following lines */
+	if (focused && e->ac_open && e->ac_n > 0) {
+		int prow = (int)bd_draw_line_height() + 4;
+		float ws_px = e_span_px(e, cls, e->ac_anchor);   /* word-start x */
+		int px = ix + (int)(ws_px - e->scroll_x);
+		int caret_y = iy + caret_top - e->scroll_y;
+
+		int pw = 140;
+		for (int i = 0; i < e->ac_n; i++) {
+			int wt = (int)bd_draw_text_width(e->ac_text[i]);
+			int wd = e->ac_detail[i][0]
+			    ? (int)bd_draw_text_width(e->ac_detail[i]) + 20 : 0;
+			int need = wt + wd + 16;
+			if (need > pw) pw = need;
+		}
+		if (pw > w - 8) pw = w - 8;
+		int ph = e->ac_n * prow + 2;
+		if (px + pw > x + w - 2) px = x + w - 2 - pw;
+		if (px < x + 2) px = x + 2;
+		int py = caret_y + lh;                     /* below the caret ... */
+		if (py + ph > y + h - 2) py = caret_y - ph; /* ... or flip above */
+		if (py < y + 2) py = y + 2;
+
+		bd_draw_flush();
+		bd_draw_rect((float)px, (float)py, (float)pw, (float)ph, th->widget);
+		bd_draw_rect_lines((float)px, (float)py, (float)pw, (float)ph, th->border);
+		int base = (prow - (int)bd_draw_line_height()) / 2;
+		for (int i = 0; i < e->ac_n; i++) {
+			int ry = py + 1 + i * prow;
+			if (i == e->ac_sel)
+				bd_draw_rect((float)(px + 1), (float)ry,
+				    (float)(pw - 2), (float)prow, th->select);
+			bd_draw_text(e->ac_text[i], (float)(px + 6),
+			    (float)(ry + base), th->text);
+			if (e->ac_detail[i][0]) {
+				float dw = bd_draw_text_width(e->ac_detail[i]);
+				bd_draw_text(e->ac_detail[i],
+				    (float)(px + pw - 6) - dw, (float)(ry + base),
+				    th->border);
+			}
+		}
+		bd_draw_flush();
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -415,6 +476,90 @@ editor_insert(struct editor *e, unsigned cp)
 	int off = e->cursor;
 	e_splice(e, off, 0, enc, n);
 	e->cursor = off + n;
+}
+
+/* ------------------------------------------------------------------ */
+/* autocomplete                                                       */
+/* ------------------------------------------------------------------ */
+
+static int
+ac_is_word(unsigned char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+	    (c >= '0' && c <= '9') || c == '_';
+}
+
+/* Byte offset where the identifier ending at the caret starts. */
+static int
+ac_word_start(const struct editor *e)
+{
+	int p = e->cursor;
+	while (p > 0 && ac_is_word((unsigned char)e->buf[p - 1]))
+		p--;
+	return p;
+}
+
+static void
+ac_close(struct editor *e)
+{
+	e->ac_open = 0;
+	e->ac_n = 0;
+}
+
+/* Recompute the prefix before the caret and (re-)query the provider. Opens the
+ * popup when the prefix is long enough and the provider returns items. */
+static void
+ac_query(bd_id id, struct editor *e)
+{
+	if (!e->ac_fn || e->locked) { ac_close(e); return; }
+	int start = ac_word_start(e);
+	int plen = e->cursor - start;
+	if (plen < e->ac_min || plen >= AC_TEXTLEN) {
+		ac_close(e);
+		return;
+	}
+	char prefix[AC_TEXTLEN];
+	memcpy(prefix, e->buf + start, (size_t)plen);
+	prefix[plen] = '\0';
+
+	bd_completion items[AC_MAX];
+	memset(items, 0, sizeof items);
+	int n = e->ac_fn(id, prefix, items, AC_MAX, e->ac_user);
+	if (n < 0) n = 0;
+	if (n > AC_MAX) n = AC_MAX;
+	for (int i = 0; i < n; i++) {
+		e->ac_text[i][0] = '\0';
+		e->ac_detail[i][0] = '\0';
+		if (items[i].text) {
+			strncpy(e->ac_text[i], items[i].text, AC_TEXTLEN - 1);
+			e->ac_text[i][AC_TEXTLEN - 1] = '\0';
+		}
+		if (items[i].detail) {
+			strncpy(e->ac_detail[i], items[i].detail, AC_DETLEN - 1);
+			e->ac_detail[i][AC_DETLEN - 1] = '\0';
+		}
+	}
+	e->ac_n = n;
+	e->ac_anchor = start;
+	if (e->ac_sel >= n)
+		e->ac_sel = 0;
+	e->ac_open = n > 0;
+}
+
+/* Replace the current word fragment with the highlighted completion. */
+static void
+ac_accept(struct editor *e)
+{
+	if (!e->ac_open || e->ac_sel < 0 || e->ac_sel >= e->ac_n || e->locked) {
+		ac_close(e);
+		return;
+	}
+	const char *t = e->ac_text[e->ac_sel];
+	int tn = (int)strlen(t);
+	int start = e->ac_anchor;
+	e_splice(e, start, e->cursor - start, t, tn);
+	e->cursor = start + tn;
+	ac_close(e);
 }
 
 static int
@@ -448,8 +593,15 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		return 1;   /* consume capture; selection drag is TODO */
 
 	case BD_EV_CHAR:
-		if (ev->codepoint >= 32)
+		if (ev->codepoint >= 32) {
 			editor_insert(e, ev->codepoint);
+			/* a word char (re-)queries; anything else dismisses */
+			if (e->ac_fn && ev->codepoint < 128 &&
+			    ac_is_word((unsigned char)ev->codepoint))
+				ac_query(id, e);
+			else
+				ac_close(e);
+		}
 		return 1;
 
 	case BD_EV_TEXT_COMMIT:        /* IME / compose / dead-key commit */
@@ -457,6 +609,8 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 			int n = (int)strlen(ev->text);
 			e_splice(e, e->cursor, 0, ev->text, n);
 			e->cursor += n;
+			if (e->ac_fn)
+				ac_query(id, e);
 		}
 		return 1;
 
@@ -464,6 +618,29 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		break;
 	default:
 		return 0;
+	}
+
+	/* autocomplete popup steals navigation/accept keys while open */
+	if (e->ac_open) {
+		switch (ev->key) {
+		case BD_KEY_DOWN:
+			e->ac_sel = (e->ac_sel + 1) % e->ac_n;
+			return 1;
+		case BD_KEY_UP:
+			e->ac_sel = (e->ac_sel - 1 + e->ac_n) % e->ac_n;
+			return 1;
+		case BD_KEY_ENTER:
+			ac_accept(e);
+			return 1;
+		case BD_KEY_ESCAPE:
+			ac_close(e);
+			return 1;      /* consume, keep focus */
+		case BD_KEY_BACKSPACE:
+			break;         /* fall through: delete, then re-query below */
+		default:
+			ac_close(e);   /* caret moves etc. dismiss, then act normally */
+			break;
+		}
 	}
 
 	/* key handling */
@@ -525,6 +702,8 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 			int p = e_prev(e->buf, e->cursor);
 			e_splice(e, p, e->cursor - p, NULL, 0);  /* cursor -> p */
 		}
+		if (e->ac_open)                  /* shrink the prefix, re-filter */
+			ac_query(id, e);
 		break;
 	case BD_KEY_DELETE:
 		if (!e->locked && e->cursor < e->len) {
@@ -583,6 +762,7 @@ bd_editor_set_text(bd_id id, const char *text)
 	e->cursor = 0;
 	e->scroll_x = 0.0f;
 	e->scroll_y = 0;
+	ac_close(e);
 }
 
 int
@@ -670,6 +850,25 @@ bd_editor_on_submit(bd_id id, bd_callback_fn fn, void *data)
 	if (!e) return;
 	e->on_submit = fn;
 	e->on_submit_data = data;
+}
+
+void
+bd_editor_set_completer(bd_id id, bd_completer_fn fn, void *user)
+{
+	struct editor *e = editor_of(id);
+	if (!e) return;
+	e->ac_fn = fn;
+	e->ac_user = user;
+	if (!fn)
+		ac_close(e);
+}
+
+void
+bd_editor_set_complete_min(bd_id id, int chars)
+{
+	struct editor *e = editor_of(id);
+	if (e && chars >= 1)
+		e->ac_min = chars;
 }
 
 void

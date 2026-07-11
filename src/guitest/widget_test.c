@@ -257,6 +257,25 @@ w_activate(bd_id w, uint64_t key, void *user)
 	report(b);
 }
 
+/* ---- an editor completion provider (MUD verbs + directions) ---- */
+static int
+mud_complete(bd_id ed, const char *prefix, bd_completion *out, int max, void *user)
+{
+	(void)ed; (void)user;
+	static const struct { const char *w, *kind; } vocab[] = {
+		{ "connect", "cmd" }, { "cast", "cmd" }, { "consider", "cmd" },
+		{ "north", "dir" }, { "northeast", "dir" }, { "northwest", "dir" },
+		{ "south", "dir" }, { "look", "cmd" }, { "inventory", "cmd" },
+		{ "kill", "cmd" }, { "score", "cmd" }, { "wield", "cmd" },
+	};
+	int n = 0, pl = (int)strlen(prefix);
+	for (int i = 0; i < (int)(sizeof vocab / sizeof vocab[0]); i++)
+		if (n < max && strncmp(vocab[i].w, prefix, (size_t)pl) == 0)
+			out[n++] = (bd_completion){ .text = vocab[i].w,
+			    .detail = vocab[i].kind };
+	return n;
+}
+
 /* Open a second native window: a small dialog with its own widgets, proving
  * windows render and take input independently. */
 static int dialog_n;
@@ -742,7 +761,8 @@ build_ui(void)
 		BD_BG_C, 0x2B2D30FFu, BD_END);
 	bd_id ned = bd_editor_create(noteswin, BD_GROW_I, 1, BD_END);
 	bd_editor_set_text(ned,
-		"A floating editor pane.\nDrag my title bar, or\nminimize me to the dock.");
+		"A floating editor pane.\nType a MUD verb (co, no...)\nfor autocomplete.");
+	bd_editor_set_completer(ned, mud_complete, NULL);
 
 	/* Log: a BD_LIST, floating */
 	bd_id logwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Log",

@@ -60,6 +60,29 @@ void bd_editor_on_submit(bd_id id, bd_callback_fn fn, void *data);
 void bd_editor_set_enter_submits(bd_id id, int on);
 int  bd_editor_enter_submits(bd_id id);
 
+/* ---- autocomplete ----
+ *
+ * Install a completion provider and the editor shows a popup as the user types.
+ * Once the identifier fragment before the caret reaches the minimum length
+ * (bd_editor_set_complete_min, default 2) the editor calls the provider with
+ * that prefix; if it returns any items, a floating list appears under the
+ * caret and re-queries on each further keystroke. Up/Down move the highlight,
+ * Enter accepts (replacing the fragment with the item's `text`), and Esc, a
+ * caret move, or a non-word character dismiss it. A word char is [A-Za-z0-9_].
+ * Pass fn = NULL to disable. */
+typedef struct bd_completion {
+	const char *text;    /* the replacement token inserted on accept */
+	const char *detail;  /* optional right-aligned hint (kind/type); NULL = none */
+} bd_completion;
+
+/* Fill up to `max` completions for `prefix`; return the count written (0 = no
+ * popup). The strings are copied by the editor, so they may be transient. */
+typedef int (*bd_completer_fn)(bd_id editor, const char *prefix,
+                               bd_completion *out, int max, void *user);
+
+void bd_editor_set_completer(bd_id id, bd_completer_fn fn, void *user);
+void bd_editor_set_complete_min(bd_id id, int chars);  /* auto-trigger prefix length */
+
 /* ---- lock (read-only; the row API and styling still work) ---- */
 void bd_editor_set_locked(bd_id id, int locked);
 int  bd_editor_locked(bd_id id);

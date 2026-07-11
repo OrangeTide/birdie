@@ -57,7 +57,7 @@ those primitives and the tools are mostly composition.
 | **Radio group / segmented control** (instance \| class) | `bd_toggle` is 2-state on/off, not an N-way exclusive selector | **missing** |
 | Editor: line-number gutter | — | **missing** |
 | Editor: syntax highlighting *driver* | style-span mechanism exists; no tokenizer hook / re-highlight-on-edit | **partial** |
-| Editor: autocomplete popup | — | **missing** (see TODO: "wire up autocomplete to an editor") |
+| Editor: autocomplete popup | `bd_editor_set_completer` (auto-popup, text+detail items) | **have** |
 | Editor: find / replace bar | — | **missing** |
 | List: type-ahead find | — | **missing** (small add to `BD_LIST`) |
 
@@ -97,9 +97,10 @@ In dependency order. The first three unlock every tool above.
    - a **syntax-highlight hook**: a per-widget tokenizer callback the editor
      calls on edited rows to emit style spans, so highlighting stays current
      instead of being a one-shot `bd_editor_style_span` at load;
-   - an **autocomplete popup** (shared with the standalone autocomplete TODO): a
-     floating `BD_LIST` at the caret, fed by a completion callback, Tab/Enter to
-     accept;
+   - an **autocomplete popup** (*built* -- `bd_editor_set_completer`): a floating
+     list under the caret, auto-shown as an identifier is typed, fed by a
+     completer callback that returns text+detail items, Up/Down + Enter to
+     accept (Tab is reserved by the toolkit for focus traversal);
    - a **find / replace bar**: a thin input strip the editor can host, with
      next/prev and match highlighting via existing `_highlight_span`.
 
@@ -184,8 +185,9 @@ Fixed arrangements over a shared model, packaged so a host instantiates one call
 2. `BD_TREE` — **built** (`bd_widget_tree`). The Hierarchy Browser and the
    project tree (TODO: "tree browser for projects") share it.
 3. `BD_RADIO` / segmented control — small, needed by the browser.
-4. Editor autocomplete + syntax-highlight hook + find bar — shared with the TODO
-   items "wire up autocomplete to an editor" and the IDE-on-an-editor note.
+4. Editor autocomplete (**built** — `bd_editor_set_completer`) + syntax-highlight
+   hook + find bar — the TODO "wire up autocomplete to an editor" is done; the
+   gutter/tokenizer-hook/find-bar remain.
 5. `BD_COLUMN_BROWSER` (the generic pane container), then the `bd_class_browser`,
    Inspector, and Debugger composites on top of it.
 
