@@ -25,6 +25,8 @@
 #include "bd_widget_indicator.h"
 #include "bd_widget_tabview.h"
 #include "bd_widget_dock.h"
+#include "bd_widget_meter.h"
+#include "bd_widget_progress.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
 #include "window.h"
@@ -42,6 +44,8 @@ static bd_id term;
 static bd_id tab_view;        /* the gallery's BD_TAB_VIEW (for auto-select) */
 static int   desktop_tab;     /* index of the "Desktop" MDI pane */
 static bd_id desk_logwin;     /* a Desktop-pane frame (auto-minimize for a shot) */
+/* animated meters, driven from the main loop to show ballistics/peak/fill */
+static bd_id m_vu, m_eye, m_load, m_sig, m_hp, m_mp, m_disk, m_prog;
 static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
 
@@ -552,6 +556,45 @@ build_ui(void)
 	bd_slider_create(hwrap, BD_HORIZONTAL, 0.4f, on_slider, (void *)"Wet",
 		BD_PREF_H_I, 24, BD_END);
 
+	/* -- Meters: the 0..1 instrument styles + a progress bar (animated in the
+	 * main loop so ballistics, peak-hold, and the liquid fill are visible) -- */
+	bd_id meters = bd_tabview_add_pane(tabs, "Meters");
+	bd_set(meters, BD_PAD_I, 6, BD_GAP_I, 8, BD_END);
+
+	/* round instruments in a row */
+	bd_id mrow = section(meters, "Round meters (VU / magic eye / pie / vials)",
+		BD_LAYOUT_ROW, 130);
+	m_vu = bd_meter_create(mrow, &(bd_meter_desc){ .style = BD_METER_VU,
+		.value = 0.3f, .zones = "green amber red", .stops = "0.6 0.85",
+		.ballistic = BD_METER_VU_BALLISTIC, .peak = 1, .size = 110,
+		.label = "VU" }, BD_END);
+	m_eye = bd_meter_create(mrow, &(bd_meter_desc){ .style = BD_METER_EYE,
+		.value = 0.5f, .size = 96, .label = "Tune" }, BD_END);
+	m_disk = bd_meter_create(mrow, &(bd_meter_desc){ .style = BD_METER_PIE,
+		.value = 0.67f, .zones = "green amber red", .peak = 1, .size = 96,
+		.label = "Disk" }, BD_END);
+	/* RPG life/mana orbs: red drains, blue refills */
+	m_hp = bd_meter_create(mrow, &(bd_meter_desc){ .style = BD_METER_VIAL,
+		.value = 0.8f, .color = 0xD2233BFFu, .size = 96, .label = "HP" }, BD_END);
+	m_mp = bd_meter_create(mrow, &(bd_meter_desc){ .style = BD_METER_VIAL,
+		.value = 0.4f, .color = 0x2E7DE0FFu, .size = 96, .label = "MP" }, BD_END);
+
+	/* bars: a zoned horizontal load meter and a vertical LED signal meter */
+	bd_id brow = section(meters, "Level bars (zones, LED segments, peak-hold)",
+		BD_LAYOUT_ROW, 140);
+	bd_id bcol = bd_create(brow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+		BD_GROW_I, 1, BD_GAP_I, 10, BD_END);
+	m_load = bd_meter_create(bcol, &(bd_meter_desc){ .style = BD_METER_BAR,
+		.value = 0.3f, .zones = "green amber red", .stops = "0.65 0.88",
+		.ballistic = BD_METER_PEAK_HOLD, .peak = 1, .size = 22,
+		.label = "Load" }, BD_GROW_I, 1, BD_END);
+	m_prog = bd_progress_create(bcol, &(bd_progress_desc){ .value = 0.0f,
+		.show_percent = 1, .label = "Copy" }, BD_GROW_I, 1, BD_END);
+	m_sig = bd_meter_create(brow, &(bd_meter_desc){ .style = BD_METER_BAR,
+		.orient = BD_VERTICAL, .segments = 12, .value = 0.5f,
+		.zones = "green green amber red", .stops = "0.4 0.6 0.85",
+		.peak = 1, .size = 26, .label = "Sig" }, BD_END);
+
 	/* -- Paint & Layout: the drawing canvas and the layout demos -- */
 	bd_id paint = bd_tabview_add_pane(tabs, "Paint & Layout");
 	bd_set(paint, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
@@ -694,6 +737,8 @@ main(void)
 
 	bd_gui_init(&bd_backend_gles, NULL);
 	build_ui();
+	if (getenv("GALLERY_AUTOTAB"))    /* select a tab by index for a shot */
+		bd_tabview_set_active(tab_view, atoi(getenv("GALLERY_AUTOTAB")));
 	if (getenv("GALLERY_AUTODESK")) { /* open the Desktop (MDI) tab for a shot */
 		bd_tabview_set_active(tab_view, desktop_tab);
 		if (getenv("GALLERY_AUTOMIN"))   /* minimize a frame to show the dock */
@@ -755,6 +800,22 @@ main(void)
 		 * amber not (state 2 vs 1 of its "amber green" list) */
 		int focused = bd_gui_focused();
 		bd_indicator_set(focus_led, focused ? 2 : 1);
+
+		/* drive the Meters tab from a clock so ballistics, peak-hold, and the
+		 * liquid fills animate (a real app sets these from live data) */
+		{
+			struct timespec ts;
+			clock_gettime(CLOCK_MONOTONIC, &ts);
+			double t = ts.tv_sec + ts.tv_nsec * 1e-9;
+			bd_meter_set(m_vu,  0.5 + 0.45 * sin(t * 2.1));
+			bd_meter_set(m_eye, 0.5 + 0.5  * sin(t * 0.7));
+			bd_meter_set(m_load, fabs(sin(t * 3.3)) * 0.5 +
+			    0.5 * fabs(sin(t * 0.9)));
+			bd_meter_set(m_sig, 0.5 + 0.5 * sin(t * 1.3 + 1.0));
+			bd_meter_set(m_hp,  0.5 + 0.5 * sin(t * 0.35));      /* drains/heals */
+			bd_meter_set(m_mp,  0.5 + 0.5 * sin(t * 0.5 + 2.0));
+			bd_progress_set(m_prog, fmod(t, 4.0) / 4.0);          /* 0..100% ramp */
+		}
 
 		/* the GLES backend is multi_window, so bd_gui_render() makes each
 		 * window current and presents it; no win_swap() here */
