@@ -241,6 +241,18 @@ spoke(float cx, float cy, float ang, float r0, float r1, float wpx, uint32_t c)
 	             bx + nx*hw, by + ny*hw, bx - nx*hw, by - ny*hw, c);
 }
 
+/* A filled disc via a triangle fan (small; for hubs). */
+static void
+disc(float cx, float cy, float r, uint32_t c)
+{
+	int N = 20;
+	for (int i = 0; i < N; i++) {
+		float a0 = (float)i / N * 6.2831853f, a1 = (float)(i+1) / N * 6.2831853f;
+		bd_draw_quad(cx, cy, cx + cosf(a0)*r, cy + sinf(a0)*r,
+		    cx + cosf(a1)*r, cy + sinf(a1)*r, cx + cosf(a1)*r, cy + sinf(a1)*r, c);
+	}
+}
+
 /* ------------------------------------------------------------------ */
 /* shader (EYE + VIAL)                                                */
 /* ------------------------------------------------------------------ */
@@ -288,18 +300,31 @@ static const char *METER_FRAG =
 	"    } else {\n"
 	"        /* vial: glass globe, liquid filled to u_value */\n"
 	"        float globe = smoothstep(0.96+aa, 0.96-aa, r);\n"
+	"        float on = step(0.004, u_value);\n"
 	"        float level = 1.0 - clamp(u_value,0.0,1.0);\n"  /* uv.y of surface */
-	"        float liquid = smoothstep(-0.008, 0.008, v_uv.y - level);\n"
-	"        vec3 lc = u_color * (0.7 + 0.5*(1.0 - v_uv.y));\n"  /* deeper=darker */
-	"        float men = exp(-pow((v_uv.y-level)/0.045, 2.0));\n"
-	"        lc += vec3(1.0)*men*0.45*step(0.002,u_value);\n"    /* meniscus */
-	"        vec3 empty = u_color*0.12 + vec3(0.03);\n"
+	"        /* surface dips slightly in the middle (a meniscus curve) */\n"
+	"        float surf = level - 0.035*(1.0 - p.x*p.x)*on;\n"
+	"        float liquid = smoothstep(-0.012, 0.012, v_uv.y - surf) * on;\n"
+	"        /* liquid: bright near the surface, darker with depth, edges shaded\n"
+	"           down so the sphere reads as a volume */\n"
+	"        float depth = clamp((v_uv.y - surf)/(1.0 - surf + 0.001), 0.0, 1.0);\n"
+	"        vec3 lc = u_color * (1.18 - 0.6*depth);\n"
+	"        lc *= 0.72 + 0.28*(1.0 - r);\n"
+	"        float men = exp(-pow((v_uv.y-surf)/0.03, 2.0)) * on;\n"
+	"        lc += (u_color*0.6 + vec3(0.4))*men*0.7;\n"           /* bright meniscus */
+	"        /* empty glass above the liquid: neutral dark, high contrast */\n"
+	"        vec3 empty = mix(vec3(0.05,0.06,0.08), u_color*0.10, 0.35);\n"
 	"        vec3 body = mix(empty, lc, liquid);\n"
+	"        /* interior shading: darken toward the inside of the rim */\n"
+	"        body *= 0.62 + 0.38*smoothstep(0.95, 0.6, r);\n"
 	"        col = body * globe; alpha = globe;\n"
-	"        float rim = smoothstep(0.96-2.5*aa,0.96,r);\n"
-	"        col = mix(col, vec3(0.55,0.62,0.7), rim*0.5);\n"     /* glass rim */
-	"        float spec = smoothstep(0.24,0.0,length(p - vec2(-0.34,-0.44)));\n"
-	"        col += vec3(1.0)*spec*0.55*globe;\n"                 /* highlight */
+	"        float rim = smoothstep(0.96-3.0*aa,0.96,r);\n"
+	"        col = mix(col, vec3(0.60,0.68,0.80), rim*0.55);\n"    /* glass rim */
+	"        /* soft broad highlight + a small sharp glint, top-left */\n"
+	"        float spec = smoothstep(0.40,0.0,length(p - vec2(-0.32,-0.42)));\n"
+	"        col += vec3(1.0)*spec*0.40*globe;\n"
+	"        float glint = smoothstep(0.09,0.0,length(p - vec2(-0.30,-0.40)));\n"
+	"        col += vec3(1.0)*glint*0.7*globe;\n"
 	"    }\n"
 	"    frag = vec4(col, alpha);\n"
 	"}\n";
@@ -420,32 +445,59 @@ static void
 render_vu(struct meter *m, int x, int y, int w, int h)
 {
 	const bd_theme *th = bd_gui_theme();
-	/* dark bezel + cream face */
-	bd_draw_rect(x, y, w, h, 0x20242AFFu);
+	/* dark bezel + cream face with a faint top-lit gradient */
+	bd_draw_rect(x, y, w, h, 0x1C1F24FFu);
 	int in = 3;
-	bd_draw_rect(x + in, y + in, w - 2*in, h - 2*in, 0xEDE6D0FFu);
+	bd_draw_rect(x + in, y + in, w - 2*in, h - 2*in, 0xEAE3CFFFu);
+	bd_draw_rect(x + in, y + in, w - 2*in, (h - 2*in) / 2, 0xF3EEDDFFu);
 	bd_draw_rect_lines(x, y, w, h, th->border);
 
 	float cx = x + w * 0.5f;
-	float cy = y + h * 0.86f;                 /* pivot low on the face */
-	float R  = (h - 2*in) * 0.92f;
-	const float SPAN = 2.2f;                  /* ~126 deg total sweep */
-	/* scale ticks */
-	int NT = 11;
-	float redStart = (m->nbrk > 0) ? m->brk[m->nbrk - 1] : 0.8f;
+	float cy = y + h * 0.92f;                 /* pivot low on the face */
+	float R  = (h - 2*in) * 0.82f;
+	const float SPAN = 2.0f;                  /* ~115 deg total sweep */
+	float redStart = (m->nbrk > 0) ? m->brk[m->nbrk - 1] : 0.85f;
+
+	/* red danger band, a filled arc annulus from redStart..1 */
+	int RS = 24;
+	for (int i = 0; i < RS; i++) {
+		float f0 = redStart + (1.0f - redStart) * i / RS;
+		float f1 = redStart + (1.0f - redStart) * (i + 1) / RS;
+		float a0 = (f0 - 0.5f) * SPAN, a1 = (f1 - 0.5f) * SPAN;
+		float s0 = sinf(a0), c0 = cosf(a0), s1 = sinf(a1), c1 = cosf(a1);
+		float r0 = R * 0.9f, r1 = R;
+		bd_draw_quad(cx + s0*r0, cy - c0*r0, cx + s0*r1, cy - c0*r1,
+		    cx + s1*r1, cy - c1*r1, cx + s1*r0, cy - c1*r0, 0xC22222FFu);
+	}
+	/* scale ticks: 21 minor, every 5th a longer major */
+	int NT = 21;
 	for (int i = 0; i < NT; i++) {
 		float f = (float)i / (NT - 1);
 		float ang = (f - 0.5f) * SPAN;
-		uint32_t tc = (f >= redStart) ? 0xC01818FFu : 0x30302AFFu;
-		spoke(cx, cy, ang, R * 0.86f, R, (i % 2 == 0) ? 2.0f : 1.0f, tc);
+		int major = (i % 5 == 0);
+		uint32_t tc = (f >= redStart) ? 0x8A1414FFu : 0x2A2A22FFu;
+		spoke(cx, cy, ang, R * (major ? 0.80f : 0.88f), R,
+		    major ? 2.0f : 1.0f, tc);
 	}
-	/* peak marker */
+	/* peak marker (thin blue) */
 	if (m->peak_on && m->peak > 0.001f)
-		spoke(cx, cy, (m->peak - 0.5f) * SPAN, R * 0.7f, R, 2.0f, 0x1050C0FFu);
-	/* needle */
+		spoke(cx, cy, (m->peak - 0.5f) * SPAN, R * 0.55f, R * 0.9f,
+		    2.0f, 0x1552C8FFu);
+
+	/* needle: a tapered blade (wide at the hub, sharp at the tip) with a short
+	 * counterweight tail and a two-tone hub */
 	float ang = (m->disp - 0.5f) * SPAN;
-	spoke(cx, cy, ang, 0.0f, R * 0.95f, 2.4f, 0x101014FFu);
-	bd_draw_rect((int)cx - 3, (int)cy - 3, 6, 6, 0x101014FFu);   /* hub */
+	float s = sinf(ang), co = cosf(ang);
+	float nx = co, ny = s;                    /* perpendicular to the blade */
+	float bw = 3.0f;                          /* half-width at the hub */
+	float tipx = cx + s * R * 0.94f, tipy = cy - co * R * 0.94f;
+	float tailx = cx - s * R * 0.16f, taily = cy + co * R * 0.16f;
+	bd_draw_quad(cx - nx*bw, cy - ny*bw, cx + nx*bw, cy + ny*bw,
+	    tipx, tipy, tipx, tipy, 0x14161CFFu);          /* blade */
+	bd_draw_quad(cx - nx*bw, cy - ny*bw, cx + nx*bw, cy + ny*bw,
+	    tailx, taily, tailx, taily, 0x14161CFFu);       /* counterweight */
+	disc(cx, cy, 4.5f, 0x14161CFFu);
+	disc(cx, cy, 2.0f, 0x6A6A74FFu);
 }
 
 /* ------------------------------------------------------------------ */
