@@ -549,6 +549,33 @@ the title bar, takes body clicks, drags by its title, and stops receiving input
 while minimized. The frame does not auto-size to its content (layout never
 measures children), so give the frame an explicit preferred size.
 
+**Embedded window managers — `BD_MANAGED_CANVAS`.** The in-surface WM is no
+longer a single global mode tied to `multi_window == 0`; it is a *service scoped
+to a host rectangle*. The surface desktop is one host; a `BD_MANAGED_CANVAS`
+widget is another. A `BD_FRAME` created with a canvas as its parent is adopted
+out of the canvas's child tree into the canvas's own floating-frame list: it
+floats, is decorated, dragged, edge-snapped, minimized, and docked **inside the
+canvas rect**, on *any* backend. This gives a primitive MDI and, crucially, lets
+a `multi_window` backend (where every real frame is otherwise its own OS window)
+host in-surface floating frames and a working `BD_DOCK` inside one window.
+
+```c
+bd_id cv    = bd_managed_canvas_create(pane, BD_GROW_I, 1, BD_END);
+bd_id notes = bd_create(cv, BD_FRAME, BD_LABEL_S, "Notes", BD_END); /* floats in cv */
+bd_id dock  = bd_dock_create(cv, NULL, BD_END);                     /* scoped to cv */
+```
+
+Internally the WM helpers take a `wm_host` descriptor (origin, size, projection,
+frame list); frame `user_x`/`user_y` are host-local while `pool[].x/y` stay
+absolute so the child tree renders and hit-tests unchanged. `bd_window_list_in`
+and `bd_managed_canvas_of` scope a dock to its canvas; a canvas in a hidden tab
+pane skips layout/render/input (`ancestors_visible`). The GLES gallery's
+"Desktop" tab demonstrates the canvas + dock on the native multi-window backend;
+`test/test_gui.c` covers adoption, host-scoped listing, canvas-local placement
+and drag, body-click routing, and dock scoping. Deferred: Tab focus traversal
+into canvas frames, a host-drawn / texture backdrop (compositing widgets over a
+live GL scene), and canvases nested inside floating frames.
+
 Still to do:
 
 - **ludica / single-surface compositing** for genuinely separate render

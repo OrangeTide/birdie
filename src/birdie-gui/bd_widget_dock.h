@@ -10,13 +10,17 @@
  * window: clicking a tile restores (and raises) its window. See
  * doc/gui/dock-design.md for the full design.
  *
- * SINGLE-SURFACE ONLY. The dock is a projection of the toolkit's in-surface
- * window manager (minimized floating BD_FRAMEs), which runs only when the
- * backend cannot open native windows (bd_backend.multi_window == 0: ludica,
- * SDL, the headless stub). On a native multi-window backend (the GLES gallery)
- * each frame is a real OS window managed by the host's window manager, there
- * are no in-surface frames to minimize, and this widget stays empty. Extending
- * docks/panels to native windows is a separate design (see the design doc).
+ * IN-SURFACE WM ONLY. The dock is a projection of an in-surface window manager's
+ * minimized floating BD_FRAMEs. That WM runs for the whole surface when the
+ * backend cannot open native windows (bd_backend.multi_window == 0: ludica, SDL,
+ * the headless stub) -- put the dock on the desktop root and it tracks the
+ * surface's minimized frames. It ALSO runs, on any backend, inside a
+ * BD_MANAGED_CANVAS: create the dock with the canvas as its parent and it scopes
+ * itself to that canvas's minimized frames (bd_managed_canvas_of +
+ * bd_window_list_in), giving a working dock on a native multi_window backend
+ * too (see the GLES gallery's "Desktop" tab). A dock on the desktop root of a
+ * native multi_window backend stays empty: the OS owns those windows, so there
+ * are no in-surface frames to minimize.
  *
  * The dock is *derived state*: its tile set is a projection of which frames are
  * minimized (bd_window_minimize / bd_window_list), never an independent list.

@@ -918,6 +918,68 @@ main(void)
 	    bd_dock_count(dock) == 0);
 	bd_gui_cleanup();
 
+	/* ---- BD_MANAGED_CANVAS: an embedded WM hosting floating frames ---- */
+	wm_click_a = 0;
+	bd_gui_init(&stub, NULL);
+	bd_id cdesk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id canvas = bd_managed_canvas_create(cdesk,
+	    BD_ANCHOR_I, BD_ANCHOR_NW, BD_X_I, 100, BD_Y_I, 80,
+	    BD_PREF_W_I, 400, BD_PREF_H_I, 300, BD_END);
+	bd_id cdock = bd_dock_create(canvas, NULL, BD_END);
+	bd_dock_set_gravity(cdock, BD_GRAVITY_LEFT);
+	bd_id cf1 = bd_create(canvas, BD_FRAME, BD_LABEL_S, "One",
+	    BD_PREF_W_I, 160, BD_PREF_H_I, 120, BD_X_I, 20, BD_Y_I, 20, BD_END);
+	bd_create(cf1, BD_BUTTON, BD_LABEL_S, "hit", BD_GROW_I, 1,
+	    BD_ON_CLICK_F, on_wm_a, BD_END);
+	bd_id cf2 = bd_create(canvas, BD_FRAME, BD_LABEL_S, "Two",
+	    BD_PREF_W_I, 160, BD_PREF_H_I, 120, BD_X_I, 200, BD_Y_I, 20, BD_END);
+
+	bd_gui_layout(800, 500);
+
+	check("canvas adopts frames out of its child tree",
+	    bd_managed_canvas_of(cf1) == canvas && bd_parent(cf1) == BD_NONE);
+	check("canvas host lists its managed frames",
+	    bd_window_list_in(canvas, NULL, 0) == 2);
+	check("surface window list excludes canvas frames",
+	    bd_window_list(NULL, 0) == 1);   /* only cdesk */
+
+	/* cf1 sits at the canvas origin (100,80) + its local X/Y (20,20) */
+	int c1x, c1y;
+	bd_widget_rect(cf1, &c1x, &c1y, NULL, NULL);
+	check("a managed frame is placed relative to the canvas origin",
+	    c1x == 120 && c1y == 100);
+
+	/* click into cf1's body (below the title bar) -> its button fires */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x=c1x+80, .y=c1y+60 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x=c1x+80, .y=c1y+60 });
+	check("a click in a canvas frame reaches its widget", wm_click_a == 1);
+
+	/* minimize cf2 -> the canvas's own dock shows exactly one tile */
+	bd_window_minimize(cf2);
+	bd_gui_layout(800, 500);
+	check("the canvas dock is scoped to its host's minimized frames",
+	    bd_dock_count(cdock) == 1);
+
+	/* drag cf1's title bar: the frame moves by the pointer delta (host-local
+	 * coordinate translation) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x=c1x+10, .y=c1y+8 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=c1x+60, .y=c1y+40 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x=c1x+60, .y=c1y+40 });
+	bd_gui_layout(800, 500);
+	int m1x, m1y;
+	bd_widget_rect(cf1, &m1x, &m1y, NULL, NULL);
+	check("dragging a canvas frame title bar moves it within the canvas",
+	    m1x == c1x + 50 && m1y == c1y + 32);
+
+	bd_gui_render();   /* exercises the clipped canvas-frame render path */
+	check("canvas render does not crash", 1);
+	bd_gui_cleanup();
+
 	/* ---- layout: cross-axis gravity (BD_ANCHOR_I) in a column ----
 	 * The surface is 800x500; a COL frame with no padding gives each child a
 	 * 800px-wide cross cell. A non-FILL anchor makes the child take its

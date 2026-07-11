@@ -82,6 +82,8 @@ struct widget {
 	int locked;             /* floating frame: pinned (not draggable), keeps gravity */
 	int minimized;          /* floating frame: hidden from the surface, shown as a dock tile */
 	int focused;            /* top-level frame: window holds OS input focus */
+	bd_id wm_host;          /* floating frame: the BD_MANAGED_CANVAS hosting it, or
+	                           BD_NONE for the surface desktop / a native window */
 
 	void *state;            /* per-instance data for extension widget types */
 };
@@ -109,7 +111,51 @@ static bd_id wm_active_frame = BD_NONE; /* focused floating window (BD_NONE=desk
 static bd_id wm_drag_frame = BD_NONE;   /* window being dragged by its title bar */
 static int   wm_grab_dx, wm_grab_dy;    /* pointer offset within the dragged window */
 static int   wm_snap_cand = BD_GRAVITY_NONE; /* pending dock target during a drag */
-static void  wm_raise(bd_id f);         /* move a floating frame to the front */
+
+/*
+ * A WM host: the rectangle of surface that floats and decorates a set of
+ * top-level frames. The surface desktop is one host (canvas == BD_NONE, origin
+ * 0,0, filling the surface); a BD_MANAGED_CANVAS is another (origin/size = the
+ * canvas rect). Frame user_x/user_y are host-local; pool[f].x/y stay absolute
+ * (origin + local) so the frame's child tree renders and hit-tests unchanged.
+ * proj_w/proj_h are the pixel size of the OS window the host draws into (needed
+ * for bd_draw_begin's projection under a multi_window backend).
+ */
+struct wm_host {
+	bd_id  canvas;          /* BD_NONE = the surface desktop */
+	int    ox, oy, w, h;    /* host rect, surface coords */
+	int    proj_w, proj_h;  /* containing OS window pixel size */
+	bd_id *list;            /* z-order back->front, floating frames only */
+	int    count;
+};
+static void wm_raise(const struct wm_host *host, bd_id f);
+
+/* Embedded window managers: one record per live BD_MANAGED_CANVAS, holding its
+ * managed frames in z-order (back to front). Frames adopted here are unlinked
+ * from the canvas's child tree; the canvas draws them itself. */
+#define MAX_CANVASES      8
+#define MAX_CANVAS_FRAMES 16
+struct mcanvas {
+	bd_id id;
+	bd_id frames[MAX_CANVAS_FRAMES];
+	int   count;
+};
+static struct mcanvas canvases[MAX_CANVASES];
+static int canvas_count;
+
+static struct mcanvas *
+mcanvas_of(bd_id id)
+{
+	for (int i = 0; i < canvas_count; i++)
+		if (canvases[i].id == id)
+			return &canvases[i];
+	return NULL;
+}
+
+static void  wm_surface_host(struct wm_host *out);
+static void  wm_host_from_canvas(struct mcanvas *c, struct wm_host *out);
+static void  wm_host_for(bd_id frame, struct wm_host *out);
+static bd_id window_frame_of(bd_id id);
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer */
@@ -724,6 +770,28 @@ link_child(bd_id pid, bd_id cid)
 	p->last_child = cid;
 }
 
+/* Detach a child from its parent's sibling chain (inverse of link_child) and
+ * clear its parent link. Used to adopt a BD_FRAME out of a managed canvas's
+ * child tree into the canvas's floating-frame list. */
+static void
+unlink_child(bd_id cid)
+{
+	struct widget *c = &pool[cid];
+	if (c->parent == BD_NONE)
+		return;
+	struct widget *p = &pool[c->parent];
+	if (c->prev_sib != BD_NONE)
+		pool[c->prev_sib].next_sib = c->next_sib;
+	else
+		p->first_child = c->next_sib;
+	if (c->next_sib != BD_NONE)
+		pool[c->next_sib].prev_sib = c->prev_sib;
+	else
+		p->last_child = c->prev_sib;
+	c->prev_sib = c->next_sib = BD_NONE;
+	c->parent = BD_NONE;
+}
+
 static void
 defaults(struct widget *w, int type)
 {
@@ -736,6 +804,10 @@ defaults(struct widget *w, int type)
 	case BD_FRAME:
 		w->bg = theme.bg;
 		w->layout = BD_LAYOUT_COL;
+		break;
+	case BD_MANAGED_CANVAS:
+		w->bg = theme.press;      /* backdrop the managed frames float over */
+		w->layout = BD_LAYOUT_FIXED;  /* ordinary children anchor to edges */
 		break;
 	case BD_PANEL:
 		w->layout = BD_LAYOUT_COL;
@@ -837,6 +909,31 @@ static void
 register_window(bd_id id)
 {
 	struct widget *w = &pool[id];
+
+	/* A BD_FRAME parented to a managed canvas is adopted into that canvas's
+	 * embedded WM instead of becoming a native/surface window: detach it from
+	 * the canvas child tree, mark its host, and add it to the float list. This
+	 * is the in-surface WM path regardless of the backend's multi_window. */
+	if (w->type == BD_FRAME && w->parent != BD_NONE &&
+	    pool[w->parent].type == BD_MANAGED_CANVAS) {
+		bd_id cv = w->parent;
+		struct mcanvas *c = mcanvas_of(cv);
+		unlink_child(id);            /* now parent == BD_NONE */
+		w->wm_host = cv;
+		w->focused = 1;
+		if (c && c->count < MAX_CANVAS_FRAMES) {
+			/* cascade frames that gave no position so they don't stack */
+			if (c->count > 0 && w->user_x == 0 && w->user_y == 0 &&
+			    w->gravity == BD_GRAVITY_NONE) {
+				int step = 28 * c->count;
+				w->user_x = 20 + step;
+				w->user_y = 20 + step;
+			}
+			c->frames[c->count++] = id;
+		}
+		return;
+	}
+
 	if (w->type != BD_FRAME || w->parent != BD_NONE)
 		return;
 	if (window_count < MAX_WINDOWS)
@@ -872,6 +969,9 @@ create_finish(bd_id id)
 	struct widget *w = &pool[id];
 	if (w->type == BD_MENU && w->pref_w == 0 && w->label)
 		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
+	if (w->type == BD_MANAGED_CANVAS && !mcanvas_of(id) &&
+	    canvas_count < MAX_CANVASES)
+		canvases[canvas_count++] = (struct mcanvas){ .id = id };
 	register_window(id);
 }
 
@@ -971,13 +1071,16 @@ bd_window_restore(bd_id frame)
 	if (frame == BD_NONE || !pool[frame].alive)
 		return;
 	pool[frame].minimized = 0;
-	if (be && be->multi_window) {
+	if (pool[frame].wm_host == BD_NONE && be && be->multi_window) {
 		/* native backend: de-iconify + raise through the OS WM */
 		if (be->window_restore && pool[frame].win_id)
 			be->window_restore(pool[frame].win_id);
 	} else {
-		/* in-surface WM: raise in our own z-order and focus it */
-		wm_raise(frame);
+		/* in-surface WM (surface desktop or a canvas host): raise in our own
+		 * z-order and focus it */
+		struct wm_host h;
+		wm_host_for(frame, &h);
+		wm_raise(&h, frame);
 		wm_active_frame = frame;
 	}
 }
@@ -989,12 +1092,53 @@ bd_window_minimized(bd_id frame)
 }
 
 int
+bd_window_list_in(bd_id host, bd_id *out, int max)
+{
+	int n = 0;
+	if (host == BD_NONE) {
+		/* the surface desktop: top-level frames not hosted by a canvas */
+		for (int i = 0; i < window_count; i++) {
+			bd_id f = windows[i];
+			if (!pool[f].alive || pool[f].wm_host != BD_NONE)
+				continue;
+			if (out && n < max)
+				out[n] = f;
+			n++;
+		}
+	} else {
+		struct mcanvas *c = mcanvas_of(host);
+		if (c)
+			for (int i = 0; i < c->count; i++) {
+				if (!pool[c->frames[i]].alive)
+					continue;
+				if (out && n < max)
+					out[n] = c->frames[i];
+				n++;
+			}
+	}
+	return n;
+}
+
+int
 bd_window_list(bd_id *out, int max)
 {
-	if (out)
-		for (int i = 0; i < window_count && i < max; i++)
-			out[i] = windows[i];
-	return window_count;
+	return bd_window_list_in(BD_NONE, out, max);
+}
+
+bd_id
+bd_managed_canvas_of(bd_id descendant)
+{
+	bd_id id = descendant;
+	while (id != BD_NONE && pool[id].alive) {
+		if (pool[id].type == BD_MANAGED_CANVAS)
+			return id;
+		/* an adopted frame's parent is BD_NONE; hop to its canvas host */
+		if (pool[id].parent == BD_NONE && pool[id].wm_host != BD_NONE)
+			id = pool[id].wm_host;
+		else
+			id = pool[id].parent;
+	}
+	return BD_NONE;
 }
 
 bd_id
@@ -1044,6 +1188,14 @@ bd_destroy(bd_id id)
 	if (id == BD_NONE || !pool[id].alive)
 		return;
 
+	/* a managed canvas owns floating frames outside its child tree; destroy
+	 * them here (each bd_destroy shrinks the canvas float list) */
+	if (pool[id].type == BD_MANAGED_CANVAS) {
+		struct mcanvas *c = mcanvas_of(id);
+		while (c && c->count > 0)
+			bd_destroy(c->frames[c->count - 1]);
+	}
+
 	while (pool[id].first_child != BD_NONE)
 		bd_destroy(pool[id].first_child);
 
@@ -1078,6 +1230,27 @@ bd_destroy(bd_id id)
 		window_count--;
 		break;
 	}
+
+	/* drop an adopted frame from its canvas's float list */
+	if (w->wm_host != BD_NONE) {
+		struct mcanvas *c = mcanvas_of(w->wm_host);
+		if (c)
+			for (int i = 0; i < c->count; i++)
+				if (c->frames[i] == id) {
+					for (int j = i; j < c->count - 1; j++)
+						c->frames[j] = c->frames[j + 1];
+					c->count--;
+					break;
+				}
+	}
+	/* drop a destroyed canvas from the registry */
+	if (w->type == BD_MANAGED_CANVAS)
+		for (int i = 0; i < canvas_count; i++)
+			if (canvases[i].id == id) {
+				canvases[i] = canvases[canvas_count - 1];
+				canvas_count--;
+				break;
+			}
 
 	if (root == id)
 		root = BD_NONE;
@@ -2563,6 +2736,8 @@ bd_gui_cleanup(void)
 	pool_next = 1;
 	root = BD_NONE;
 	window_count = 0;
+	canvas_count = 0;
+	memset(canvases, 0, sizeof canvases);
 	wm_active_frame = BD_NONE;
 	wm_drag_frame = BD_NONE;
 	wm_snap_cand = BD_GRAVITY_NONE;
@@ -2595,14 +2770,101 @@ wm_enabled(void)
 	return be && !be->multi_window;
 }
 
+/* The OS-window frame that ultimately paints `id`: walk up parents to a
+ * top-level, hopping through a canvas host if that top-level is itself
+ * canvas-adopted (nested canvases), and stop at the surface/native frame. */
+static bd_id
+window_frame_of(bd_id id)
+{
+	for (;;) {
+		while (id != BD_NONE && pool[id].parent != BD_NONE)
+			id = pool[id].parent;
+		if (id != BD_NONE && pool[id].wm_host != BD_NONE) {
+			id = pool[id].wm_host;
+			continue;
+		}
+		return id;
+	}
+}
+
+/* Whether `id` and every ancestor (hopping canvas hosts) is alive and visible.
+ * A managed canvas in a hidden tab pane must not lay out, render, or capture
+ * input for its floating frames. */
+static int
+ancestors_visible(bd_id id)
+{
+	for (bd_id p = id; p != BD_NONE; ) {
+		if (!pool[p].alive || !pool[p].visible)
+			return 0;
+		if (pool[p].parent == BD_NONE && pool[p].wm_host != BD_NONE)
+			p = pool[p].wm_host;
+		else
+			p = pool[p].parent;
+	}
+	return 1;
+}
+
+/* The surface desktop host: the whole surface, floating frames windows[1..]. */
+static void
+wm_surface_host(struct wm_host *out)
+{
+	out->canvas = BD_NONE;
+	out->ox = out->oy = 0;
+	out->w = out->proj_w = be->width();
+	out->h = out->proj_h = be->height();
+	out->list = window_count > 1 ? &windows[1] : NULL;
+	out->count = window_count > 1 ? window_count - 1 : 0;
+}
+
+/* A canvas host: origin/size = the canvas rect, projecting into whichever OS
+ * window contains the canvas (so bd_draw's projection matches under a
+ * multi_window backend). */
+static void
+wm_host_from_canvas(struct mcanvas *c, struct wm_host *out)
+{
+	struct widget *cv = &pool[c->id];
+	out->canvas = c->id;
+	out->ox = cv->x;
+	out->oy = cv->y;
+	out->w = cv->w;
+	out->h = cv->h;
+	out->list = c->frames;
+	out->count = c->count;
+	out->proj_w = be->width();
+	out->proj_h = be->height();
+	if (be->multi_window) {
+		bd_id wf = window_frame_of(c->id);
+		if (wf != BD_NONE && pool[wf].win_id) {
+			out->proj_w = be->window_width(pool[wf].win_id);
+			out->proj_h = be->window_height(pool[wf].win_id);
+		}
+	}
+}
+
+/* Fill the host that owns `frame` (surface desktop or its canvas). */
+static void
+wm_host_for(bd_id frame, struct wm_host *out)
+{
+	if (pool[frame].wm_host != BD_NONE) {
+		struct mcanvas *c = mcanvas_of(pool[frame].wm_host);
+		if (c) {
+			wm_host_from_canvas(c, out);
+			return;
+		}
+	}
+	wm_surface_host(out);
+}
+
 /* The on-surface rectangle for a floating frame, derived from its gravity: an
  * edge gravity stretches it into a full-length dock strip, a corner pins the
  * corner at the preferred size, and BD_GRAVITY_NONE floats at X/Y (clamped so
  * the title bar stays on-surface). */
 static void
-frame_wm_rect(bd_id f, int W, int H, int *ox, int *oy, int *ow, int *oh)
+frame_wm_rect(bd_id f, const struct wm_host *host,
+    int *ox, int *oy, int *ow, int *oh)
 {
 	struct widget *w = &pool[f];
+	int W = host->w, H = host->h;
 	int pw = w->pref_w > 0 ? w->pref_w : 240;
 	int ph = w->pref_h > 0 ? w->pref_h : 160;
 	if (pw > W) pw = W;
@@ -2625,20 +2887,22 @@ frame_wm_rect(bd_id f, int W, int H, int *ox, int *oy, int *ow, int *oh)
 		if (y < 0) y = 0;
 		break;
 	}
-	*ox = x; *oy = y; *ow = ww; *oh = hh;
+	/* user_x/user_y are host-local; emit absolute (surface) coordinates */
+	*ox = host->ox + x; *oy = host->oy + y; *ow = ww; *oh = hh;
 }
 
 /* The edge/corner a dragged floating frame would snap to, or BD_GRAVITY_NONE
- * when no edge is within WM_SNAP_DIST. Measured against the frame's laid-out
- * rectangle (pool[f].x/y/w/h). */
+ * when no edge is within WM_SNAP_DIST. Measured against the host rect (the
+ * frame's absolute pool[f].x/y/w/h relative to the host origin). */
 static int
-wm_snap_candidate(bd_id f, int W, int H)
+wm_snap_candidate(bd_id f, const struct wm_host *host)
 {
 	struct widget *w = &pool[f];
-	int nearL = w->x <= WM_SNAP_DIST;
-	int nearT = w->y <= WM_SNAP_DIST;
-	int nearR = (W - (w->x + w->w)) <= WM_SNAP_DIST;
-	int nearB = (H - (w->y + w->h)) <= WM_SNAP_DIST;
+	int lx = w->x - host->ox, ty = w->y - host->oy;
+	int nearL = lx <= WM_SNAP_DIST;
+	int nearT = ty <= WM_SNAP_DIST;
+	int nearR = (host->w - (lx + w->w)) <= WM_SNAP_DIST;
+	int nearB = (host->h - (ty + w->h)) <= WM_SNAP_DIST;
 
 	if (nearL && nearT) return BD_GRAVITY_TOP_LEFT;
 	if (nearR && nearT) return BD_GRAVITY_TOP_RIGHT;
@@ -2651,12 +2915,12 @@ wm_snap_candidate(bd_id f, int W, int H)
 	return BD_GRAVITY_NONE;
 }
 
-/* Topmost floating frame containing (x,y), or BD_NONE for the desktop. */
+/* Topmost floating frame of a host containing (x,y), or BD_NONE for none. */
 static bd_id
-wm_frame_at(int x, int y)
+wm_frame_at(const struct wm_host *host, int x, int y)
 {
-	for (int i = window_count - 1; i >= 1; i--) {
-		bd_id f = windows[i];
+	for (int i = host->count - 1; i >= 0; i--) {
+		bd_id f = host->list[i];
 		if (pool[f].alive && pool[f].visible && !pool[f].minimized &&
 		    in_rect(x, y, pool[f].x, pool[f].y, pool[f].w, pool[f].h))
 			return f;
@@ -2664,18 +2928,18 @@ wm_frame_at(int x, int y)
 	return BD_NONE;
 }
 
-/* Raise a floating frame to the front of the z-order (end of windows[]). */
+/* Raise a floating frame to the front of its host's z-order (end of list). */
 static void
-wm_raise(bd_id f)
+wm_raise(const struct wm_host *host, bd_id f)
 {
 	int idx = -1;
-	for (int i = 1; i < window_count; i++)
-		if (windows[i] == f) { idx = i; break; }
-	if (idx < 0 || idx == window_count - 1)
+	for (int i = 0; i < host->count; i++)
+		if (host->list[i] == f) { idx = i; break; }
+	if (idx < 0 || idx == host->count - 1)
 		return;
-	for (int i = idx; i < window_count - 1; i++)
-		windows[i] = windows[i + 1];
-	windows[window_count - 1] = f;
+	for (int i = idx; i < host->count - 1; i++)
+		host->list[i] = host->list[i + 1];
+	host->list[host->count - 1] = f;
 }
 
 /* Title-bar glyph buttons, right to left: close, lock, minimize. */
@@ -2725,13 +2989,37 @@ bd_gui_layout(int win_w, int win_h)
 		}
 	} else {
 		layout_frame(root, win_w, win_h);
-		/* floating frames: dock/snap per gravity, reserving a title bar */
-		for (int wi = 1; wi < window_count; wi++) {
-			bd_id f = windows[wi];
+		/* floating frames: dock/snap per gravity, reserving a title bar. Use
+		 * the layout size (be->width() may lag a resize the caller passed). */
+		struct wm_host sh;
+		wm_surface_host(&sh);
+		sh.w = sh.proj_w = win_w;
+		sh.h = sh.proj_h = win_h;
+		for (int wi = 0; wi < sh.count; wi++) {
+			bd_id f = sh.list[wi];
 			if (!pool[f].alive || pool[f].minimized)
 				continue;
 			int fx, fy, fw, fh;
-			frame_wm_rect(f, win_w, win_h, &fx, &fy, &fw, &fh);
+			frame_wm_rect(f, &sh, &fx, &fy, &fw, &fh);
+			layout_frame_at(f, fx, fy, fw, fh, WM_TITLEBAR_H);
+		}
+	}
+
+	/* embedded window managers: lay out each managed canvas's floating frames
+	 * within the canvas rect (known from the tree layout above). Works on both
+	 * backends, so a canvas gives a multi_window host in-surface MDI too. */
+	for (int ci = 0; ci < canvas_count; ci++) {
+		struct mcanvas *c = &canvases[ci];
+		if (!ancestors_visible(c->id))
+			continue;
+		struct wm_host h;
+		wm_host_from_canvas(c, &h);
+		for (int k = 0; k < c->count; k++) {
+			bd_id f = c->frames[k];
+			if (!pool[f].alive || pool[f].minimized)
+				continue;
+			int fx, fy, fw, fh;
+			frame_wm_rect(f, &h, &fx, &fy, &fw, &fh);
 			layout_frame_at(f, fx, fy, fw, fh, WM_TITLEBAR_H);
 		}
 	}
@@ -3010,36 +3298,63 @@ render_wm_titlebar(bd_id f, int active)
 	draw_close_glyph(close_x, gy, theme.text);
 }
 
-/* Render a floating window into the shared surface (no clear): body, title bar,
- * a raised border, then its popups. */
+/* Render a floating window of `host` into the shared surface (no clear): body,
+ * title bar, a raised border, then its popups. A canvas host clips its frames
+ * to the canvas rect; the surface host draws unclipped as before. */
 static void
-render_wm_frame(bd_id f)
+render_wm_frame(bd_id f, const struct wm_host *host)
 {
 	struct widget *w = &pool[f];
-	int W = be->width(), H = be->height();
+	int W = host->proj_w, H = host->proj_h;
 	int active = (f == wm_active_frame);
+	int clip = host->canvas != BD_NONE;
 
 	bd_draw_begin(W, H);
+	if (clip) be->scissor(host->ox, host->oy, host->w, host->h);
 	render_widget(f);                 /* frame bg + widget tree */
 	render_wm_titlebar(f, active);
 	stroke_rect(w->x, w->y, w->w, w->h, theme.border);
+	if (clip) be->scissor_off();
 	bd_draw_end();
 
 	/* snap-zone preview while this window is being dragged near an edge */
 	if (f == wm_drag_frame && wm_snap_cand != BD_GRAVITY_NONE) {
 		int sx, sy, sw, sh, sav = w->gravity;
 		w->gravity = wm_snap_cand;
-		frame_wm_rect(f, W, H, &sx, &sy, &sw, &sh);
+		frame_wm_rect(f, host, &sx, &sy, &sw, &sh);
 		w->gravity = sav;
 		bd_draw_begin(W, H);
+		if (clip) be->scissor(host->ox, host->oy, host->w, host->h);
 		fill_rect(sx, sy, sw, sh, (theme.focus & 0xFFFFFF00) | 0x40);
 		stroke_rect(sx, sy, sw, sh, theme.focus);
+		if (clip) be->scissor_off();
 		bd_draw_end();
 	}
 
 	bd_draw_begin(W, H);
 	render_popups(f);
 	bd_draw_end();
+}
+
+/* Render every managed canvas that paints into OS-window frame `winframe`:
+ * its floating frames, clipped to the canvas rect, above the canvas backdrop. */
+static void
+render_canvas_frames(bd_id winframe)
+{
+	for (int ci = 0; ci < canvas_count; ci++) {
+		struct mcanvas *c = &canvases[ci];
+		if (!ancestors_visible(c->id))
+			continue;
+		if (window_frame_of(c->id) != winframe)
+			continue;
+		struct wm_host h;
+		wm_host_from_canvas(c, &h);
+		for (int k = 0; k < c->count; k++) {
+			bd_id f = c->frames[k];
+			if (pool[f].alive && pool[f].visible && !pool[f].minimized)
+				render_wm_frame(f, &h);
+		}
+	}
 }
 
 /* The drag ghost trailing the pointer during a cross-widget drag: a translucent
@@ -3083,6 +3398,7 @@ bd_gui_render(void)
 			be->window_begin(id);
 			render_frame(f, be->window_width(id),
 			    be->window_height(id));
+			render_canvas_frames(f);  /* embedded-WM frames in this window */
 			if (i == 0) { /* overlays layer above the primary window */
 				render_modal(be->window_width(id),
 				    be->window_height(id));
@@ -3095,11 +3411,16 @@ bd_gui_render(void)
 		}
 	} else {
 		render_frame(root, be->width(), be->height());
+		render_canvas_frames(root);  /* embedded-WM frames on the desktop */
 		/* floating windows over the desktop, back to front */
-		for (int i = 1; i < window_count; i++) {
-			bd_id f = windows[i];
-			if (pool[f].alive && pool[f].visible && !pool[f].minimized)
-				render_wm_frame(f);
+		struct wm_host sh;
+		wm_surface_host(&sh);
+		for (int i = 0; i < sh.count; i++) {
+			bd_id f = sh.list[i];
+			if (pool[f].alive && pool[f].visible && !pool[f].minimized) {
+				render_wm_frame(f, &sh);
+				render_canvas_frames(f);  /* canvases inside a float win */
+			}
 		}
 		render_modal(be->width(), be->height());
 		render_notice(be->width(), be->height());
@@ -3277,6 +3598,16 @@ bd_tabbar_set_active(bd_id id, int index)
 	if (index < 0) index = 0;
 	if (index >= n) index = n - 1;
 	pool[id].cursor = index;   /* programmatic set: no callback */
+}
+
+bd_id
+bd_managed_canvas_create(bd_id parent, ...)
+{
+	va_list ap;
+	va_start(ap, parent);
+	bd_id id = bd_create_va(parent, BD_MANAGED_CANVAS, ap);
+	va_end(ap);
+	return id;
 }
 
 void
@@ -3479,20 +3810,24 @@ handle_pen(const bd_event *ev, bd_id frame)
  * *route to the frame whose content should receive it (root == desktop).
  */
 static int
-wm_dispatch(const bd_event *ev, bd_id *route)
+wm_dispatch(const bd_event *ev, const struct wm_host *host, bd_id *route)
 {
-	int W = be->width(), H = be->height();
-	*route = root;
+	/* a miss on the surface routes to the desktop tree; a miss inside a canvas
+	 * falls through to the containing window's normal routing (BD_NONE) */
+	*route = host->canvas == BD_NONE ? root : BD_NONE;
 
 	switch (ev->type) {
 	case BD_EV_MOUSE_DOWN: {
-		bd_id f = wm_frame_at(ev->x, ev->y);
+		bd_id f = wm_frame_at(host, ev->x, ev->y);
 		if (ev->button != BD_MOUSE_LEFT) {
-			if (f != BD_NONE) { wm_raise(f); wm_active_frame = f; *route = f; }
+			if (f != BD_NONE) { wm_raise(host, f); wm_active_frame = f; *route = f; }
 			return 0;
 		}
-		if (f == BD_NONE) { wm_active_frame = BD_NONE; return 0; }
-		wm_raise(f);
+		if (f == BD_NONE) {
+			if (host->canvas == BD_NONE) wm_active_frame = BD_NONE;
+			return 0;
+		}
+		wm_raise(host, f);
 		wm_active_frame = f;
 		struct widget *w = &pool[f];
 		if (ev->y < w->y + WM_TITLEBAR_H) {
@@ -3528,15 +3863,15 @@ wm_dispatch(const bd_event *ev, bd_id *route)
 		if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive) {
 			struct widget *w = &pool[wm_drag_frame];
 			w->gravity = BD_GRAVITY_NONE;
-			w->user_x = ev->x - wm_grab_dx;
-			w->user_y = ev->y - wm_grab_dy;
+			w->user_x = ev->x - wm_grab_dx - host->ox;   /* host-local */
+			w->user_y = ev->y - wm_grab_dy - host->oy;
 			int fx, fy, fw, fh;   /* live rect for the snap test/preview */
-			frame_wm_rect(wm_drag_frame, W, H, &fx, &fy, &fw, &fh);
+			frame_wm_rect(wm_drag_frame, host, &fx, &fy, &fw, &fh);
 			w->x = fx; w->y = fy; w->w = fw; w->h = fh;
-			wm_snap_cand = wm_snap_candidate(wm_drag_frame, W, H);
+			wm_snap_cand = wm_snap_candidate(wm_drag_frame, host);
 			return 1;
 		}
-		{ bd_id f = wm_frame_at(ev->x, ev->y); if (f != BD_NONE) *route = f; }
+		{ bd_id f = wm_frame_at(host, ev->x, ev->y); if (f != BD_NONE) *route = f; }
 		return 0;
 
 	case BD_EV_MOUSE_UP:
@@ -3547,11 +3882,11 @@ wm_dispatch(const bd_event *ev, bd_id *route)
 			wm_snap_cand = BD_GRAVITY_NONE;
 			return 1;
 		}
-		{ bd_id f = wm_frame_at(ev->x, ev->y); if (f != BD_NONE) *route = f; }
+		{ bd_id f = wm_frame_at(host, ev->x, ev->y); if (f != BD_NONE) *route = f; }
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL:
-		{ bd_id f = wm_frame_at(mouse_x, mouse_y); if (f != BD_NONE) *route = f; }
+		{ bd_id f = wm_frame_at(host, mouse_x, mouse_y); if (f != BD_NONE) *route = f; }
 		return 0;
 
 	default:
@@ -3560,6 +3895,70 @@ wm_dispatch(const bd_event *ev, bd_id *route)
 			*route = wm_active_frame;
 		return 0;
 	}
+}
+
+/* Topmost managed canvas whose rect contains (x,y), or BD_NONE. */
+static bd_id
+canvas_at(int x, int y)
+{
+	for (int i = canvas_count - 1; i >= 0; i--) {
+		struct widget *cv = &pool[canvases[i].id];
+		if (ancestors_visible(canvases[i].id) &&
+		    in_rect(x, y, cv->x, cv->y, cv->w, cv->h))
+			return canvases[i].id;
+	}
+	return BD_NONE;
+}
+
+/*
+ * Embedded-WM input: pointer events over a managed canvas's floating frames are
+ * handled by that canvas's window manager, on any backend. Returns 1 if the
+ * canvas WM consumed the event (title bar, buttons, drag); otherwise returns 0
+ * and, when the pointer is over a canvas frame's body, sets *route to that frame
+ * so the caller delivers the event into it. Leaves *route == BD_NONE to fall
+ * through to the containing window's normal routing (canvas backdrop, dock,
+ * ordinary children, or the rest of the window).
+ */
+static int
+canvas_wm_event(const bd_event *ev, bd_id *route)
+{
+	*route = BD_NONE;
+	int is_ptr = ev->type == BD_EV_MOUSE_DOWN || ev->type == BD_EV_MOUSE_MOVE ||
+	    ev->type == BD_EV_MOUSE_UP || ev->type == BD_EV_MOUSE_SCROLL;
+	if (!is_ptr)
+		return 0;
+
+	bd_id cv;
+	if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive &&
+	    pool[wm_drag_frame].wm_host != BD_NONE) {
+		cv = pool[wm_drag_frame].wm_host;   /* an in-progress canvas drag */
+	} else {
+		int px = ev->type == BD_EV_MOUSE_SCROLL ? mouse_x : ev->x;
+		int py = ev->type == BD_EV_MOUSE_SCROLL ? mouse_y : ev->y;
+		cv = canvas_at(px, py);
+		if (cv == BD_NONE)
+			return 0;
+		struct mcanvas *c = mcanvas_of(cv);
+		if (!c)
+			return 0;
+		struct wm_host h;
+		wm_host_from_canvas(c, &h);
+		/* only intercept when actually over a floating frame; otherwise let
+		 * the canvas's own children (dock, backdrop) handle the event */
+		if (wm_frame_at(&h, px, py) == BD_NONE)
+			return 0;
+	}
+
+	struct mcanvas *c = mcanvas_of(cv);
+	if (!c)
+		return 0;
+	struct wm_host h;
+	wm_host_from_canvas(c, &h);
+	bd_id r;
+	if (wm_dispatch(ev, &h, &r))
+		return 1;         /* consumed */
+	*route = r;           /* a canvas frame to route body input into, or NONE */
+	return 0;
 }
 
 int
@@ -3632,16 +4031,34 @@ bd_gui_event(const bd_event *ev)
 
 	/* the top-level frame this event is destined for (its own window) */
 	int modal_active = (active_modal != BD_NONE && pool[active_modal].alive);
-	bd_id frame;
-	if (wm_enabled() && !modal_active) {
-		/* the toolkit's own window manager runs the floating frames and
-		 * decides which one (or the desktop) the event routes to */
-		bd_id route;
-		if (wm_dispatch(ev, &route))
+	bd_id frame = BD_NONE;
+	int have_frame = 0;
+
+	/* embedded window managers (managed canvases) run on any backend: they
+	 * intercept pointer input over their floating frames before the surface WM
+	 * / native routing sees it */
+	if (!modal_active && canvas_count > 0) {
+		bd_id croute;
+		if (canvas_wm_event(ev, &croute))
 			return 1;
-		frame = route;
-	} else {
-		frame = modal_active ? active_modal : frame_for_window(ev->window);
+		if (croute != BD_NONE) {
+			frame = croute;
+			have_frame = 1;
+		}
+	}
+	if (!have_frame) {
+		if (wm_enabled() && !modal_active) {
+			/* the toolkit's own window manager runs the floating frames and
+			 * decides which one (or the desktop) the event routes to */
+			struct wm_host sh;
+			wm_surface_host(&sh);
+			bd_id route;
+			if (wm_dispatch(ev, &sh, &route))
+				return 1;
+			frame = route;
+		} else {
+			frame = modal_active ? active_modal : frame_for_window(ev->window);
+		}
 	}
 	if (frame == BD_NONE || !pool[frame].alive)
 		return 0;

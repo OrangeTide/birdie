@@ -68,12 +68,14 @@ dock_anchor(int g)
 	}
 }
 
-/* rebuild tiles[] from the minimized top-level frames (derived state) */
+/* rebuild tiles[] from the minimized top-level frames (derived state). Scoped
+ * to the dock's WM host: a dock inside a managed canvas shows only that canvas's
+ * minimized frames; a dock on the desktop shows the surface's. */
 static void
-dock_reconcile(struct dock *d)
+dock_reconcile(struct dock *d, bd_id id)
 {
 	bd_id all[DOCK_MAX];
-	int n = bd_window_list(all, DOCK_MAX);
+	int n = bd_window_list_in(bd_managed_canvas_of(id), all, DOCK_MAX);
 	d->ntiles = 0;
 	for (int i = 0; i < n && d->ntiles < DOCK_MAX; i++)
 		if (bd_window_minimized(all[i]))
@@ -128,7 +130,7 @@ dock_layout(bd_id id, void *state, int w, int h)
 {
 	(void)w; (void)h;
 	struct dock *d = state;
-	dock_reconcile(d);
+	dock_reconcile(d, id);
 	int vert = is_vertical(d->gravity);
 	int cw = cell_w(d), ch = cell_h(d);
 	int pw = vert ? cw : d->ntiles * cw;
@@ -142,7 +144,7 @@ static void
 dock_render(bd_id id, void *state)
 {
 	struct dock *d = state;
-	dock_reconcile(d);
+	dock_reconcile(d, id);
 	if (d->ntiles == 0)
 		return;
 	const bd_theme *th = bd_gui_theme();

@@ -25,6 +25,7 @@ enum {
 	BD_NOTICE,
 	BD_TAB_BAR,
 	BD_INPUT_LINE,
+	BD_MANAGED_CANVAS,
 };
 
 /* layout modes */
@@ -309,5 +310,37 @@ void bd_window_minimize(bd_id frame);
 void bd_window_restore(bd_id frame);
 int  bd_window_minimized(bd_id frame);
 int  bd_window_list(bd_id *out, int max);
+
+/*
+ * Managed canvas (BD_MANAGED_CANVAS): a widget that hosts an *embedded* window
+ * manager. Top-level BD_FRAMEs created with the canvas as their parent are not
+ * laid out as ordinary children; instead the toolkit's in-surface WM floats,
+ * decorates, drags, snaps, minimizes and docks them *inside the canvas rect* --
+ * the same machinery the WM uses for the whole surface on a single-surface
+ * backend, now scoped to a sub-rectangle. This gives a primitive MDI that works
+ * on a multi_window backend too (where each real frame is otherwise its own OS
+ * window and there are no in-surface frames to minimize).
+ *
+ *   bd_id cv    = bd_managed_canvas_create(pane, BD_GROW_I, 1, BD_END);
+ *   bd_id notes = bd_create(cv, BD_FRAME, BD_LABEL_S, "Notes", BD_END);
+ *   bd_id dock  = bd_dock_create(cv, NULL, BD_END);   // scoped to this canvas
+ *
+ * The canvas defaults to BD_LAYOUT_FIXED so ordinary children (a dock, a status
+ * strip) anchor to its edges while managed frames overlay them. Give it room
+ * (BD_GROW_I or a size). A backdrop colour is drawn from BD_BG_C; a host-drawn
+ * / texture backdrop for compositing widgets over a live GL scene is a roadmap
+ * item.
+ */
+bd_id bd_managed_canvas_create(bd_id parent, ...);
+
+/* The BD_MANAGED_CANVAS that hosts `descendant` (walking up parents/hosts), or
+ * BD_NONE if it lives on the surface desktop. A dock uses this to scope itself
+ * to its canvas. */
+bd_id bd_managed_canvas_of(bd_id descendant);
+
+/* Enumerate the top-level frames of one WM host: the surface desktop when
+ * host == BD_NONE (== bd_window_list), else the frames managed by that canvas.
+ * Copies up to `max` ids into out (may be NULL to just count). */
+int  bd_window_list_in(bd_id host, bd_id *out, int max);
 
 #endif
