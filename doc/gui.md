@@ -876,7 +876,9 @@ Either way the face is named by identity, not by the stock filename.
 (`bd_editor_set_locked`), styling (`bd_editor_clear_styles` /
 `style_span` / `highlight_row` / `highlight_span` with `bd_rich_style`), the
 multi-line editor (caret nav, newline, backspace/delete, click-to-caret,
-scroll), and styled rendering segment-by-segment: per-run fg/bg, underline,
+scroll), a submit-on-Enter hook (`bd_editor_on_submit`; Ctrl+Enter submits by
+default, `bd_editor_set_enter_submits` makes plain Enter submit for command-line
+use), and styled rendering segment-by-segment: per-run fg/bg, underline,
 strikeout, **true bold and italic** (separate baked faces, see Rendering),
 super/subscript (baseline shift); it renders in a **fixed-width face by
 default** (`bd_editor_set_monospace`). Style runs are byte ranges that shift across

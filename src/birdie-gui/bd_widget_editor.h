@@ -48,6 +48,18 @@ void bd_editor_insert_row(bd_id id, int row, const char *s);
 void bd_editor_replace_row(bd_id id, int row, const char *s);
 void bd_editor_delete_row(bd_id id, int row);
 
+/* ---- submit hook ----
+ *
+ * The editor is multi-line, so Enter inserts a newline by default and
+ * Ctrl+Enter submits (fires the hook). bd_editor_set_enter_submits(id, 1)
+ * swaps that: plain Enter submits and Shift/Ctrl+Enter inserts a newline,
+ * for single-line-style entry (a command line, a REPL, a rename field). In
+ * either mode a submit with no hook installed falls back to inserting a
+ * newline, so the key is never dead. The callback fires on the editor id. */
+void bd_editor_on_submit(bd_id id, bd_callback_fn fn, void *data);
+void bd_editor_set_enter_submits(bd_id id, int on);
+int  bd_editor_enter_submits(bd_id id);
+
 /* ---- lock (read-only; the row API and styling still work) ---- */
 void bd_editor_set_locked(bd_id id, int locked);
 int  bd_editor_locked(bd_id id);

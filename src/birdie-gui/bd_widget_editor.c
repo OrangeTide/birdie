@@ -26,6 +26,9 @@ struct editor {
 	int    scroll_y;
 	int    locked;
 	int    mono;            /* fixed-width face (default on) */
+	int    enter_submits;   /* plain Enter submits instead of inserting \n */
+	bd_callback_fn on_submit;
+	void  *on_submit_data;
 	struct erun *runs;
 	int    nrun, runcap;
 };
@@ -493,9 +496,17 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		e->cursor = e_col_at_px(e, ns, ne, gx);
 		break;
 	}
-	case BD_KEY_ENTER:
-		editor_insert(e, '\n');
+	case BD_KEY_ENTER: {
+		int mod = ev->mods & (BD_MOD_SHIFT | BD_MOD_CTRL);
+		/* enter_submits: plain Enter submits, modified inserts a newline.
+		 * default: Ctrl+Enter submits, everything else inserts a newline. */
+		int submit = e->enter_submits ? (mod == 0) : (ev->mods & BD_MOD_CTRL);
+		if (submit && e->on_submit)
+			e->on_submit(id, e->on_submit_data);
+		else
+			editor_insert(e, '\n');   /* editor_insert honors the lock */
 		break;
+	}
 	case 'V':       /* Ctrl-V: paste at the cursor */
 		if (ev->mods & BD_MOD_CTRL) {
 			const bd_backend *be = bd_backend_get();
@@ -650,6 +661,29 @@ bd_editor_delete_row(bd_id id, int row)
 	else if (a > 0)            /* last row: take the preceding newline */
 		a--;
 	e_splice(e, a, b - a, NULL, 0);
+}
+
+void
+bd_editor_on_submit(bd_id id, bd_callback_fn fn, void *data)
+{
+	struct editor *e = editor_of(id);
+	if (!e) return;
+	e->on_submit = fn;
+	e->on_submit_data = data;
+}
+
+void
+bd_editor_set_enter_submits(bd_id id, int on)
+{
+	struct editor *e = editor_of(id);
+	if (e) e->enter_submits = on;
+}
+
+int
+bd_editor_enter_submits(bd_id id)
+{
+	struct editor *e = editor_of(id);
+	return e ? e->enter_submits : 0;
 }
 
 void

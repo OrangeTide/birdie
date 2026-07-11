@@ -258,6 +258,8 @@ void  bd_editor_set_text(bd_id, const char *);    int bd_editor_text(bd_id, char
 int   bd_editor_row_count(bd_id);                 int bd_editor_row_text(bd_id, int row, char *out, int cap);
 void  bd_editor_insert_row(bd_id, int row, const char *);   void bd_editor_replace_row(bd_id, int row, const char *);
 void  bd_editor_delete_row(bd_id, int row);
+void  bd_editor_on_submit(bd_id, bd_callback_fn, void *data);
+void  bd_editor_set_enter_submits(bd_id, int);    int bd_editor_enter_submits(bd_id);
 void  bd_editor_set_locked(bd_id, int);           int bd_editor_locked(bd_id);
 void  bd_editor_set_monospace(bd_id, int);
 void  bd_editor_clear_styles(bd_id);
