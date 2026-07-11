@@ -28,6 +28,7 @@
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
+#include "bd_widget_chart.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
 #include "window.h"
@@ -47,6 +48,7 @@ static int   desktop_tab;     /* index of the "Desktop" MDI pane */
 static bd_id desk_logwin;     /* a Desktop-pane frame (auto-minimize for a shot) */
 /* animated meters, driven from the main loop to show ballistics/peak/fill */
 static bd_id m_vu, m_eye, m_load, m_sig, m_hp, m_mp, m_disk, m_prog;
+static bd_id m_chart;   /* system-monitor strip chart */
 static bd_id m_hpbar, m_mpbar;   /* glass liquid tubes (bar-form BD_METER_VIAL) */
 static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
@@ -619,6 +621,14 @@ build_ui(void)
 	bd_id meters = bd_tabview_add_pane(tabs, "Meters");
 	bd_set(meters, BD_PAD_I, 6, BD_GAP_I, 8, BD_END);
 
+	/* system-monitor strip chart (BD_CHART): CPU %, latency ms, memory MB */
+	bd_id chrow = section(meters, "System monitor (BD_CHART -- scrolling time series)",
+		BD_LAYOUT_ROW, 130);
+	m_chart = bd_chart_create(chrow, 160, BD_GROW_I, 1, BD_END);
+	bd_chart_add_series(m_chart, &(bd_chart_series){ .label = "CPU", .unit = "%" });
+	bd_chart_add_series(m_chart, &(bd_chart_series){ .label = "Latency", .unit = "ms" });
+	bd_chart_add_series(m_chart, &(bd_chart_series){ .label = "Mem", .unit = "MB" });
+
 	/* round instruments in a row */
 	bd_id mrow = section(meters, "Round meters (VU / magic eye / pie / vials)",
 		BD_LAYOUT_ROW, 130);
@@ -889,6 +899,17 @@ main(void)
 			bd_progress_set(m_hpbar, 0.5 + 0.5 * sin(t * 0.35)); /* tube twins */
 			bd_progress_set(m_mpbar, 0.5 + 0.5 * sin(t * 0.5 + 2.0));
 			bd_progress_set(m_prog, fmod(t, 4.0) / 4.0);          /* 0..100% ramp */
+
+			static double last_push;   /* sample the chart at ~10 Hz */
+			if (t - last_push > 0.1) {
+				last_push = t;
+				float row[3] = {
+					(float)(45 + 35 * sin(t * 0.7) + 10 * sin(t * 5.0)),   /* CPU % */
+					(float)(80 + 55 * sin(t * 0.4 + 1.0) + 18 * fabs(sin(t * 3))), /* ms */
+					(float)(300 + 120 * sin(t * 0.25)),                    /* MB */
+				};
+				bd_chart_push_row(m_chart, row, 3);
+			}
 		}
 
 		/* the GLES backend is multi_window, so bd_gui_render() makes each

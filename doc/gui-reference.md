@@ -26,6 +26,7 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_indicator.h` | panel-mount LED indicator lamp                                  |
 | `bd_widget_meter.h`     | 0..1 meters (bar / VU / magic eye / pie / liquid vial)          |
 | `bd_widget_progress.h`  | determinate / indeterminate progress bar                        |
+| `bd_widget_chart.h`     | scrolling multi-series time-series strip chart                   |
 | `bd_backend_ludica.h` / `bd_backend_sdl3.h` | reference backends                            |
 
 ## Core lifecycle
@@ -360,6 +361,24 @@ bd_id bd_progress_create(bd_id parent, const bd_progress_desc *desc, ...);
 void  bd_progress_set(bd_id, float value);       float bd_progress_get(bd_id);
 void  bd_progress_set_indeterminate(bd_id, int on);
 /* desc: value, indeterminate, show_percent, glass, orient, color, label */
+```
+
+### Chart (`bd_widget_chart.h`)
+
+A scrolling time-series strip chart (xload / system-monitor style): overlaid
+colored line traces on a graph-paper grid, newest sample at the right. The
+widget owns a ring buffer per series; the app pushes samples. Each series
+autoscales over its window; a `"%"` unit pins it to 0..100 and shares the grid,
+and up to two other units get a labeled value axis (left, then right).
+
+```c
+/* series: label, unit ("%" = 0..100 scale), color (0 = palette) */
+bd_id bd_chart_create(bd_id parent, int window, ...);   /* window = samples kept */
+int   bd_chart_add_series(bd_id, const bd_chart_series *);   /* -> index or -1 */
+void  bd_chart_push(bd_id, int series, float value);
+void  bd_chart_push_row(bd_id, const float *values, int n); /* one per series */
+void  bd_chart_clear(bd_id);
+void  bd_chart_set_grid(bd_id, int);   void bd_chart_set_legend(bd_id, int);
 ```
 
 ## Theme (`bd_theme.h`)

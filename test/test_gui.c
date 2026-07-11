@@ -24,6 +24,7 @@
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
+#include "bd_widget_chart.h"
 #include "bd_asset.h"
 #include "bd_utf8.h"
 #include "bd_draw.h"
@@ -2436,6 +2437,37 @@ main(void)
 	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
 	bd_editor_text(ed, tb, sizeof tb);
 	check("autocomplete stays closed with no matches", strcmp(tb, "zz\n") == 0);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_CHART: multi-series push + render, wrap, clear, series cap ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id croot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_id ch = bd_chart_create(croot, 32, BD_GROW_I, 1, BD_END);
+	int s0 = bd_chart_add_series(ch, &(bd_chart_series){ .label = "CPU", .unit = "%" });
+	int s1 = bd_chart_add_series(ch, &(bd_chart_series){ .label = "Lat", .unit = "ms" });
+	int s2 = bd_chart_add_series(ch, &(bd_chart_series){ .label = "Mem", .unit = "MB" });
+	check("chart series get sequential indices", s0 == 0 && s1 == 1 && s2 == 2);
+
+	for (int i = 0; i < 50; i++) {   /* > window: exercises the ring wrap */
+		float r[3] = { (float)(i % 100), (float)(i * 2), (float)(200 + i) };
+		bd_chart_push_row(ch, r, 3);
+	}
+	bd_chart_push(ch, 0, 42.0f);
+	bd_gui_layout(320, 160);
+	bd_gui_render();
+	check("chart renders overlaid series (wrapped ring) without crashing", 1);
+
+	bd_chart_clear(ch);
+	bd_gui_render();
+	check("chart clear then render (empty) without crashing", 1);
+
+	int idx = 0;
+	for (int i = 0; i < 12; i++)     /* fill past the 8-series cap */
+		idx = bd_chart_add_series(ch, &(bd_chart_series){ .label = "x" });
+	check("chart caps the series count", idx == -1);
 	}
 	bd_gui_cleanup();
 

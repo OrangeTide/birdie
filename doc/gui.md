@@ -184,6 +184,12 @@ What is built:
   simpler sibling `bd_widget_progress.{c,h}`; its `glass` flag renders a
   horizontal liquid-in-glass tube matching `BD_METER_VIAL` (the bar-form of the
   round life/mana orb).
+- **Chart widget** (extension) — `bd_widget_chart`, a scrolling multi-series
+  time-series strip chart (xload / system-monitor style): overlaid colored line
+  traces on a graph-paper grid, newest sample at the right, one ring buffer per
+  series the app pushes into. Each series autoscales over its window; a `"%"`
+  unit pins to 0..100 and shares the grid, and up to two other units get a
+  labeled value axis (left, then right). Output-only, like the meters.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
   runs: fg/bg/underline/strike/bold/super-sub) for code or ABC-notation music.
 - **Explorer widget** (extension) — model-driven icon grid with selection
