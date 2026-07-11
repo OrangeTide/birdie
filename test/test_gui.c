@@ -25,6 +25,7 @@
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
 #include "bd_widget_chart.h"
+#include "bd_widget_icon.h"
 #include "bd_asset.h"
 #include "bd_utf8.h"
 #include "bd_draw.h"
@@ -402,6 +403,11 @@ ed_type(bd_id ed, const char *s)
 	for (; *s; s++)
 		bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = (unsigned)*s });
 }
+
+static uint64_t icon_act_key;
+static int icon_act_n;
+static void icon_act_cb(bd_id w, uint64_t key, void *u)
+{ (void)w; (void)u; icon_act_key = key; icon_act_n++; }
 
 int
 main(void)
@@ -2468,6 +2474,38 @@ main(void)
 	for (int i = 0; i < 12; i++)     /* fill past the 8-series cap */
 		idx = bd_chart_add_series(ch, &(bd_chart_series){ .label = "x" });
 	check("chart caps the series count", idx == -1);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_ICON: standalone icon activate + drag advertises payload ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id iroot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_id ic = bd_icon_create(iroot,
+	    &(bd_icon_desc){ .key = 77, .label = "App", .enabled = 1 },
+	    BD_GROW_I, 1, BD_END);
+	bd_icon_on_activate(ic, icon_act_cb, NULL);
+	bd_gui_layout(120, 120);
+	bd_gui_render();
+	check("icon reports its key", bd_icon_key(ic) == 77);
+
+	int ix, iy, iw, ih;
+	bd_widget_rect(ic, &ix, &iy, &iw, &ih);
+	int cx = ix + iw / 2, cy = iy + ih / 2;
+	bd_event id0 = mouse(BD_EV_MOUSE_DOWN, cx, cy);
+	bd_event iu0 = mouse(BD_EV_MOUSE_UP,   cx, cy);
+	bd_gui_event(&id0); bd_gui_event(&iu0);   /* click focuses the icon */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	check("icon Enter activates", icon_act_n > 0 && icon_act_key == 77);
+
+	bd_event id1 = mouse(BD_EV_MOUSE_DOWN, cx, cy);
+	bd_event im1 = mouse(BD_EV_MOUSE_MOVE, cx + 10, cy + 10);
+	bd_gui_event(&id1); bd_gui_event(&im1);   /* press + drag past threshold */
+	const bd_dnd_payload *dp = bd_dnd_get();
+	check("icon drag advertises its payload", dp && dp->key == 77);
+	bd_event iu1 = mouse(BD_EV_MOUSE_UP, cx + 10, cy + 10);
+	bd_gui_event(&iu1);
 	}
 	bd_gui_cleanup();
 

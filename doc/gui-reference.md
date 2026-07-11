@@ -21,6 +21,7 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_editor.h`    | rich-text, row-oriented editor                                  |
 | `bd_widget_table.h`     | sortable multi-column table                                     |
 | `bd_widget_tree.h`      | indented expand/collapse hierarchy list                         |
+| `bd_widget_icon.h`      | shared icon cell + standalone icon (app launcher / desktop icon) |
 | `bd_widget_inventory.h` | fixed grid of icon cells (game inventory)                       |
 | `bd_widget_sketch.h`    | pressure-sensitive sketch pad                                    |
 | `bd_widget_indicator.h` | panel-mount LED indicator lamp                                  |
@@ -307,6 +308,26 @@ void     bd_tree_refresh(bd_id);
 uint64_t bd_tree_selected(bd_id);        void bd_tree_set_selected(bd_id, uint64_t node);
 void     bd_tree_set_expanded(bd_id, uint64_t node, int open);   int bd_tree_is_expanded(bd_id, uint64_t);
 void     bd_tree_set_indent(bd_id, int px);
+```
+
+### Icon (`bd_widget_icon.h`)
+
+The shared icon "cell" the dock, action bar, and inventory render and drag
+through (`bd_icon_desc` = key/label/icon/count/enabled; `bd_icon_draw` +
+`bd_icon_dnd_begin`), plus a standalone single-icon widget used as an app
+launcher or a desktop icon (double-click / Enter activates; drag it onto any
+icon-accepting target).
+
+```c
+typedef struct bd_icon_desc { uint64_t key; const char *label; bd_texture icon; int count, enabled; } bd_icon_desc;
+void  bd_icon_draw(float rx, float ry, int cell_w, int pad, int icon_size, const bd_icon_desc *, uint32_t bg, uint32_t border, uint32_t fg);
+void  bd_icon_dnd_begin(bd_id source, const bd_icon_desc *, void *user);
+/* standalone widget */
+bd_id bd_icon_create(bd_id parent, const bd_icon_desc *desc, ...);
+void  bd_icon_set(bd_id, const bd_icon_desc *);   void bd_icon_set_texture(bd_id, bd_texture);
+uint64_t bd_icon_key(bd_id);
+void  bd_icon_on_activate(bd_id, bd_icon_activate_fn, void *user);   /* dbl-click / Enter */
+void  bd_icon_on_drop(bd_id, bd_icon_drop_fn, void *user);           /* makes it a drop target */
 ```
 
 ### Inventory (`bd_widget_inventory.h`)

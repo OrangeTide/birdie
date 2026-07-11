@@ -16,6 +16,7 @@
  */
 
 #include "bd_widget_dock.h"
+#include "bd_widget_icon.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
 #include <stdarg.h>
@@ -162,9 +163,10 @@ dock_render(bd_id id, void *state)
 		int ry = vert ? y + i * ch : y;
 		bd_dock_item it;
 		dock_item(d, d->tiles[i], &it);
-		bd_draw_tile((float)rx, (float)ry, cw, DOCK_PAD, d->tile_size,
-		    it.icon, it.label, it.count, it.enabled,
-		    th->bg, th->border, th->text);
+		bd_icon_desc dc = { .key = it.key, .label = it.label,
+		    .icon = it.icon, .count = it.count, .enabled = it.enabled };
+		bd_icon_draw((float)rx, (float)ry, cw, DOCK_PAD, d->tile_size,
+		    &dc, th->bg, th->border, th->text);
 		if (i == d->press_tile)
 			bd_draw_rect_lines((float)(rx + DOCK_PAD),
 			    (float)(ry + DOCK_PAD), (float)d->tile_size,
@@ -195,12 +197,10 @@ dock_event(bd_id id, void *state, const bd_event *ev)
 		d->dragging = 1;
 		bd_dock_item it;
 		dock_item(d, d->tiles[d->press_tile], &it);
-		bd_dnd_payload p = {0};
-		p.source = id;
-		p.key    = d->tiles[d->press_tile];
-		p.label  = it.label;
-		p.icon   = it.icon;
-		bd_dnd_begin(&p);
+		bd_icon_desc dc = { .key = d->tiles[d->press_tile],
+		    .label = it.label, .icon = it.icon, .count = it.count,
+		    .enabled = it.enabled };
+		bd_icon_dnd_begin(id, &dc, NULL);
 		return 1;
 	}
 	if (ev->type == BD_EV_MOUSE_UP && ev->button == BD_MOUSE_LEFT &&

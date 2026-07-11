@@ -195,6 +195,12 @@ What is built:
 - **Explorer widget** (extension) — model-driven icon grid with selection
   (single / Ctrl / Shift-range / rubber-band), drag-move, double-click
   activate, right-click context, keyboard nav, in-place rename, scissor clip.
+- **Icon cell** (extension) — `bd_widget_icon`, the shared "slot" the dock,
+  action bar, and inventory render and drag through (`bd_icon_desc` +
+  `bd_icon_draw` + `bd_icon_dnd_begin`, one cell vocabulary across the four
+  widgets), plus a standalone single-icon widget (double-click/Enter activates,
+  drag onto any icon-accepting target) used as an app launcher or a desktop
+  icon.
 - **Tree widget** (extension) — `bd_widget_tree`, an indented expand/collapse
   hierarchy list over a lazy child model (file/project tree, class hierarchy).
   Owns scrolling, selection, keyboard (up/down, left/right collapse-expand,

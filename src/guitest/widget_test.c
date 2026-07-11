@@ -25,6 +25,8 @@
 #include "bd_widget_indicator.h"
 #include "bd_widget_tabview.h"
 #include "bd_widget_dock.h"
+#include "bd_widget_actionbar.h"
+#include "bd_widget_icon.h"
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
@@ -68,6 +70,14 @@ report(const char *msg)
 /* ---- callbacks ---- */
 
 static void on_btn(bd_id id, void *arg)   { (void)id; report((const char *)arg); }
+
+static void on_launch(bd_id id, uint64_t key, void *arg)
+{
+	(void)id; (void)key;
+	static char b[48];
+	snprintf(b, sizeof b, "launch %s", (const char *)arg);
+	report(b);
+}
 
 static bd_id sketch;   /* the sketch pad, cleared by its Clear button */
 static void on_canvas_clear(bd_id id, void *arg)
@@ -748,6 +758,26 @@ build_ui(void)
 		"BD_MANAGED_CANVAS: drag the frame title bars; minimize (_) a frame to "
 		"the dock; click a dock tile to restore.",
 		BD_PREF_H_I, 16, BD_FG_C, 0x9DA3AAFFu, BD_END);
+
+	/* standalone BD_ICON app launchers + an action-bar drop target: double-
+	 * click a launcher to run it, or drag one onto the bar to bind it (the
+	 * icon cell + cross-widget drag are shared with the dock/inventory) */
+	bd_id launchrow = bd_create(deskpane, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 78, BD_GAP_I, 10, BD_END);
+	static const struct { const char *name; int col; } apps[] = {
+		{ "Telnet", 1 }, { "Editor", 4 }, { "Map", 5 },
+	};
+	for (int i = 0; i < 3; i++) {
+		bd_id ic = bd_icon_create(launchrow,
+			&(bd_icon_desc){ .key = 100 + i, .label = apps[i].name,
+				.icon = inv_icons[apps[i].col], .enabled = 1 },
+			BD_PREF_W_I, 64, BD_END);
+		bd_icon_on_activate(ic, on_launch, (void *)apps[i].name);
+	}
+	bd_create(launchrow, BD_LABEL, BD_LABEL_S, "drag onto ->",
+		BD_PREF_W_I, 72, BD_END);
+	bd_actionbar_create(launchrow, 6, NULL, BD_END);
+
 	bd_id cv = bd_managed_canvas_create(deskpane, BD_GROW_I, 1,
 		BD_BG_C, 0x1E2024FFu, BD_END);
 

@@ -14,6 +14,7 @@
  */
 
 #include "bd_widget_actionbar.h"
+#include "bd_widget_icon.h"
 #include "bd_draw.h"
 #include <stdarg.h>
 #include <stdlib.h>
@@ -260,9 +261,11 @@ ab_render(bd_id id, void *state)
 		int rx, ry;
 		slot_origin(a, x, y, i, &rx, &ry);
 		struct ab_slot *s = &a->slots[i];
-		bd_draw_tile((float)rx, (float)ry, cell_w(a), AB_PAD, a->tile_size,
-		    s->icon, s->filled ? s->label : NULL, 0,
-		    s->filled ? s->enabled : 1, th->bg, th->border, th->text);
+		bd_icon_desc dc = { .key = s->key,
+		    .label = s->filled ? s->label : NULL, .icon = s->icon,
+		    .count = 0, .enabled = s->filled ? s->enabled : 1 };
+		bd_icon_draw((float)rx, (float)ry, cell_w(a), AB_PAD, a->tile_size,
+		    &dc, th->bg, th->border, th->text);
 
 		/* hotkey label in the top-left corner of the icon, shown when the
 		 * slot is empty (so the binding is discoverable) or hovered */
@@ -289,13 +292,10 @@ static void
 ab_start_slot_drag(bd_id id, struct actionbar *a)
 {
 	struct ab_slot *s = &a->slots[a->press_slot];
-	bd_dnd_payload p = {0};
-	p.source = id;
-	p.key    = s->key;
-	p.label  = s->label;
-	p.icon   = s->icon;
-	p.user   = s->user;
-	bd_dnd_begin(&p);   /* the toolkit draws the ghost + delivers any drop */
+	bd_icon_desc dc = { .key = s->key, .label = s->label, .icon = s->icon,
+	    .count = 0, .enabled = s->enabled };
+	/* the toolkit draws the ghost + delivers any drop */
+	bd_icon_dnd_begin(id, &dc, s->user);
 }
 
 static int

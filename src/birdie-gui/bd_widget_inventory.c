@@ -1,4 +1,5 @@
 #include "bd_widget_inventory.h"
+#include "bd_widget_icon.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
 #include <stdarg.h>
@@ -128,13 +129,9 @@ inv_start_dnd(bd_id id, struct inv *v)
 		return;
 	bd_inventory_item it;
 	slot_item(v, v->press_slot, &it);
-	bd_dnd_payload p = {0};
-	p.source = id;
-	p.key    = it.key;
-	p.label  = it.label;
-	p.icon   = it.icon;
-	p.user   = it.user;
-	bd_dnd_begin(&p);
+	bd_icon_desc dc = { .key = it.key, .label = it.label, .icon = it.icon,
+	    .count = it.count, .enabled = it.enabled };
+	bd_icon_dnd_begin(id, &dc, it.user);
 }
 
 /* fetch a slot's item (zeroed for empty / no model) */
@@ -281,10 +278,12 @@ inv_render(bd_id id, void *state)
 			bd_inventory_item it;
 			slot_item(v, slot, &it);
 
-			/* the shared tile: recessed square + icon + badge + caption
-			 * (identical to the dock widget) */
-			bd_draw_tile(rx, ry, cw, CELL_PAD, is, it.icon, it.label,
-			    it.count, it.enabled, th->bg, th->border, th->text);
+			/* the shared icon cell: recessed square + icon + badge +
+			 * caption (bd_icon_draw, shared with dock / action bar) */
+			bd_icon_desc dc = { .key = it.key, .label = it.label,
+			    .icon = it.icon, .count = it.count, .enabled = it.enabled };
+			bd_icon_draw(rx, ry, cw, CELL_PAD, is, &dc,
+			    th->bg, th->border, th->text);
 
 			/* drop-target ring during a drag-move */
 			if (v->mode == DRAG_ITEM && slot == v->drop_slot &&
