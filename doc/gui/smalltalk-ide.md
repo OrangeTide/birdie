@@ -53,7 +53,7 @@ those primitives and the tools are mostly composition.
 | Modal dialogs / confirmers | `BD_NOTICE`, modal API | **have** |
 | Icon grid (method categories as icons, tool launcher) | `bd_widget_explorer`, `bd_widget_inventory` | **have** |
 | **Resizable split panes (sash)** | — | **missing** — foundational |
-| **Tree view (indented, expand/collapse)** | `explorer` is an icon grid, not a tree | **missing** |
+| **Tree view (indented, expand/collapse)** | `bd_widget_tree` (`BD_TREE`) | **have** |
 | **Radio group / segmented control** (instance \| class) | `bd_toggle` is 2-state on/off, not an N-way exclusive selector | **missing** |
 | Editor: line-number gutter | — | **missing** |
 | Editor: syntax highlighting *driver* | style-span mechanism exists; no tokenizer hook / re-highlight-on-edit | **partial** |
@@ -74,12 +74,16 @@ In dependency order. The first three unlock every tool above.
    re-snap on resize. Nestable, so a browser is a vertical split (panes over
    code) whose top is a horizontal split of four lists.
 
-2. **`BD_TREE` — indented hierarchy list.** A `BD_LIST` cousin that renders an
-   indented, expand/collapse outline over a model that yields children on
-   demand. Drives the class Hierarchy Browser, the project/file tree (also a
-   separate TODO), and any nested structure. Model-driven like `BD_TABLE`:
-   `count`, `child`, `label`, `has_children`, `expanded`. Keyboard
-   left/right collapse/expand, type-ahead, activation callback.
+2. **`BD_TREE` — indented hierarchy list.** *Built* (`bd_widget_tree.{c,h}`). A
+   `BD_LIST` cousin that renders an indented, expand/collapse outline over a
+   model that yields children on demand (`child_count` / `child` / `get` with
+   `label`, `has_children`, `enabled`, `user`; nodes keyed by an app
+   `uint64_t`). Drives the class Hierarchy Browser, the project/file tree (also
+   a separate TODO), and any nested structure. Owns scrolling, selection,
+   keyboard (up/down, left/right collapse-expand, type-ahead), the twisty
+   toggles, and the expand state (the widget owns it; seed with
+   `bd_tree_set_expanded`, react via the `expand` callback for lazy loading);
+   select / activate / expand callbacks.
 
 3. **`BD_RADIO` / segmented control.** An N-way exclusive selector for the
    browser's `instance | class` toggle (and message-category filters). Either a
@@ -177,8 +181,8 @@ Fixed arrangements over a shared model, packaged so a host instantiates one call
 ## Build order and cross-references
 
 1. `BD_SPLIT` — unblocks every tool; also broadly useful outside the IDE.
-2. `BD_TREE` — the Hierarchy Browser and the project tree (TODO: "tree browser
-   for projects") share it.
+2. `BD_TREE` — **built** (`bd_widget_tree`). The Hierarchy Browser and the
+   project tree (TODO: "tree browser for projects") share it.
 3. `BD_RADIO` / segmented control — small, needed by the browser.
 4. Editor autocomplete + syntax-highlight hook + find bar — shared with the TODO
    items "wire up autocomplete to an editor" and the IDE-on-an-editor note.

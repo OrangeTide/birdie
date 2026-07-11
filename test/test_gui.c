@@ -23,6 +23,7 @@
 #include "bd_widget_indicator.h"
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
+#include "bd_widget_tree.h"
 #include "bd_asset.h"
 #include "bd_utf8.h"
 #include "bd_draw.h"
@@ -359,6 +360,26 @@ mouse(int type, int x, int y)
 static int ind_clicks, ind_last_state;
 static void on_indicator(bd_id id, void *arg, int state)
 { (void)id; (void)arg; ind_clicks++; ind_last_state = state; }
+
+/* ---- a small tree model for BD_TREE ---- */
+static const struct tnode { uint64_t key; const char *label; uint64_t parent; int folder; } tnodes[] = {
+	{ 1, "Project",   0, 1 }, { 10, "README.md", 0, 0 },
+	{ 2, "src",       1, 1 }, { 3,  "doc",       1, 1 },
+	{ 4, "main.c",    2, 0 }, { 5,  "net.c",     2, 0 },
+	{ 6, "gui.md",    3, 0 },
+};
+#define TNODE_N ((int)(sizeof tnodes / sizeof tnodes[0]))
+static int tn_child_count(void *c, uint64_t p)
+{ (void)c; int n = 0; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].parent == p) n++; return n; }
+static uint64_t tn_child(void *c, uint64_t p, int idx)
+{ (void)c; int k = 0; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].parent == p && k++ == idx) return tnodes[i].key; return 0; }
+static void tn_get(void *c, uint64_t key, bd_tree_item *out)
+{ (void)c; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].key == key) { out->label = tnodes[i].label; out->has_children = tnodes[i].folder; out->enabled = 1; out->user = (void *)&tnodes[i]; return; } }
+static uint64_t tr_sel_key, tr_act_key, tr_exp_key;
+static int tr_sel_n, tr_act_n, tr_exp_n, tr_exp_open;
+static void tr_on_select(bd_id w, uint64_t k, void *u)   { (void)w; (void)u; tr_sel_key = k; tr_sel_n++; }
+static void tr_on_activate(bd_id w, uint64_t k, void *u) { (void)w; (void)u; tr_act_key = k; tr_act_n++; }
+static void tr_on_expand(bd_id w, uint64_t k, int o, void *u) { (void)w; (void)u; tr_exp_key = k; tr_exp_open = o; tr_exp_n++; }
 
 int
 main(void)
@@ -2284,6 +2305,71 @@ main(void)
 	    fabsf(bd_progress_get(gtube) - 0.6f) < 0.001f);
 	check("vertical glass tube renders without crashing",
 	    fabsf(bd_progress_get(gvert) - 0.3f) < 0.001f);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_TREE: expand/collapse, select, activate, twisty clicks ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id troot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_tree_model tm = { .child_count = tn_child_count, .child = tn_child,
+	    .get = tn_get };
+	bd_tree_cb tc = { .select = tr_on_select, .activate = tr_on_activate,
+	    .expand = tr_on_expand };
+	bd_id tr = bd_tree_create(troot, &tm, &tc, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(300, 260);
+	bd_gui_render();
+	check("tree initial selection empty", bd_tree_selected(tr) == 0);
+
+	bd_tree_set_expanded(tr, 1, 1);
+	bd_tree_set_expanded(tr, 2, 1);
+	check("tree node reports expanded", bd_tree_is_expanded(tr, 1));
+	bd_gui_layout(300, 260);
+	bd_gui_render();
+	check("tree renders expanded without crashing", 1);
+
+	bd_tree_set_selected(tr, 4);
+	check("tree set_selected reflected", bd_tree_selected(tr) == 4);
+
+	int rx, ry, rw, rh;
+	bd_widget_rect(tr, &rx, &ry, &rw, &rh);
+	int rowh = (int)bd_draw_line_height() + 6;
+	/* body click on row 0 (Project), off the twisty, selects it */
+	bd_event s0d = mouse(BD_EV_MOUSE_DOWN, rx + 40, ry + 1 + rowh / 2);
+	bd_event s0u = mouse(BD_EV_MOUSE_UP,   rx + 40, ry + 1 + rowh / 2);
+	bd_gui_event(&s0d); bd_gui_event(&s0u);
+	check("tree body click selects the row",
+	    tr_sel_n > 0 && tr_sel_key == 1 && bd_tree_selected(tr) == 1);
+
+	/* twisty click on row 0 collapses Project, firing expand(open=0) */
+	bd_event c0d = mouse(BD_EV_MOUSE_DOWN, rx + 12, ry + 1 + rowh / 2);
+	bd_event c0u = mouse(BD_EV_MOUSE_UP,   rx + 12, ry + 1 + rowh / 2);
+	bd_gui_event(&c0d); bd_gui_event(&c0u);
+	check("tree twisty click collapses + fires expand",
+	    tr_exp_n > 0 && tr_exp_key == 1 && tr_exp_open == 0 &&
+	    !bd_tree_is_expanded(tr, 1));
+
+	/* twisty click again re-expands */
+	bd_gui_event(&c0d); bd_gui_event(&c0u);
+	check("tree twisty click re-expands", bd_tree_is_expanded(tr, 1));
+
+	/* click a leaf row (row 2 = main.c, key 4) to select + focus it, then
+	 * Enter activates it (the stub clock defeats double-click detection) */
+	int ly = ry + 1 + 2 * rowh + rowh / 2;
+	bd_event l1 = mouse(BD_EV_MOUSE_DOWN, rx + 40, ly);
+	bd_event l2 = mouse(BD_EV_MOUSE_UP,   rx + 40, ly);
+	bd_gui_event(&l1); bd_gui_event(&l2);
+	check("tree leaf click selects it", bd_tree_selected(tr) == 4);
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	check("tree Enter activates a leaf", tr_act_n > 0 && tr_act_key == 4);
+
+	/* Left arrow on a leaf jumps to its parent (src, key 2) */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_LEFT });
+	check("tree Left on a leaf selects the parent", bd_tree_selected(tr) == 2);
+	/* Left again collapses the expanded parent */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_LEFT });
+	check("tree Left collapses an expanded node", !bd_tree_is_expanded(tr, 2));
 	}
 	bd_gui_cleanup();
 

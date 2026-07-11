@@ -20,6 +20,7 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_explorer.h`  | icon/grid browser (Explorer / Finder style)                     |
 | `bd_widget_editor.h`    | rich-text, row-oriented editor                                  |
 | `bd_widget_table.h`     | sortable multi-column table                                     |
+| `bd_widget_tree.h`      | indented expand/collapse hierarchy list                         |
 | `bd_widget_inventory.h` | fixed grid of icon cells (game inventory)                       |
 | `bd_widget_sketch.h`    | pressure-sensitive sketch pad                                    |
 | `bd_widget_indicator.h` | panel-mount LED indicator lamp                                  |
@@ -280,6 +281,26 @@ bd_id bd_table_create(bd_id parent, const bd_table_column *cols, int ncols, cons
 void  bd_table_refresh(bd_id);
 int   bd_table_selection(bd_id, int *rows, int max);   void bd_table_select(bd_id, int row, int add);
 int   bd_table_current(bd_id);                         /* cursor row */
+```
+
+### Tree (`bd_widget_tree.h`)
+
+An indented expand/collapse outline over a model that yields children on
+demand (a file/project tree, a class hierarchy). Node identity is an app-chosen
+`uint64_t` key (0 = the invisible root: `child_count(ctx, 0)` returns the top
+level). The widget owns scrolling, selection, keyboard nav (up/down, left/right
+collapse-expand, type-ahead), and the expand state (seed it with
+`bd_tree_set_expanded`); an optional `expand` callback lets the app lazily fill
+children the first time a node opens.
+
+```c
+/* model: child_count(ctx, parent) + child(ctx, parent, i) -> key + get(ctx, node, *item) */
+/* item: label, icon, has_children, enabled, user   cb: select / activate / expand */
+bd_id    bd_tree_create(bd_id parent, const bd_tree_model *, const bd_tree_cb *, ...);
+void     bd_tree_refresh(bd_id);
+uint64_t bd_tree_selected(bd_id);        void bd_tree_set_selected(bd_id, uint64_t node);
+void     bd_tree_set_expanded(bd_id, uint64_t node, int open);   int bd_tree_is_expanded(bd_id, uint64_t);
+void     bd_tree_set_indent(bd_id, int px);
 ```
 
 ### Inventory (`bd_widget_inventory.h`)

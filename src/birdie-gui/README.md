@@ -462,7 +462,7 @@ cc -I. -Ibackend-gles -Ithirdparty/stb -Ithirdparty/khronos -Ibd_vt \
    backend-gles/bd_backend_gles.c bd_backend_gles_core.c bd_gl.c \
    widget.c bd_draw.c bd_asset.c bd_utf8.c bd_color.c \
    bd_widget_value.c bd_widget_explorer.c bd_widget_editor.c \
-   bd_widget_sketch.c bd_widget_table.c bd_widget_inventory.c \
+   bd_widget_sketch.c bd_widget_table.c bd_widget_tree.c bd_widget_inventory.c \
    bd_widget_dock.c bd_widget_actionbar.c bd_widget_tabview.c \
    bd_widget_indicator.c bd_vt/*.c \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o assets/gallery

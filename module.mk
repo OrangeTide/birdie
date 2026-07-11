@@ -175,6 +175,7 @@ DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
                 bd_asset.h bd_utf8.h bd_color.h bd_backend_gles_core.h bd_gl.h \
                 bd_widget_value.h bd_widget_explorer.h \
                 bd_widget_editor.h bd_widget_sketch.h bd_widget_table.h \
+                bd_widget_tree.h \
                 bd_widget_inventory.h bd_widget_dock.h bd_widget_actionbar.h \
                 bd_widget_tabview.h bd_widget_indicator.h \
                 bd_widget_meter.h bd_widget_progress.h
@@ -185,7 +186,7 @@ DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
 DIST_SOURCES := widget.c bd_draw.c bd_embed_font.h bd_asset.c bd_utf8.c bd_color.c \
                 bd_widget_value.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_sketch.c \
-                bd_widget_table.c bd_widget_inventory.c bd_widget_dock.c \
+                bd_widget_table.c bd_widget_tree.c bd_widget_inventory.c bd_widget_dock.c \
                 bd_widget_actionbar.c bd_widget_tabview.c \
                 bd_widget_indicator.c bd_widget_meter.c bd_widget_progress.c \
                 bd_embed_pushpin.h \

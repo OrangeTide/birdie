@@ -189,6 +189,11 @@ What is built:
 - **Explorer widget** (extension) — model-driven icon grid with selection
   (single / Ctrl / Shift-range / rubber-band), drag-move, double-click
   activate, right-click context, keyboard nav, in-place rename, scissor clip.
+- **Tree widget** (extension) — `bd_widget_tree`, an indented expand/collapse
+  hierarchy list over a lazy child model (file/project tree, class hierarchy).
+  Owns scrolling, selection, keyboard (up/down, left/right collapse-expand,
+  type-ahead) and the twisty toggles; nodes keyed by an app `uint64_t`. First
+  of the Smalltalk-IDE primitives from `doc/gui/smalltalk-ide.md`.
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`.
 - **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`

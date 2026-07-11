@@ -43,6 +43,7 @@ birdie_gui_SRCS = \
 	bd_widget_dock.c \
 	bd_widget_actionbar.c \
 	bd_widget_tabview.c \
+	bd_widget_tree.c \
 	bd_widget_indicator.c \
 	bd_widget_meter.c \
 	bd_widget_progress.c

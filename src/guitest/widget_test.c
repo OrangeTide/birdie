@@ -27,6 +27,7 @@
 #include "bd_widget_dock.h"
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
+#include "bd_widget_tree.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
 #include "window.h"
@@ -226,6 +227,36 @@ gtbl_activate(bd_id w, int row, void *c)
 	report(b);
 }
 
+/* ---- a small tree model (Session sidebar: worlds grouped by category) ---- */
+static const struct wnode {
+	uint64_t key; const char *label; uint64_t parent; int folder;
+} wnodes[] = {
+	{ 1, "Favorites", 0, 1 }, { 2, "Fantasy", 0, 1 }, { 3, "Sci-Fi", 0, 1 },
+	{ 10, "Aardwolf", 1, 0 }, { 11, "BatMUD", 1, 0 },
+	{ 20, "Discworld", 2, 0 }, { 21, "Threshold", 2, 0 }, { 22, "Lensmoor", 2, 0 },
+	{ 30, "Genesis", 3, 0 }, { 31, "Federation", 3, 0 },
+};
+#define WNODE_N ((int)(sizeof wnodes / sizeof wnodes[0]))
+static int
+w_child_count(void *c, uint64_t p)
+{ (void)c; int n = 0; for (int i = 0; i < WNODE_N; i++) if (wnodes[i].parent == p) n++; return n; }
+static uint64_t
+w_child(void *c, uint64_t p, int idx)
+{ (void)c; int k = 0; for (int i = 0; i < WNODE_N; i++) if (wnodes[i].parent == p && k++ == idx) return wnodes[i].key; return 0; }
+static void
+w_get(void *c, uint64_t key, bd_tree_item *out)
+{ (void)c; for (int i = 0; i < WNODE_N; i++) if (wnodes[i].key == key) {
+	out->label = wnodes[i].label; out->has_children = wnodes[i].folder;
+	out->enabled = 1; out->user = (void *)&wnodes[i]; return; } }
+static void
+w_activate(bd_id w, uint64_t key, void *user)
+{
+	(void)w; (void)key;
+	static char b[64];
+	snprintf(b, sizeof b, "connect %s", ((const struct wnode *)user)->label);
+	report(b);
+}
+
 /* Open a second native window: a small dialog with its own widgets, proving
  * windows render and take input independently. */
 static int dialog_n;
@@ -416,9 +447,16 @@ build_ui(void)
 	/* -- Session: the MUD-client surface (terminal, command line, MUD list) -- */
 	bd_id session = bd_tabview_add_pane(tabs, "Session");
 	bd_set(session, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
-	/* terminal with a standalone scrollbar beside it */
+	/* a worlds tree (BD_TREE) sidebar, then the terminal + its scrollbar */
 	bd_id termrow = bd_create(session, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1, BD_GAP_I, 2, BD_END);
+		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_GROW_I, 1, BD_GAP_I, 6, BD_END);
+	bd_id wtree = bd_tree_create(termrow,
+		&(bd_tree_model){ .child_count = w_child_count, .child = w_child,
+			.get = w_get },
+		&(bd_tree_cb){ .activate = w_activate },
+		BD_PREF_W_I, 170, BD_END);
+	bd_tree_set_expanded(wtree, 1, 1);   /* open "Favorites" */
+	bd_tree_set_expanded(wtree, 2, 1);   /* open "Fantasy" */
 	term = bd_terminal_create(termrow, BD_GROW_I, 1, BD_END);
 	bd_id sbar = bd_create(termrow, BD_SCROLLBAR, BD_PREF_W_I, 14, BD_END);
 	bd_scrollbar_set(sbar, 0.25f, 0.4f);
