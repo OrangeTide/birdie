@@ -13,7 +13,7 @@
 # Usage:
 #   get-birdie-gui.sh <version> [dest-dir]
 #
-#   <version>    release to fetch, e.g. 0.8.0 (matches the birdie-gui tag)
+#   <version>    release to fetch, e.g. 0.8.1 (matches the birdie-gui tag)
 #   [dest-dir]   where the toolkit is vendored (default: third_party/birdie-gui)
 #
 # Options:
