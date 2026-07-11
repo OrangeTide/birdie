@@ -44,7 +44,7 @@ those primitives and the tools are mostly composition.
 | Scrolling selectable list | `BD_LIST` | **have** |
 | Multi-column list / grid (method list with flags, senders) | `BD_TABLE` (sortable columns) | **have** |
 | Code editor with styled runs | `bd_widget_editor` (`bd_editor_style_span` / `_highlight_row`) | **have** (styling hooks exist; see gaps) |
-| Scratch/workspace pane | `BD_MULTILINE` / editor | **have** |
+| Scratch/workspace pane | `BD_TEXT_AREA` / editor | **have** |
 | Transcript / log pane | `BD_TERMINAL` (or read-only multiline) | **have** |
 | Scrollbar | `BD_SCROLLBAR` | **have** |
 | Tabbed tool container | `BD_TAB_VIEW` | **have** |

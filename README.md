@@ -28,7 +28,7 @@ so the same widget code runs on ludica, SDL3, or raw X11/EGL/GLES. The gallery
 below (`make widget-test`) exercises the full widget set on the GLES backend:
 menu + folder tabs, a libvt terminal, a data table, an inventory grid, rotary
 knobs and dials, switches and wheels, X-Y pads, sliders, and a pressure/tilt
-drawing canvas.
+sketch pad.
 
 ![The birdie-gui widget gallery on the GLES backend, showing the full widget set](doc/images/birdie-gui-gallery.png)
 

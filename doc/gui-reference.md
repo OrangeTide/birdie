@@ -14,13 +14,14 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_theme.h`            | `bd_theme` colors/metrics; `bd_theme_default()`                  |
 | `bd_draw.h`             | the immediate renderer widgets are drawn with (rects, text, sprites) |
 | `bd_asset.h`            | register fonts/images as in-binary blobs instead of files        |
+| `bd_color.h`            | parse color names / `#hex` into RGBA8 (widget color lists)       |
 | `bd_widget_value.h`     | slider, knob, toggle, wheel, jog, X-Y pad                        |
 | `bd_widget_vt.h`        | `BD_TERMINAL` (libvt-backed terminal)                            |
 | `bd_widget_explorer.h`  | icon/grid browser (Explorer / Finder style)                     |
 | `bd_widget_editor.h`    | rich-text, row-oriented editor                                  |
 | `bd_widget_table.h`     | sortable multi-column table                                     |
 | `bd_widget_inventory.h` | fixed grid of icon cells (game inventory)                       |
-| `bd_widget_canvas.h`    | pressure-sensitive drawing canvas                               |
+| `bd_widget_sketch.h`    | pressure-sensitive sketch pad                                    |
 | `bd_widget_indicator.h` | panel-mount LED indicator lamp                                  |
 | `bd_widget_meter.h`     | 0..1 meters (bar / VU / magic eye / pie / liquid vial)          |
 | `bd_widget_progress.h`  | determinate / indeterminate progress bar                        |
@@ -145,8 +146,8 @@ Core widgets (`widget.h`) are created with `bd_create(parent, TYPE, ...)`.
 | `BD_PANEL`      | layout container (optionally a bg)     | —                                |
 | `BD_LABEL`      | read-only text                         | `BD_LABEL_S`                     |
 | `BD_BUTTON`     | clickable action; also a menu item     | `BD_ON_CLICK_F/_P`              |
-| `BD_TEXT`       | single-line text input                 | `BD_LABEL_S`, `BD_PASSWORD_B`   |
-| `BD_MULTILINE`  | multi-line text input                  | `BD_LABEL_S`                     |
+| `BD_TEXT_FIELD`       | single-line text input                 | `BD_LABEL_S`, `BD_PASSWORD_B`   |
+| `BD_TEXT_AREA`  | multi-line text input                  | `BD_LABEL_S`                     |
 | `BD_LIST`       | scrolling single-select list           | `bd_list_*`                     |
 | `BD_SCROLLBAR`  | standalone scrollbar                   | `bd_scrollbar_*`                |
 | `BD_MENU`       | menu-bar entry / popup (pinnable)      | children are `BD_BUTTON` items; `BD_MENU_PIN_B` |
@@ -293,15 +294,15 @@ int   bd_inventory_cols(bd_id);   int bd_inventory_rows(bd_id);
 int   bd_inventory_selected(bd_id);   int bd_inventory_selection(bd_id, int *slots, int max);   void bd_inventory_select(bd_id, int slot, int add);
 ```
 
-### Canvas (`bd_widget_canvas.h`)
+### Sketch pad (`bd_widget_sketch.h`)
 
 Pressure-sensitive freehand drawing.
 
 ```c
-bd_id bd_canvas_create(bd_id parent, ...);
-void  bd_canvas_set_ink(bd_id, uint32_t rgba);   void bd_canvas_set_alt_ink(bd_id, uint32_t rgba);
-void  bd_canvas_set_nib(bd_id, float px);        void bd_canvas_clear(bd_id);
-int   bd_canvas_stroke_count(bd_id);
+bd_id bd_sketch_create(bd_id parent, ...);
+void  bd_sketch_set_ink(bd_id, uint32_t rgba);   void bd_sketch_set_alt_ink(bd_id, uint32_t rgba);
+void  bd_sketch_set_nib(bd_id, float px);        void bd_sketch_clear(bd_id);
+int   bd_sketch_stroke_count(bd_id);
 ```
 
 ### Meters (`bd_widget_meter.h`)
@@ -324,7 +325,8 @@ void  bd_meter_reset_peak(bd_id);
 ### Progress bar (`bd_widget_progress.h`)
 
 The simple sibling of `BD_METER_BAR`: a determinate fill, an optional `NN%`
-readout, or an indeterminate marquee. (A round "ball" progress is `BD_METER_VIAL`.)
+readout, or an indeterminate marquee. (A round "ball" progress is
+`BD_METER_VIAL`.)
 
 ```c
 bd_id bd_progress_create(bd_id parent, const bd_progress_desc *desc, ...);

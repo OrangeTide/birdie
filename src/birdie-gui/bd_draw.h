@@ -75,6 +75,19 @@ void bd_draw_flush(void);
 int bd_draw_win_w(void);
 int bd_draw_win_h(void);
 
+/* A shared screen-space vertex shader for widgets that draw a full-quad
+ * fragment effect (shaded knob, LED lens, meter eye/vial, glass tube). It maps
+ * pixel a_pos through `u_res` to clip space and forwards a_uv (0..1) as v_uv.
+ * Pair it with your fragment shader in bd_backend->make_shader; the fragment
+ * reads `in vec2 v_uv` and may read `uniform vec2 u_res`. */
+extern const char *const BD_SHADER_QUAD_VERT;
+
+/* Flush pending chrome, bind `shader`, set its `u_res` to the window size, and
+ * draw a 6-vertex quad covering pixel rect (x,y,w,h) with uv 0..1 and white
+ * vertex color. Set your other uniforms on `shader` (each self-binds) before
+ * calling. Use with BD_SHADER_QUAD_VERT. */
+void bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h);
+
 /* Solid fill / one-pixel outline. */
 void bd_draw_rect(float x, float y, float w, float h, uint32_t rgba);
 void bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba);

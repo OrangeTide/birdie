@@ -7,7 +7,7 @@
 /*
  * Rich-text editor widget, built on the extension API (widget_ext.h). A
  * higher-level, row-oriented text editor with the same multi-line editing
- * model as BD_MULTILINE plus a rich-text styling layer, suitable for a small
+ * model as BD_TEXT_AREA plus a rich-text styling layer, suitable for a small
  * code or music (ABC notation) editor.
  *
  * Text is plain UTF-8; styling is carried separately as a list of style runs

@@ -75,7 +75,7 @@ struct widget {
 	int sel_anchor;
 	int password;           /* text field: render masked */
 	float scroll_x;
-	float scroll_y;         /* BD_MULTILINE vertical scroll */
+	float scroll_y;         /* BD_TEXT_AREA vertical scroll */
 
 	int win_id;             /* backend window id for a top-level frame; 0 = none */
 	int gravity;            /* enum bd_gravity: floating frame edge/corner dock */
@@ -198,12 +198,12 @@ static bd_id preedit_owner = BD_NONE;
 static int   ime_enabled;
 
 /* Single-line editable text widgets share the same edit/render/focus paths.
- * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT is
+ * BD_INPUT_LINE is the MUD command line (Enter submits and clears); BD_TEXT_FIELD is
  * a plain form field (Enter commits but keeps the text). */
 static int
 is_text_field(int type)
 {
-	return type == BD_INPUT_LINE || type == BD_TEXT || type == BD_MULTILINE;
+	return type == BD_INPUT_LINE || type == BD_TEXT_FIELD || type == BD_TEXT_AREA;
 }
 
 /* ------------------------------------------------------------------ */
@@ -463,7 +463,7 @@ input_text_px(const char *buf, int end)
 }
 
 /* ------------------------------------------------------------------ */
-/* multi-line text helpers (BD_MULTILINE)                             */
+/* multi-line text helpers (BD_TEXT_AREA)                             */
 /* ------------------------------------------------------------------ */
 
 static int
@@ -823,7 +823,7 @@ defaults(struct widget *w, int type)
 	case BD_MENU:
 		w->pref_h = (int)CHROME_FONT_SZ + 4;
 		break;
-	case BD_TEXT:
+	case BD_TEXT_FIELD:
 	case BD_INPUT_LINE:
 		w->bg = theme.press;
 		w->fg = theme.text_hi;
@@ -831,7 +831,7 @@ defaults(struct widget *w, int type)
 		w->pad = 4;
 		w->sel_anchor = -1;
 		break;
-	case BD_MULTILINE:
+	case BD_TEXT_AREA:
 		w->bg = theme.press;
 		w->fg = theme.text_hi;
 		w->pref_h = (int)CHROME_FONT_SZ * 6 + 8;   /* ~6 lines */
@@ -1611,7 +1611,7 @@ render_widget(bd_id id)
 		break;
 	}
 
-	case BD_TEXT:
+	case BD_TEXT_FIELD:
 	case BD_INPUT_LINE: {
 		int focused = (focus_id == id);
 		uint32_t border = focused ? theme.focus : theme.border;
@@ -1679,7 +1679,7 @@ render_widget(bd_id id)
 		break;
 	}
 
-	case BD_MULTILINE: {
+	case BD_TEXT_AREA: {
 		int focused = (focus_id == id);
 		uint32_t border = focused ? theme.focus : theme.border;
 		fill_rect(w->x, w->y, w->w, w->h, w->bg);
@@ -2505,7 +2505,7 @@ input_key(bd_id id, int key, unsigned mods)
 		if (ctrl) {
 			if (be->clipboard_get)
 				input_insert_text(w, be->clipboard_get(),
-				    w->type != BD_MULTILINE);
+				    w->type != BD_TEXT_AREA);
 			return 1;
 		}
 		return 0;
@@ -2524,7 +2524,7 @@ input_key(bd_id id, int key, unsigned mods)
 }
 
 /*
- * Key handling for BD_MULTILINE. Home/End are line-relative, Up/Down move
+ * Key handling for BD_TEXT_AREA. Home/End are line-relative, Up/Down move
  * across lines preserving the caret's x, and Enter inserts a newline; every
  * other key (Left/Right/Backspace/Delete/Ctrl-A/Escape) reuses input_key,
  * which edits the shared buffer and treats '\n' as an ordinary byte.
@@ -3163,7 +3163,7 @@ caret_rect(bd_id id, int *cx, int *cy, int *cw, int *ch)
 {
 	struct widget *w = &pool[id];
 	int pad = w->pad;
-	if (w->type == BD_MULTILINE) {
+	if (w->type == BD_TEXT_AREA) {
 		int ls = ml_line_start(w->text_buf, w->cursor);
 		int line = ml_line_index(w->text_buf, w->cursor);
 		float px = ml_span_px(w->text_buf, ls, w->cursor);
@@ -3173,7 +3173,7 @@ caret_rect(bd_id id, int *cx, int *cy, int *cw, int *ch)
 		*ch = ml_line_h();
 		return 1;
 	}
-	if (w->type == BD_INPUT_LINE || w->type == BD_TEXT) {
+	if (w->type == BD_INPUT_LINE || w->type == BD_TEXT_FIELD) {
 		float px = input_text_px(w->text_buf, w->cursor);
 		*cx = w->x + pad + (int)(px - w->scroll_x);
 		*cy = w->y;
@@ -4086,7 +4086,7 @@ bd_gui_event(const bd_event *ev)
 				preedit_len = 0;
 				preedit_owner = BD_NONE;
 				input_insert_text(&pool[focus_id], ev->text,
-				    pool[focus_id].type != BD_MULTILINE);
+				    pool[focus_id].type != BD_TEXT_AREA);
 			}
 			return 1;
 		}
@@ -4121,7 +4121,7 @@ bd_gui_event(const bd_event *ev)
 			return 1;
 		}
 		if (ev->type == BD_EV_KEY_DOWN)
-			return pool[focus_id].type == BD_MULTILINE
+			return pool[focus_id].type == BD_TEXT_AREA
 			    ? multiline_key(focus_id, ev->key, ev->mods)
 			    : input_key(focus_id, ev->key, ev->mods);
 	}
@@ -4220,7 +4220,7 @@ bd_gui_event(const bd_event *ev)
 			if (hit != BD_NONE &&
 			    is_text_field(pool[hit].type)) {
 				focus_id = hit;
-				if (pool[hit].type == BD_MULTILINE)
+				if (pool[hit].type == BD_TEXT_AREA)
 					multiline_click(hit, mx, my);
 				else
 					input_click(hit, mx);

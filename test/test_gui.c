@@ -14,7 +14,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
-#include "bd_widget_canvas.h"
+#include "bd_widget_sketch.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
 #include "bd_widget_dock.h"
@@ -1211,10 +1211,10 @@ main(void)
 	check("Space activates the focused button", clicked == before + 2);
 	bd_gui_cleanup();
 
-	/* ---- BD_TEXT single-line field ---- */
+	/* ---- BD_TEXT_FIELD single-line field ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id txf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
-	bd_id tedit = bd_create(txf, BD_TEXT, BD_PREF_H_I, 24,
+	bd_id tedit = bd_create(txf, BD_TEXT_FIELD, BD_PREF_H_I, 24,
 	    BD_ON_CLICK_F, on_text_commit, BD_END);
 	bd_gui_layout(800, 600);
 
@@ -1222,25 +1222,25 @@ main(void)
 	bd_widget_rect(tedit, &txx, &txy, &txw, &txh);
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=txx+5, .y=txy+5 });
-	check("clicking a BD_TEXT focuses it", bd_focused() == tedit);
+	check("clicking a BD_TEXT_FIELD focuses it", bd_focused() == tedit);
 
 	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='h' });
 	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='i' });
-	check("typing into BD_TEXT updates its text",
+	check("typing into BD_TEXT_FIELD updates its text",
 	    strcmp(bd_get_s(tedit, BD_LABEL_S), "hi") == 0);
 
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
-	check("Enter commits BD_TEXT (fires callback, keeps text)",
+	check("Enter commits BD_TEXT_FIELD (fires callback, keeps text)",
 	    text_committed == 1 && strcmp(bd_get_s(tedit, BD_LABEL_S), "hi") == 0);
 
 	bd_set(tedit, BD_LABEL_S, "xyz", BD_END);
-	check("bd_set BD_LABEL_S replaces BD_TEXT contents",
+	check("bd_set BD_LABEL_S replaces BD_TEXT_FIELD contents",
 	    strcmp(bd_get_s(tedit, BD_LABEL_S), "xyz") == 0);
 
 	bd_event tabx = { .type=BD_EV_KEY_DOWN, .key=BD_KEY_TAB };
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=0, .y=0 });
 	bd_gui_event(&tabx);
-	check("Tab reaches the BD_TEXT field", bd_focused() == tedit);
+	check("Tab reaches the BD_TEXT_FIELD field", bd_focused() == tedit);
 
 	/* password mode: masks on screen but keeps the real buffer editable */
 	bd_set(tedit, BD_PASSWORD_B, 1, BD_END);
@@ -1255,17 +1255,17 @@ main(void)
 	bd_gui_render();   /* exercise the masked render path (must not crash) */
 	bd_gui_cleanup();
 
-	/* ---- BD_MULTILINE multi-line editor ---- */
+	/* ---- BD_TEXT_AREA multi-line editor ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id mlf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
-	bd_id ml = bd_create(mlf, BD_MULTILINE, BD_GROW_I, 1, BD_END);
+	bd_id ml = bd_create(mlf, BD_TEXT_AREA, BD_GROW_I, 1, BD_END);
 	bd_gui_layout(800, 600);
 
 	int mlx, mly, mlw, mlh;
 	bd_widget_rect(ml, &mlx, &mly, &mlw, &mlh);
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mlx+5, .y=mly+5 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mlx+5, .y=mly+5 });
-	check("clicking BD_MULTILINE focuses it", bd_focused() == ml);
+	check("clicking BD_TEXT_AREA focuses it", bd_focused() == ml);
 
 	/* type "ab", Enter, "cd" -> two lines */
 	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='a' });
@@ -1539,7 +1539,7 @@ main(void)
 	/* ---- clipboard: copy / paste / cut in a text field ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id cbf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
-	bd_id ctf = bd_create(cbf, BD_TEXT, BD_PREF_H_I, 24, BD_END);
+	bd_id ctf = bd_create(cbf, BD_TEXT_FIELD, BD_PREF_H_I, 24, BD_END);
 	bd_gui_layout(800, 600);
 	int cbx, cby, cbw, cbh;
 	bd_widget_rect(ctf, &cbx, &cby, &cbw, &cbh);
@@ -1568,14 +1568,14 @@ main(void)
 
 	/* paste keeps newlines in a multi-line field */
 	be_clip_set("a\nb");
-	bd_id cml = bd_create(cbf, BD_MULTILINE, BD_GROW_I, 1, BD_END);
+	bd_id cml = bd_create(cbf, BD_TEXT_AREA, BD_GROW_I, 1, BD_END);
 	bd_gui_layout(800, 600);
 	int mlx2, mly2, mlw2, mlh2;
 	bd_widget_rect(cml, &mlx2, &mly2, &mlw2, &mlh2);
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=mlx2+3, .y=mly2+3 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=mlx2+3, .y=mly2+3 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='V', .mods=BD_MOD_CTRL });
-	check("paste preserves newlines in BD_MULTILINE",
+	check("paste preserves newlines in BD_TEXT_AREA",
 	    strcmp(bd_get_s(cml, BD_LABEL_S), "a\nb") == 0);
 	bd_gui_cleanup();
 
@@ -1602,7 +1602,7 @@ main(void)
 	/* ---- IME: commit / preedit / enable-on-focus ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id imf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
-	bd_id itx = bd_create(imf, BD_TEXT, BD_PREF_H_I, 24, BD_END);
+	bd_id itx = bd_create(imf, BD_TEXT_FIELD, BD_PREF_H_I, 24, BD_END);
 	bd_gui_layout(800, 600);
 	int imx, imy, imw, imh;
 	bd_widget_rect(itx, &imx, &imy, &imw, &imh);
@@ -1662,7 +1662,7 @@ main(void)
 	/* ---- pen / drawing canvas: pressure strokes + eraser ---- */
 	bd_gui_init(&stub, NULL);
 	bd_id pf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
-	bd_id cv = bd_canvas_create(pf, BD_GROW_I, 1, BD_END);
+	bd_id cv = bd_sketch_create(pf, BD_GROW_I, 1, BD_END);
 	bd_gui_layout(800, 600);
 	int cvx, cvy, cvw, cvh;
 	bd_widget_rect(cv, &cvx, &cvy, &cvw, &cvh);
@@ -1671,7 +1671,7 @@ main(void)
 	/* hovering in proximity must not lay down ink */
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_HOVER, .x=pcx, .y=pcy,
 	    .pen_flags=BD_PEN_INRANGE });
-	check("pen hover draws no stroke", bd_canvas_stroke_count(cv) == 0);
+	check("pen hover draws no stroke", bd_sketch_stroke_count(cv) == 0);
 
 	/* a tip-down / move / up makes one stroke; the move past the widget edge
 	 * still lands because contact captures the canvas */
@@ -1683,24 +1683,24 @@ main(void)
 	    .pressure=0.5f, .pen_flags=BD_PEN_INRANGE });
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=cvx+cvw+50, .y=pcy,
 	    .pen_flags=BD_PEN_INRANGE });
-	check("pen stroke committed on tip up", bd_canvas_stroke_count(cv) == 1);
+	check("pen stroke committed on tip up", bd_sketch_stroke_count(cv) == 1);
 
 	/* a second stroke */
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=pcx-30, .y=pcy-30,
 	    .pressure=1.0f, .pen_flags=BD_PEN_INRANGE });
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=pcx-30, .y=pcy-30,
 	    .pen_flags=BD_PEN_INRANGE });
-	check("second pen stroke committed", bd_canvas_stroke_count(cv) == 2);
+	check("second pen stroke committed", bd_sketch_stroke_count(cv) == 2);
 
 	/* the eraser end removes a stroke it passes over (no new stroke added) */
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=pcx, .y=pcy,
 	    .pressure=1.0f, .pen_flags=BD_PEN_INRANGE|BD_PEN_ERASER });
 	bd_gui_event(&(bd_event){ .type=BD_EV_PEN_UP, .x=pcx, .y=pcy,
 	    .pen_flags=BD_PEN_INRANGE|BD_PEN_ERASER });
-	check("eraser removes the stroke under it", bd_canvas_stroke_count(cv) == 1);
+	check("eraser removes the stroke under it", bd_sketch_stroke_count(cv) == 1);
 
-	bd_canvas_clear(cv);
-	check("canvas clear empties strokes", bd_canvas_stroke_count(cv) == 0);
+	bd_sketch_clear(cv);
+	check("sketch clear empties strokes", bd_sketch_stroke_count(cv) == 0);
 	bd_gui_cleanup();
 
 	/* ---- multi-column table ---- */

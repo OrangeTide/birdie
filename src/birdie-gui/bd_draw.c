@@ -531,6 +531,36 @@ bd_draw_flush(void)
 int bd_draw_win_w(void) { return (int)win_w; }
 int bd_draw_win_h(void) { return (int)win_h; }
 
+const char *const BD_SHADER_QUAD_VERT =
+	"#version 300 es\n"
+	"layout(location=0) in vec2 a_pos;\n"
+	"layout(location=1) in vec2 a_uv;\n"
+	"uniform vec2 u_res;\n"
+	"out vec2 v_uv;\n"
+	"void main(){\n"
+	"    vec2 p = a_pos / u_res * 2.0 - 1.0;\n"
+	"    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);\n"
+	"    v_uv = a_uv;\n"
+	"}\n";
+
+void
+bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h)
+{
+	float fx = (float)x, fy = (float)y, fw = (float)w, fh = (float)h;
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fh, 0, 1, 1, 1, 1, 1 },
+	};
+	flush();   /* land batched chrome beneath the effect */
+	be->use_shader(shader);
+	be->set_uniform_vec2(shader, "u_res", (float)win_w, (float)win_h);
+	be->draw_verts(q, 6);
+}
+
 void
 bd_draw_rect(float x, float y, float w, float h, uint32_t rgba)
 {

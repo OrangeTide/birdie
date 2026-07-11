@@ -163,8 +163,8 @@ What is built:
 - **Renderer** — `bd_draw.c` builds rects, textured sprites, and stb_truetype
   text on the GPU interface; widgets can also drop to a custom fragment shader.
 - **Chrome widgets** — `BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`,
-  `BD_MENU` (+ pinnable pushpins), `BD_TEXT` (single-line field),
-  `BD_MULTILINE` (multi-line editor), `BD_LIST` (scrolling/selectable list),
+  `BD_MENU` (+ pinnable pushpins), `BD_TEXT_FIELD` (single-line field),
+  `BD_TEXT_AREA` (multi-line editor), `BD_LIST` (scrolling/selectable list),
   `BD_TAB_BAR` (skeuomorphic folder tabs), `BD_SCROLLBAR`, `BD_NOTICE` (modal
   alert/confirm), `BD_INPUT_LINE`, and the `BD_TERMINAL` extension (libvt).
   Flexbox row/col + fixed layout. The v1.0 core widget set is complete.
@@ -197,7 +197,7 @@ What is built:
 - **Multitouch** — `BD_EV_TOUCH_DOWN/MOVE/UP` with per-pointer ids + per-finger
   capture (several knobs at once); X11 XInput2 on the GLES backend.
 - **Pen / tablet** — `BD_EV_PEN_HOVER/DOWN/MOVE/UP` with pressure/tilt/flags +
-  a `bd_widget_canvas` drawing surface; X11 XInput2 valuators on the GLES
+  a `bd_widget_sketch` drawing surface; X11 XInput2 valuators on the GLES
   backend.
 - **Window focus** — `BD_EV_FOCUS_IN`/`BD_EV_FOCUS_OUT` (X11 `FocusIn`/`FocusOut`
   on the GLES backend, `LUD_EV_FOCUS`/`UNFOCUS` on ludica, SDL window
@@ -237,8 +237,8 @@ are extensions (`widget_ext.h`) and so are not in this core set.
 | `BD_PANEL`       | layout container                                    | yes  |
 | `BD_LABEL`       | read-only text                                      | yes  |
 | `BD_BUTTON`      | clickable action                                    | yes  |
-| `BD_TEXT`        | single-line text input                              | yes  |
-| `BD_MULTILINE`   | multi-line text input (prefs notes, script edit)    | yes  |
+| `BD_TEXT_FIELD`        | single-line text input                              | yes  |
+| `BD_TEXT_AREA`   | multi-line text input (prefs notes, script edit)    | yes  |
 | `BD_LIST`        | scrolling list (MUD list, log sink list)            | yes  |
 | `BD_SCROLLBAR`   | standalone scrollbar (paired with terminal pane)    | yes  |
 | `BD_MENU`        | menu bar / popup menu (with `BD_MENU_ITEM`); pinnable | yes |
@@ -773,7 +773,7 @@ MUD-list format, prefs for a DAW), keyed by the stable key.
 **Scope.** First cut: icon grid, single/multi-select (rubber-band +
 Ctrl/Shift), drag-move, double-click activate, right-click context,
 enabled/disabled, wheel scroll, refresh. Later: list/details view modes,
-in-place rename (needs the real `BD_TEXT` widget), type-to-find, drag-drop
+in-place rename (needs the real `BD_TEXT_FIELD` widget), type-to-find, drag-drop
 between explorers, a `BD_SCROLLBAR`, per-icon accessibility roles. Sensible
 build order is mouse-only core first, then rename, keyboard nav, and a richer
 context menu as those dependencies (text widget, focus traversal,
@@ -786,7 +786,7 @@ The four seams (identical across X11 (XIM/IBus), Win32 (IMM/TSF), macOS
 
 - **Commit as a UTF-8 string.** `BD_EV_TEXT_COMMIT` carries `bd_event.text`
   (valid for the dispatch only). The text widgets insert it (replacing the
-  selection; newlines kept in `BD_MULTILINE`); the editor handles it too. This
+  selection; newlines kept in `BD_TEXT_AREA`); the editor handles it too. This
   is what makes multi-codepoint commits, dead keys, and compose work. `BD_CHAR`
   stays for the simple single-codepoint path (ludica still uses it).
 - **Preedit event.** `BD_EV_TEXT_PREEDIT` carries the in-progress string plus
@@ -813,24 +813,24 @@ NULL and keeps the `BD_EV_CHAR` path. Still to do: an over-the-spot X11 preedit
 
 ### Real text and multiline widgets
 
-Both **done**. `BD_TEXT` (single-line field) shares `BD_INPUT_LINE`'s editor
+Both **done**. `BD_TEXT_FIELD` (single-line field) shares `BD_INPUT_LINE`'s editor
 (`is_text_field()` covers all three) and differs only in that Enter commits
-without clearing. `BD_MULTILINE` (prefs notes, script editing) holds `\n`-
+without clearing. `BD_TEXT_AREA` (prefs notes, script editing) holds `\n`-
 separated text in the same buffer: it reuses `input_key` for
 Left/Right/Backspace/Delete and the char path, adds line-relative Home/End,
 Up/Down (preserving caret x), Enter-inserts-newline, vertical scroll, and
 scissor-clipped multi-line rendering; click positions the caret by line/column.
 Initial text via `BD_LABEL_S`, read back with `bd_get_s(id, BD_LABEL_S)`, set
 with `bd_set`. Both will pick up the IME preedit/commit path above when it
-lands; cross-line selection in `BD_MULTILINE` is still to do, and it is the
+lands; cross-line selection in `BD_TEXT_AREA` is still to do, and it is the
 base the rich-text editor widget composes over.
 
 ### Editor widget (rich-text, row-oriented) — implemented
 
 `src/birdie-gui/bd_widget_editor.{c,h}`. A higher-level text editor with the same
-multi-line editing model as `BD_MULTILINE` plus a rich-text styling layer. An
+multi-line editing model as `BD_TEXT_AREA` plus a rich-text styling layer. An
 extension (`widget_ext`), not a core widget. (It reimplements the editing
-model rather than embedding a `BD_MULTILINE`, since the multiline renders one
+model rather than embedding a `BD_TEXT_AREA`, since the multiline renders one
 color and rich text needs per-run drawing.)
 
 Driving use case (smoltrek): a window to edit a small text-based music file
@@ -899,14 +899,14 @@ Tab-inserts-a-tab (Tab currently traverses focus).
 Copy / cut / paste via two optional backend hooks, `clipboard_set(utf8)` and
 `clipboard_get()`. The text fields handle Ctrl-C / Ctrl-X (copy/cut the
 selection) and Ctrl-V (paste, replacing the selection; newlines kept in
-`BD_MULTILINE`, stripped in single-line fields); the editor widget pastes too.
+`BD_TEXT_AREA`, stripped in single-line fields); the editor widget pastes too.
 The raw GLES backend implements it on the X11 CLIPBOARD selection (owns the
 selection and serves `SelectionRequest`; reads via `XConvertSelection`),
 verified interoperating with `xclip` both directions. The ludica backend
 leaves the hooks NULL for now, so birdie itself has no clipboard until ludica
 exposes one (see `todo.txt`); the hooks being NULL is a safe no-op. Per-window
 copy/cut still needs a selection, so it is single-line-field-only until
-`BD_MULTILINE`/editor selection lands.
+`BD_TEXT_AREA`/editor selection lands.
 
 ### Focus traversal, key-up, and repeat
 
@@ -938,7 +938,7 @@ interleaved down/move/up); not live-tested for want of a touchscreen. ludica
 exposes no touch, so birdie has none there. Win32 pointer input / Wayland touch
 / macOS are future.
 
-### Pen tablet input and a drawing canvas — implemented
+### Pen tablet input and a sketch pad — implemented
 
 `bd_event` carries pen fields: `pressure` (0..1), `tilt_x` / `tilt_y`
 (degrees), and `pen_flags` (`BD_PEN_INRANGE` / `BD_PEN_BARREL` /
@@ -949,7 +949,7 @@ under the cursor without capturing, so a canvas can preview the nib before
 touching down. Pen events are delivered verbatim (not synthesized to mouse),
 since the consumer wants pressure and tilt.
 
-The consumer is `bd_widget_canvas` (`bd_widget_canvas.{c,h}`): a
+The consumer is `bd_widget_sketch` (`bd_widget_sketch.{c,h}`): a
 drawing-canvas `widget_ext` that turns pen data into variable-width ink
 strokes (pressure → nib width, tilt → broader nib), with the barrel button
 switching to a second ink and the eraser end rubbing out strokes it crosses.

@@ -1,4 +1,4 @@
-#include "bd_widget_canvas.h"
+#include "bd_widget_sketch.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
 #include "bd_theme.h"
@@ -8,17 +8,17 @@
 #include <math.h>
 
 /*
- * Drawing canvas extension. Strokes are polylines of sampled points, each with
+ * Sketch pad extension. Strokes are polylines of sampled points, each with
  * a half-width derived from the stylus pressure (and widened by tilt). They are
  * rendered as a run of convex quads (one per segment) with a square dab stamped
  * at every sample to cap the ends and fill the joins, so a fast sparse stroke
  * still reads as a continuous variable-width line. The eraser end removes whole
- * strokes it passes over. All ink is scissor-clipped to the canvas interior.
+ * strokes it passes over. All ink is scissor-clipped to the sketch interior.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
-static int canvas_type;
+static int sketch_type;
 
 struct cpoint { float x, y, hw; };   /* hw = nib half-width here */
 
@@ -28,7 +28,7 @@ struct stroke {
 	uint32_t       color;
 };
 
-struct canvas {
+struct sketch {
 	struct stroke *strokes;
 	int            n, cap;
 	struct stroke  cur;          /* in-progress stroke */
@@ -41,10 +41,10 @@ struct canvas {
 };
 
 static void
-canvas_init(bd_id id, void *state)
+sketch_init(bd_id id, void *state)
 {
 	(void)id;
-	struct canvas *c = state;
+	struct sketch *c = state;
 	c->ink = 0x202428ffu;        /* near-black ink */
 	c->alt_ink = 0xc02418ffu;    /* red, for the barrel button */
 	c->nib = 6.0f;
@@ -59,10 +59,10 @@ stroke_free(struct stroke *s)
 }
 
 static void
-canvas_destroy(bd_id id, void *state)
+sketch_destroy(bd_id id, void *state)
 {
 	(void)id;
-	struct canvas *c = state;
+	struct sketch *c = state;
 	for (int i = 0; i < c->n; i++)
 		stroke_free(&c->strokes[i]);
 	free(c->strokes);
@@ -86,9 +86,9 @@ stroke_push(struct stroke *s, float x, float y, float hw)
 	s->n++;
 }
 
-/* Push the finished current stroke onto the canvas. */
+/* Push the finished current stroke onto the sketch. */
 static void
-canvas_commit(struct canvas *c)
+sketch_commit(struct sketch *c)
 {
 	if (c->cur.n < 1) {
 		stroke_free(&c->cur);
@@ -112,7 +112,7 @@ canvas_commit(struct canvas *c)
  * thin line; a tilted pen broadens the nib (a real chisel nib lays down more
  * ink when leaned over). */
 static float
-nib_halfwidth(const struct canvas *c, const bd_event *ev)
+nib_halfwidth(const struct sketch *c, const bd_event *ev)
 {
 	float p = ev->pressure;
 	if (p <= 0.0f)
@@ -125,7 +125,7 @@ nib_halfwidth(const struct canvas *c, const bd_event *ev)
 
 /* Remove strokes with any point within r of (px,py) — the eraser. */
 static void
-canvas_erase_at(struct canvas *c, float px, float py, float r)
+sketch_erase_at(struct sketch *c, float px, float py, float r)
 {
 	float r2 = r * r;
 	for (int i = 0; i < c->n; ) {
@@ -145,9 +145,9 @@ canvas_erase_at(struct canvas *c, float px, float py, float r)
 }
 
 static int
-canvas_event(bd_id id, void *state, const bd_event *ev)
+sketch_event(bd_id id, void *state, const bd_event *ev)
 {
-	struct canvas *c = state;
+	struct sketch *c = state;
 	int eraser = (ev->pen_flags & BD_PEN_ERASER) != 0;
 	float hw;
 	(void)id;
@@ -166,7 +166,7 @@ canvas_event(bd_id id, void *state, const bd_event *ev)
 		c->erasing = eraser;
 		hw = nib_halfwidth(c, ev);
 		if (eraser) {
-			canvas_erase_at(c, (float)ev->x, (float)ev->y, hw + 4.0f);
+			sketch_erase_at(c, (float)ev->x, (float)ev->y, hw + 4.0f);
 			c->drawing = 1;
 			return 1;
 		}
@@ -183,7 +183,7 @@ canvas_event(bd_id id, void *state, const bd_event *ev)
 			return 1;
 		hw = nib_halfwidth(c, ev);
 		if (c->erasing) {
-			canvas_erase_at(c, (float)ev->x, (float)ev->y, hw + 4.0f);
+			sketch_erase_at(c, (float)ev->x, (float)ev->y, hw + 4.0f);
 			return 1;
 		}
 		stroke_push(&c->cur, (float)ev->x, (float)ev->y, hw);
@@ -192,7 +192,7 @@ canvas_event(bd_id id, void *state, const bd_event *ev)
 	case BD_EV_PEN_UP:
 	case BD_EV_MOUSE_UP:
 		if (c->drawing && !c->erasing)
-			canvas_commit(c);
+			sketch_commit(c);
 		c->drawing = 0;
 		c->erasing = 0;
 		return 1;
@@ -226,9 +226,9 @@ draw_stroke(const struct stroke *s)
 }
 
 static void
-canvas_render(bd_id id, void *state)
+sketch_render(bd_id id, void *state)
 {
-	struct canvas *c = state;
+	struct sketch *c = state;
 	const bd_theme *th = bd_gui_theme();
 	const bd_backend *be = bd_backend_get();
 	int x, y, w, h;
@@ -254,13 +254,13 @@ canvas_render(bd_id id, void *state)
 	be->scissor_off();
 }
 
-static const bd_widget_class canvas_class = {
-	.name = "canvas",
-	.state_size = sizeof(struct canvas),
-	.init = canvas_init,
-	.destroy = canvas_destroy,
-	.render = canvas_render,
-	.event = canvas_event,
+static const bd_widget_class sketch_class = {
+	.name = "sketch",
+	.state_size = sizeof(struct sketch),
+	.init = sketch_init,
+	.destroy = sketch_destroy,
+	.render = sketch_render,
+	.event = sketch_event,
 };
 
 /* ------------------------------------------------------------------ */
@@ -268,54 +268,54 @@ static const bd_widget_class canvas_class = {
 /* ------------------------------------------------------------------ */
 
 bd_id
-bd_canvas_create(bd_id parent, ...)
+bd_sketch_create(bd_id parent, ...)
 {
-	if (canvas_type == 0)
-		canvas_type = bd_register_widget_class(&canvas_class);
+	if (sketch_type == 0)
+		sketch_type = bd_register_widget_class(&sketch_class);
 
 	va_list ap;
 	va_start(ap, parent);
-	bd_id id = bd_create_va(parent, canvas_type, ap);
+	bd_id id = bd_create_va(parent, sketch_type, ap);
 	va_end(ap);
 	return id;
 }
 
 void
-bd_canvas_set_ink(bd_id id, uint32_t rgba)
+bd_sketch_set_ink(bd_id id, uint32_t rgba)
 {
-	if (bd_widget_type(id) != canvas_type)
+	if (bd_widget_type(id) != sketch_type)
 		return;
-	struct canvas *c = bd_widget_state(id);
+	struct sketch *c = bd_widget_state(id);
 	if (c)
 		c->ink = rgba;
 }
 
 void
-bd_canvas_set_alt_ink(bd_id id, uint32_t rgba)
+bd_sketch_set_alt_ink(bd_id id, uint32_t rgba)
 {
-	if (bd_widget_type(id) != canvas_type)
+	if (bd_widget_type(id) != sketch_type)
 		return;
-	struct canvas *c = bd_widget_state(id);
+	struct sketch *c = bd_widget_state(id);
 	if (c)
 		c->alt_ink = rgba;
 }
 
 void
-bd_canvas_set_nib(bd_id id, float px)
+bd_sketch_set_nib(bd_id id, float px)
 {
-	if (bd_widget_type(id) != canvas_type)
+	if (bd_widget_type(id) != sketch_type)
 		return;
-	struct canvas *c = bd_widget_state(id);
+	struct sketch *c = bd_widget_state(id);
 	if (c && px > 0.0f)
 		c->nib = px;
 }
 
 void
-bd_canvas_clear(bd_id id)
+bd_sketch_clear(bd_id id)
 {
-	if (bd_widget_type(id) != canvas_type)
+	if (bd_widget_type(id) != sketch_type)
 		return;
-	struct canvas *c = bd_widget_state(id);
+	struct sketch *c = bd_widget_state(id);
 	if (!c)
 		return;
 	for (int i = 0; i < c->n; i++)
@@ -326,10 +326,10 @@ bd_canvas_clear(bd_id id)
 }
 
 int
-bd_canvas_stroke_count(bd_id id)
+bd_sketch_stroke_count(bd_id id)
 {
-	if (bd_widget_type(id) != canvas_type)
+	if (bd_widget_type(id) != sketch_type)
 		return 0;
-	struct canvas *c = bd_widget_state(id);
+	struct sketch *c = bd_widget_state(id);
 	return c ? c->n : 0;
 }

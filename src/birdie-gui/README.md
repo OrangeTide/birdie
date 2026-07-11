@@ -169,8 +169,8 @@ id / value pairs. Pass `BD_NONE` as the parent for the root. Attributes cover
 geometry (`BD_PREF_W_I`, `BD_GROW_I`, `BD_PAD_I`, `BD_GAP_I`), layout
 (`BD_LAYOUT_I` with `BD_LAYOUT_ROW`/`COL`/`FIXED`), text (`BD_LABEL_S`), color
 (`BD_FG_C`, `BD_BG_C`), and callbacks (`BD_ON_CLICK_F`). Built-in types include
-`BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT`,
-`BD_MULTILINE`, `BD_LIST`, `BD_TAB_BAR`, `BD_SCROLLBAR`, `BD_NOTICE`, and
+`BD_FRAME`, `BD_PANEL`, `BD_LABEL`, `BD_BUTTON`, `BD_MENU`, `BD_TEXT_FIELD`,
+`BD_TEXT_AREA`, `BD_LIST`, `BD_TAB_BAR`, `BD_SCROLLBAR`, `BD_NOTICE`, and
 `BD_INPUT_LINE`. `BD_NOTICE` is a modal alert/confirm:
 `bd_notice_open(message, "Yes\nNo", cb, arg)` shows a centered panel over a
 dimmed backdrop and blocks the rest of the UI; the callback gets the chosen
@@ -183,11 +183,11 @@ row of skeuomorphic folder tabs (labels via `BD_LABEL_S`/`bd_tabbar_set_tabs`;
 `BD_LIST` is a
 scrolling/selectable list of `\n`-separated items (`BD_LABEL_S` or
 `bd_list_set_items`); `bd_list_selected`/`bd_list_select` read/set the row and
-`BD_ON_CLICK_F` fires on activation (double-click or Enter). `BD_TEXT` is a
+`BD_ON_CLICK_F` fires on activation (double-click or Enter). `BD_TEXT_FIELD` is a
 single-line field:
 set/read its contents with `bd_set`/`bd_get_s(id, BD_LABEL_S)`; Enter fires
 `BD_ON_CLICK_F` without clearing (`BD_INPUT_LINE` clears, for a command line).
-`BD_MULTILINE` is the multi-line editor (Enter inserts a newline; Up/Down,
+`BD_TEXT_AREA` is the multi-line editor (Enter inserts a newline; Up/Down,
 line-relative Home/End, vertical scroll, click-to-caret); same
 `BD_LABEL_S`/`bd_get_s` for its `\n`-separated text.
 
@@ -297,7 +297,7 @@ scissor-clipped to the panel. Query/poke selection with
 
 ## Editor widget (rich text)
 
-`bd_widget_editor.h` is a row-oriented text editor with the `BD_MULTILINE`
+`bd_widget_editor.h` is a row-oriented text editor with the `BD_TEXT_AREA`
 editing model plus a rich-text styling layer, for a small code or ABC-notation
 music editor. Text is plain UTF-8; styling is a separate list of style runs
 over byte ranges, so a syntax highlighter (emit runs on change) and a transient
@@ -428,7 +428,7 @@ drag at once. The GLES backend sources touches from X11 XInput2 (`-lXi`).
 `bd_event.pressure`, `tilt_x`/`tilt_y`, and a `pen_flags` bitmask
 (`BD_PEN_INRANGE`/`BD_PEN_BARREL`/`BD_PEN_ERASER`). Contact captures the
 extension widget under the tip for the whole stroke; hover tracks it without
-capturing. `bd_widget_canvas` (`bd_canvas_create`) is a drawing surface that
+capturing. `bd_widget_sketch` (`bd_sketch_create`) is a drawing surface that
 turns this into variable-width ink (pressure → width), with the barrel button
 as a second ink and the eraser end removing strokes; it falls back to mouse
 drags at full pressure. The GLES backend sources the stylus from X11 XInput2
@@ -460,9 +460,9 @@ cc -I. -Ibackend-gles -Ithirdparty/stb -Ithirdparty/khronos -Ibd_vt \
    -DBD_GL_LOADER_BUILTIN \
    backend-gles/widget_test.c backend-gles/x11_window.c \
    backend-gles/bd_backend_gles.c bd_backend_gles_core.c bd_gl.c \
-   widget.c bd_draw.c bd_asset.c bd_utf8.c \
+   widget.c bd_draw.c bd_asset.c bd_utf8.c bd_color.c \
    bd_widget_value.c bd_widget_explorer.c bd_widget_editor.c \
-   bd_widget_canvas.c bd_widget_table.c bd_widget_inventory.c \
+   bd_widget_sketch.c bd_widget_table.c bd_widget_inventory.c \
    bd_widget_dock.c bd_widget_actionbar.c bd_widget_tabview.c \
    bd_widget_indicator.c bd_vt/*.c \
    -lX11 -lXi -lEGL -lGLESv2 -lm -o assets/gallery

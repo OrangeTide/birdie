@@ -13,6 +13,7 @@
 #include "bd_widget_indicator.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
+#include "bd_color.h"
 
 #include <math.h>
 #include <string.h>
@@ -33,109 +34,15 @@ struct indicator {
 };
 
 /* ------------------------------------------------------------------ */
-/* color parsing: names + HTML hex                                    */
+/* color parsing (shared core: bd_color.h)                            */
 /* ------------------------------------------------------------------ */
 
-/* Representative sRGB emission colors for the common LED bands. Names are
- * convenience; any color is reachable as #hex. */
-static const struct { const char *name; uint32_t rgba; } NAMED[] = {
-	{ "violet", 0x8B00FFFFu }, /* 400-450 nm */
-	{ "blue",   0x1A66FFFFu }, /* 450-495 nm */
-	{ "green",  0x22DD22FFu }, /* 495-570 nm */
-	{ "yellow", 0xFFD400FFu },
-	{ "amber",  0xFFB000FFu }, /* 570-590 nm */
-	{ "orange", 0xFF7A00FFu }, /* 590-620 nm */
-	{ "red",    0xFF1E10FFu }, /* 620-750 nm */
-	{ "white",  0xFFFFFFFFu },
-};
-
-static int
-str_ieq(const char *a, const char *b)
-{
-	for (; *a && *b; a++, b++) {
-		int ca = *a, cb = *b;
-		if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-		if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-		if (ca != cb)
-			return 0;
-	}
-	return *a == *b;
-}
-
-static int
-hex_nibble(char c)
-{
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	return -1;
-}
-
-/* Parse one token (already trimmed, NUL-terminated) into an 0xRRGGBBAA color.
- * Returns 1 on success. Accepts #rgb, #rrggbb, #rrggbbaa, and the named table. */
-static int
-parse_color(const char *tok, uint32_t *out)
-{
-	if (tok[0] == '#') {
-		const char *h = tok + 1;
-		int n = (int)strlen(h);
-		int d[8], i;
-		for (i = 0; i < n && i < 8; i++) {
-			d[i] = hex_nibble(h[i]);
-			if (d[i] < 0)
-				return 0;
-		}
-		unsigned r, g, b, a = 0xFF;
-		if (n == 3) {                 /* #rgb */
-			r = d[0] * 0x11; g = d[1] * 0x11; b = d[2] * 0x11;
-		} else if (n == 6 || n == 8) {/* #rrggbb[aa] */
-			r = d[0] << 4 | d[1];
-			g = d[2] << 4 | d[3];
-			b = d[4] << 4 | d[5];
-			if (n == 8)
-				a = d[6] << 4 | d[7];
-		} else {
-			return 0;
-		}
-		*out = r << 24 | g << 16 | b << 8 | a;
-		return 1;
-	}
-	for (size_t i = 0; i < sizeof NAMED / sizeof NAMED[0]; i++)
-		if (str_ieq(tok, NAMED[i].name)) {
-			*out = NAMED[i].rgba;
-			return 1;
-		}
-	return 0;
-}
-
-/* Split `s` on spaces/commas and parse each token into the color table. An
- * empty or all-unparsed string yields one amber state. Returns N. */
+/* Parse the state color list, defaulting an empty/all-unparsed string to one
+ * amber "lit" state. Returns N (>= 1). */
 static int
 parse_colors(const char *s, uint32_t *out)
 {
-	int n = 0;
-	if (s) {
-		char tok[32];
-		int tl = 0;
-		for (;;) {
-			char c = *s;
-			int sep = (c == '\0' || c == ' ' || c == ',' ||
-			    c == '\t' || c == '\n');
-			if (sep) {
-				if (tl > 0 && n < IND_MAX_STATES) {
-					tok[tl] = '\0';
-					if (parse_color(tok, &out[n]))
-						n++;
-				}
-				tl = 0;
-				if (c == '\0')
-					break;
-			} else if (tl < (int)sizeof tok - 1) {
-				tok[tl++] = c;
-			}
-			s++;
-		}
-	}
+	int n = bd_color_parse_list(s, out, IND_MAX_STATES);
 	if (n == 0)
 		out[n++] = IND_DEFAULT_COLOR;
 	return n;
@@ -144,19 +51,6 @@ parse_colors(const char *s, uint32_t *out)
 /* ------------------------------------------------------------------ */
 /* shader                                                             */
 /* ------------------------------------------------------------------ */
-
-static const char *IND_VERT =
-	"#version 300 es\n"
-	"layout(location=0) in vec2 a_pos;\n"
-	"layout(location=1) in vec2 a_uv;\n"
-	"layout(location=2) in vec4 a_col;\n"
-	"uniform vec2 u_res;\n"
-	"out vec2 v_uv;\n"
-	"void main(){\n"
-	"    vec2 p = a_pos / u_res * 2.0 - 1.0;\n"
-	"    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);\n"
-	"    v_uv = a_uv;\n"
-	"}\n";
 
 /*
  * One quad. p is centered [-1,1], y-down. The lens sits at radius u_lensr and a
@@ -252,7 +146,7 @@ static void
 ensure_shader(void)
 {
 	if (ind_shader.id == 0)
-		ind_shader = bd_backend_get()->make_shader(IND_VERT, IND_FRAG);
+		ind_shader = bd_backend_get()->make_shader(BD_SHADER_QUAD_VERT, IND_FRAG);
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,17 +215,8 @@ ind_render(bd_id id, void *state)
 
 	int cx = x + qs / 2;
 	int cy = y + h / 2;
-	float fx = (float)(cx - qs / 2);
-	float fy = (float)(cy - qs / 2);
-	float fs = (float)qs;
-	bd_vertex q[6] = {
-		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
-		{ fx + fs, fy,      1, 0, 1, 1, 1, 1 },
-		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
-		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
-		{ fx + fs, fy + fs, 1, 1, 1, 1, 1, 1 },
-		{ fx,      fy + fs, 0, 1, 1, 1, 1, 1 },
-	};
+	int qx = cx - qs / 2;
+	int qy = cy - qs / 2;
 
 	/* color of the current (or, when off, the first) state */
 	int ci = in->state > 0 ? in->state - 1 : 0;
@@ -340,17 +225,13 @@ ind_render(bd_id id, void *state)
 	float cg = ((c >> 16) & 0xFF) / 255.0f;
 	float cb = ((c >>  8) & 0xFF) / 255.0f;
 
-	bd_draw_flush();   /* land chrome drawn so far beneath the lamp */
-	be->use_shader(ind_shader);
-	be->set_uniform_vec2(ind_shader, "u_res",
-	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
 	be->set_uniform_vec3(ind_shader, "u_color", cr, cg, cb);
 	be->set_uniform_float(ind_shader, "u_lit", in->state > 0 ? 1.0f : 0.0f);
 	be->set_uniform_int(ind_shader, "u_lens", in->lens);
 	be->set_uniform_float(ind_shader, "u_press", in->pressed ? 1.0f : 0.0f);
 	be->set_uniform_float(ind_shader, "u_lensr", lensr);
 	be->set_uniform_float(ind_shader, "u_bezelr", bezelr);
-	be->draw_verts(q, 6);
+	bd_draw_shader_quad(ind_shader, qx, qy, qs, qs);
 
 	const char *label = bd_get_s(id, BD_LABEL_S);
 	if (label && label[0]) {

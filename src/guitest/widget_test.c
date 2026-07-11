@@ -19,7 +19,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
-#include "bd_widget_canvas.h"
+#include "bd_widget_sketch.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
 #include "bd_widget_indicator.h"
@@ -65,12 +65,12 @@ report(const char *msg)
 
 static void on_btn(bd_id id, void *arg)   { (void)id; report((const char *)arg); }
 
-static bd_id canvas;   /* the drawing canvas, cleared by its Clear button */
+static bd_id sketch;   /* the sketch pad, cleared by its Clear button */
 static void on_canvas_clear(bd_id id, void *arg)
 {
 	(void)id; (void)arg;
-	bd_canvas_clear(canvas);
-	report("Canvas cleared");
+	bd_sketch_clear(sketch);
+	report("Sketch cleared");
 }
 
 static void
@@ -595,15 +595,15 @@ build_ui(void)
 		.zones = "green green amber red", .stops = "0.4 0.6 0.85",
 		.peak = 1, .size = 26, .label = "Sig" }, BD_END);
 
-	/* -- Paint & Layout: the drawing canvas and the layout demos -- */
+	/* -- Paint & Layout: the sketch pad and the layout demos -- */
 	bd_id paint = bd_tabview_add_pane(tabs, "Paint & Layout");
 	bd_set(paint, BD_PAD_I, 6, BD_GAP_I, 6, BD_END);
 
-	/* ---- pressure-sensitive drawing canvas ---- */
-	bd_id crow = section(paint, "Drawing canvas (pen: pressure / tilt / "
+	/* ---- pressure-sensitive sketch pad ---- */
+	bd_id crow = section(paint, "Sketch pad (pen: pressure / tilt / "
 		"barrel = red / eraser)", BD_LAYOUT_ROW, 220);
-	canvas = bd_canvas_create(crow, BD_GROW_I, 1, BD_END);
-	bd_canvas_set_nib(canvas, 10.0f);
+	sketch = bd_sketch_create(crow, BD_GROW_I, 1, BD_END);
+	bd_sketch_set_nib(sketch, 10.0f);
 	bd_id ccol = bd_create(crow, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 70, BD_END);
 	bd_create(ccol, BD_BUTTON, BD_LABEL_S, "Clear", BD_PREF_H_I, 24,
@@ -752,7 +752,7 @@ main(void)
 	if (getenv("GALLERY_AUTODRAW")) {   /* inject pen strokes to show ink */
 		bd_gui_layout(win_width(), win_height());
 		int cx, cy, cw, ch;
-		bd_widget_rect(canvas, &cx, &cy, &cw, &ch);
+		bd_widget_rect(sketch, &cx, &cy, &cw, &ch);
 		/* a pressure-ramped sine: width swells from light to heavy */
 		bd_gui_event(&(bd_event){ .type=BD_EV_PEN_DOWN, .x=cx+12,
 			.y=cy+ch/2, .pressure=0.1f, .pen_flags=BD_PEN_INRANGE });

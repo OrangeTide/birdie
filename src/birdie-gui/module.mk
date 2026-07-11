@@ -32,11 +32,12 @@ birdie_gui_SRCS = \
 	widget.c \
 	bd_draw.c \
 	bd_asset.c \
+	bd_color.c \
 	bd_utf8.c \
 	bd_widget_value.c \
 	bd_widget_explorer.c \
 	bd_widget_editor.c \
-	bd_widget_canvas.c \
+	bd_widget_sketch.c \
 	bd_widget_table.c \
 	bd_widget_inventory.c \
 	bd_widget_dock.c \

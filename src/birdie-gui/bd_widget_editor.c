@@ -8,7 +8,7 @@
 
 /*
  * Rich-text editor widget. Plain UTF-8 text in a growable buffer with the
- * BD_MULTILINE editing model (caret nav, newline, backspace/delete, click,
+ * BD_TEXT_AREA editing model (caret nav, newline, backspace/delete, click,
  * scroll), plus a list of style runs over byte ranges that the renderer draws
  * segment by segment (per-run fg/bg, underline, strikeout, faux-bold,
  * super/subscript). A row-oriented API and a lock complete the editor.

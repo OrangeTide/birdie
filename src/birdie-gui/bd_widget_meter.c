@@ -15,6 +15,7 @@
 #include "bd_widget_value.h"   /* BD_HORIZONTAL / BD_VERTICAL */
 #include "widget_ext.h"
 #include "bd_draw.h"
+#include "bd_color.h"
 
 #include <math.h>
 #include <string.h>
@@ -44,85 +45,17 @@ struct meter {
 };
 
 /* ------------------------------------------------------------------ */
-/* color + stops parsing (color parser mirrors bd_widget_indicator)   */
+/* color + stops parsing (color parser: shared core bd_color.h)       */
 /* ------------------------------------------------------------------ */
 
-static const struct { const char *name; uint32_t rgba; } NAMED[] = {
-	{ "violet", 0x8B00FFFFu }, { "blue",   0x1A66FFFFu },
-	{ "green",  0x22DD22FFu }, { "yellow", 0xFFD400FFu },
-	{ "amber",  0xFFB000FFu }, { "orange", 0xFF7A00FFu },
-	{ "red",    0xFF1E10FFu }, { "white",  0xFFFFFFFFu },
-};
-
-static int
-str_ieq(const char *a, const char *b)
-{
-	for (; *a && *b; a++, b++) {
-		int ca = *a, cb = *b;
-		if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-		if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-		if (ca != cb)
-			return 0;
-	}
-	return *a == *b;
-}
-
-static int
-hex_nibble(char c)
-{
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	return -1;
-}
-
-static int
-parse_color(const char *tok, uint32_t *out)
-{
-	if (tok[0] == '#') {
-		const char *h = tok + 1;
-		int n = (int)strlen(h), d[8], i;
-		for (i = 0; i < n && i < 8; i++)
-			if ((d[i] = hex_nibble(h[i])) < 0)
-				return 0;
-		unsigned r, g, b, a = 0xFF;
-		if (n == 3) { r = d[0]*0x11; g = d[1]*0x11; b = d[2]*0x11; }
-		else if (n == 6 || n == 8) {
-			r = d[0]<<4 | d[1]; g = d[2]<<4 | d[3]; b = d[4]<<4 | d[5];
-			if (n == 8) a = d[6]<<4 | d[7];
-		} else return 0;
-		*out = r<<24 | g<<16 | b<<8 | a;
-		return 1;
-	}
-	for (size_t i = 0; i < sizeof NAMED / sizeof NAMED[0]; i++)
-		if (str_ieq(tok, NAMED[i].name)) { *out = NAMED[i].rgba; return 1; }
-	return 0;
-}
-
+/* Parse the zone color list, defaulting an empty/all-unparsed string to one
+ * green accent. Returns N (>= 1). */
 static int
 parse_colors(const char *s, uint32_t *out)
 {
-	int n = 0;
-	if (s) {
-		char tok[32];
-		int tl = 0;
-		for (;;) {
-			char c = *s;
-			int sep = (c=='\0'||c==' '||c==','||c=='\t'||c=='\n');
-			if (sep) {
-				if (tl > 0 && n < METER_MAX_ZONES) {
-					tok[tl] = '\0';
-					if (parse_color(tok, &out[n])) n++;
-				}
-				tl = 0;
-				if (c == '\0') break;
-			} else if (tl < (int)sizeof tok - 1) {
-				tok[tl++] = c;
-			}
-			s++;
-		}
-	}
-	if (n == 0) out[n++] = METER_DEF_ACCENT;
+	int n = bd_color_parse_list(s, out, METER_MAX_ZONES);
+	if (n == 0)
+		out[n++] = METER_DEF_ACCENT;
 	return n;
 }
 
@@ -257,19 +190,6 @@ disc(float cx, float cy, float r, uint32_t c)
 /* shader (EYE + VIAL)                                                */
 /* ------------------------------------------------------------------ */
 
-static const char *METER_VERT =
-	"#version 300 es\n"
-	"layout(location=0) in vec2 a_pos;\n"
-	"layout(location=1) in vec2 a_uv;\n"
-	"layout(location=2) in vec4 a_col;\n"
-	"uniform vec2 u_res;\n"
-	"out vec2 v_uv;\n"
-	"void main(){\n"
-	"    vec2 p = a_pos / u_res * 2.0 - 1.0;\n"
-	"    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);\n"
-	"    v_uv = a_uv;\n"
-	"}\n";
-
 static const char *METER_FRAG =
 	"#version 300 es\n"
 	"precision highp float;\n"
@@ -335,7 +255,7 @@ static void
 ensure_shader(void)
 {
 	if (meter_shader.id == 0)
-		meter_shader = bd_backend_get()->make_shader(METER_VERT, METER_FRAG);
+		meter_shader = bd_backend_get()->make_shader(BD_SHADER_QUAD_VERT, METER_FRAG);
 }
 
 /* Draw a shader disc (EYE/VIAL) filling a square of side `qs` at (fx,fy). */
@@ -347,22 +267,10 @@ draw_shader_round(int mode, uint32_t color, float value,
 	ensure_shader();
 	float cr, cg, cb;
 	rgba_f(color, &cr, &cg, &cb);
-	bd_vertex q[6] = {
-		{ fx,      fy,      0, 0, 1,1,1,1 },
-		{ fx + qs, fy,      1, 0, 1,1,1,1 },
-		{ fx + qs, fy + qs, 1, 1, 1,1,1,1 },
-		{ fx,      fy,      0, 0, 1,1,1,1 },
-		{ fx + qs, fy + qs, 1, 1, 1,1,1,1 },
-		{ fx,      fy + qs, 0, 1, 1,1,1,1 },
-	};
-	bd_draw_flush();
-	be->use_shader(meter_shader);
-	be->set_uniform_vec2(meter_shader, "u_res",
-	    (float)bd_draw_win_w(), (float)bd_draw_win_h());
 	be->set_uniform_vec3(meter_shader, "u_color", cr, cg, cb);
 	be->set_uniform_float(meter_shader, "u_value", value);
 	be->set_uniform_int(meter_shader, "u_mode", mode);
-	be->draw_verts(q, 6);
+	bd_draw_shader_quad(meter_shader, (int)fx, (int)fy, (int)qs, (int)qs);
 }
 
 /* ------------------------------------------------------------------ */
