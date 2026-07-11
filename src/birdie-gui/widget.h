@@ -338,6 +338,11 @@ bd_id bd_managed_canvas_create(bd_id parent, ...);
  * to its canvas. */
 bd_id bd_managed_canvas_of(bd_id descendant);
 
+/* Opt into minimize-to-desktop-icon for a canvas: a minimized frame then shows
+ * as a free-floating desktop icon on the canvas (double-click restores it, drag
+ * repositions it), instead of only vanishing to a BD_DOCK. Off by default. */
+void bd_managed_canvas_set_icon_minimize(bd_id canvas, int on);
+
 /* Enumerate the top-level frames of one WM host: the surface desktop when
  * host == BD_NONE (== bd_window_list), else the frames managed by that canvas.
  * Copies up to `max` ids into out (may be NULL to just count). */

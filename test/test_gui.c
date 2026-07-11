@@ -2509,6 +2509,41 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- minimize-to-desktop-icon (BD_MANAGED_CANVAS icon mode) ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id desk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_END); /* desktop */
+	bd_id cv = bd_managed_canvas_create(desk, BD_GROW_I, 1, BD_END);
+	bd_managed_canvas_set_icon_minimize(cv, 1);
+	bd_id fr = bd_create(cv, BD_FRAME, BD_LABEL_S, "W", BD_PREF_W_I, 100,
+	    BD_PREF_H_I, 80, BD_X_I, 20, BD_Y_I, 20, BD_END);
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+
+	bd_window_minimize(fr);
+	check("canvas frame minimizes", bd_window_minimized(fr) == 1);
+	bd_gui_layout(400, 300);
+	bd_gui_render();   /* places + draws the desktop icon */
+	check("icon-minimize renders without crashing", 1);
+
+	int cvx, cvy, cvw, cvh;
+	bd_widget_rect(cv, &cvx, &cvy, &cvw, &cvh);
+	int icx = cvx + 30, icy = cvy + cvh - 30;   /* inside the bottom-left icon */
+	bd_event kd = mouse(BD_EV_MOUSE_DOWN, icx, icy);
+	int consumed = bd_gui_event(&kd);
+	bd_event ku = mouse(BD_EV_MOUSE_UP, icx, icy);
+	bd_gui_event(&ku);
+	check("a click on the desktop icon is consumed by the WM", consumed == 1);
+	check("a single click does not restore the window",
+	    bd_window_minimized(fr) == 1);
+
+	bd_window_restore(fr);
+	check("bd_window_restore clears the minimized frame",
+	    bd_window_minimized(fr) == 0);
+	}
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

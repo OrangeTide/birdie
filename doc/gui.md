@@ -596,7 +596,17 @@ Internally the WM helpers take a `wm_host` descriptor (origin, size, projection,
 frame list); frame `user_x`/`user_y` are host-local while `pool[].x/y` stay
 absolute so the child tree renders and hit-tests unchanged. `bd_window_list_in`
 and `bd_managed_canvas_of` scope a dock to its canvas; a canvas in a hidden tab
-pane skips layout/render/input (`ancestors_visible`). The GLES gallery's
+pane skips layout/render/input (`ancestors_visible`).
+
+**Minimize to a desktop icon.** `bd_managed_canvas_set_icon_minimize(cv, 1)`
+opts a canvas into showing each minimized frame as a free-floating desktop icon
+(a `bd_draw_tile` cell with the window title) instead of only vanishing to a
+dock: double-click the icon to restore the window, drag it to reposition. Icons
+are placed lazily along the canvas bottom on first render (when the canvas has
+real dimensions), stored host-local per frame (`icon_x`/`icon_y`), and hit-tested
+separately from floating frames (`wm_icon_at`) so a minimized frame never leaks
+into the title-bar/drag logic. Off by default; a dock and desktop icons can both
+be enabled (each is an independent restore path). The GLES gallery's
 "Desktop" tab demonstrates the canvas + dock on the native multi-window backend;
 `test/test_gui.c` covers adoption, host-scoped listing, canvas-local placement
 and drag, body-click routing, and dock scoping. Deferred: Tab focus traversal

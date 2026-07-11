@@ -84,6 +84,9 @@ struct widget {
 	int focused;            /* top-level frame: window holds OS input focus */
 	bd_id wm_host;          /* floating frame: the BD_MANAGED_CANVAS hosting it, or
 	                           BD_NONE for the surface desktop / a native window */
+	int icon_x, icon_y;     /* minimized frame: host-local desktop-icon position
+	                           (used when its canvas is in icon-minimize mode) */
+	int icon_placed;        /* 1 once icon_x/icon_y have been assigned */
 
 	void *state;            /* per-instance data for extension widget types */
 };
@@ -139,7 +142,17 @@ struct mcanvas {
 	bd_id id;
 	bd_id frames[MAX_CANVAS_FRAMES];
 	int   count;
+	int   icon_min;         /* opt-in: minimized frames show as desktop icons */
 };
+
+/* Desktop-icon geometry for the minimize-to-icon canvas mode. */
+#define WM_ICON_CELL 52
+#define WM_ICON_PAD   8
+#define WM_ICON_GAP   8
+static bd_id wm_drag_icon = BD_NONE;    /* desktop icon being dragged to reposition */
+static int   wm_icon_dx, wm_icon_dy;    /* pointer offset within the dragged icon */
+static bd_id wm_icon_click = BD_NONE;   /* last icon pressed, for double-click */
+static double wm_icon_click_t;
 static struct mcanvas canvases[MAX_CANVASES];
 static int canvas_count;
 
@@ -1054,6 +1067,7 @@ bd_window_minimize(bd_id frame)
 	if (frame == BD_NONE || !pool[frame].alive)
 		return;
 	pool[frame].minimized = 1;
+	pool[frame].icon_placed = 0;   /* placed lazily at render, when dims exist */
 	/* native backend: iconify the OS window (option A, OS-delegated). The
 	 * in-surface WM instead just hides the frame via the flag above. */
 	if (be && be->multi_window && be->window_minimize && pool[frame].win_id)
@@ -1139,6 +1153,14 @@ bd_managed_canvas_of(bd_id descendant)
 			id = pool[id].parent;
 	}
 	return BD_NONE;
+}
+
+void
+bd_managed_canvas_set_icon_minimize(bd_id canvas, int on)
+{
+	struct mcanvas *c = mcanvas_of(canvas);
+	if (c)
+		c->icon_min = on ? 1 : 0;
 }
 
 bd_id
@@ -1266,6 +1288,10 @@ bd_destroy(bd_id id)
 		wm_active_frame = BD_NONE;
 	if (wm_drag_frame == id)
 		wm_drag_frame = BD_NONE;
+	if (wm_drag_icon == id)
+		wm_drag_icon = BD_NONE;
+	if (wm_icon_click == id)
+		wm_icon_click = BD_NONE;
 	w->alive = 0;
 }
 
@@ -2928,6 +2954,28 @@ wm_frame_at(const struct wm_host *host, int x, int y)
 	return BD_NONE;
 }
 
+/* Minimized frame whose desktop icon contains (x,y), when the canvas host is in
+ * icon-minimize mode, else BD_NONE. Kept separate from wm_frame_at so a minimized
+ * frame never leaks into the title-bar / drag logic. */
+static bd_id
+wm_icon_at(const struct wm_host *host, int x, int y)
+{
+	if (host->canvas == BD_NONE)
+		return BD_NONE;
+	struct mcanvas *c = mcanvas_of(host->canvas);
+	if (!c || !c->icon_min)
+		return BD_NONE;
+	for (int i = 0; i < host->count; i++) {
+		bd_id f = host->list[i];
+		if (!pool[f].alive || !pool[f].visible || !pool[f].minimized)
+			continue;
+		int ix = host->ox + pool[f].icon_x, iy = host->oy + pool[f].icon_y;
+		if (in_rect(x, y, ix, iy, WM_ICON_CELL, WM_ICON_CELL))
+			return f;
+	}
+	return BD_NONE;
+}
+
 /* Raise a floating frame to the front of its host's z-order (end of list). */
 static void
 wm_raise(const struct wm_host *host, bd_id f)
@@ -3340,6 +3388,41 @@ render_canvas_frames(bd_id winframe)
 			bd_id f = c->frames[k];
 			if (pool[f].alive && pool[f].visible && !pool[f].minimized)
 				render_wm_frame(f, &h);
+		}
+		/* icon-minimize mode: draw a desktop icon per minimized frame,
+		 * assigning an unplaced one a bottom-row slot now that dims exist */
+		if (c->icon_min) {
+			bd_draw_begin(h.proj_w, h.proj_h);
+			be->scissor(h.ox, h.oy, h.w, h.h);
+			int isz = WM_ICON_CELL - 2 * WM_ICON_PAD;
+			int per_row = (h.w - WM_ICON_PAD) / (WM_ICON_CELL + WM_ICON_GAP);
+			if (per_row < 1)
+				per_row = 1;
+			int slot = 0;
+			for (int k = 0; k < c->count; k++) {
+				bd_id f = c->frames[k];
+				if (!pool[f].alive || !pool[f].visible ||
+				    !pool[f].minimized)
+					continue;
+				if (!pool[f].icon_placed) {
+					int col = slot % per_row, row = slot / per_row;
+					pool[f].icon_x = WM_ICON_PAD +
+					    col * (WM_ICON_CELL + WM_ICON_GAP);
+					pool[f].icon_y = h.h - WM_ICON_PAD - WM_ICON_CELL
+					    - row * (WM_ICON_CELL + WM_ICON_GAP);
+					if (pool[f].icon_y < WM_ICON_PAD)
+						pool[f].icon_y = WM_ICON_PAD;
+					pool[f].icon_placed = 1;
+				}
+				int ix = h.ox + pool[f].icon_x;
+				int iy = h.oy + pool[f].icon_y;
+				bd_draw_tile((float)ix, (float)iy, WM_ICON_CELL,
+				    WM_ICON_PAD, isz, (bd_texture){0}, pool[f].label,
+				    0, 1, theme.bg, theme.border, theme.text);
+				slot++;
+			}
+			be->scissor_off();
+			bd_draw_end();
 		}
 	}
 }
@@ -3805,6 +3888,25 @@ wm_dispatch(const bd_event *ev, const struct wm_host *host, bd_id *route)
 
 	switch (ev->type) {
 	case BD_EV_MOUSE_DOWN: {
+		/* a desktop icon (icon-minimize mode): double-click restores its
+		 * window, a press starts a reposition drag */
+		if (ev->button == BD_MOUSE_LEFT) {
+			bd_id ic = wm_icon_at(host, ev->x, ev->y);
+			if (ic != BD_NONE) {
+				double now = bd_time();
+				if (ic == wm_icon_click && now - wm_icon_click_t < 0.4) {
+					bd_window_restore(ic);
+					wm_icon_click = BD_NONE;
+				} else {
+					wm_icon_click = ic;
+					wm_icon_click_t = now;
+					wm_drag_icon = ic;
+					wm_icon_dx = ev->x - (host->ox + pool[ic].icon_x);
+					wm_icon_dy = ev->y - (host->oy + pool[ic].icon_y);
+				}
+				return 1;
+			}
+		}
 		bd_id f = wm_frame_at(host, ev->x, ev->y);
 		if (ev->button != BD_MOUSE_LEFT) {
 			if (f != BD_NONE) { wm_raise(host, f); wm_active_frame = f; *route = f; }
@@ -3847,6 +3949,18 @@ wm_dispatch(const bd_event *ev, const struct wm_host *host, bd_id *route)
 	}
 
 	case BD_EV_MOUSE_MOVE:
+		if (wm_drag_icon != BD_NONE && pool[wm_drag_icon].alive) {
+			struct widget *w = &pool[wm_drag_icon];
+			w->icon_x = ev->x - wm_icon_dx - host->ox;
+			w->icon_y = ev->y - wm_icon_dy - host->oy;
+			if (w->icon_x < 0) w->icon_x = 0;
+			if (w->icon_y < 0) w->icon_y = 0;
+			if (w->icon_x + WM_ICON_CELL > host->w)
+				w->icon_x = host->w - WM_ICON_CELL;
+			if (w->icon_y + WM_ICON_CELL > host->h)
+				w->icon_y = host->h - WM_ICON_CELL;
+			return 1;
+		}
 		if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive) {
 			struct widget *w = &pool[wm_drag_frame];
 			w->gravity = BD_GRAVITY_NONE;
@@ -3862,6 +3976,10 @@ wm_dispatch(const bd_event *ev, const struct wm_host *host, bd_id *route)
 		return 0;
 
 	case BD_EV_MOUSE_UP:
+		if (wm_drag_icon != BD_NONE && ev->button == BD_MOUSE_LEFT) {
+			wm_drag_icon = BD_NONE;
+			return 1;
+		}
 		if (wm_drag_frame != BD_NONE && ev->button == BD_MOUSE_LEFT) {
 			if (pool[wm_drag_frame].alive)
 				pool[wm_drag_frame].gravity = wm_snap_cand;
@@ -3919,6 +4037,9 @@ canvas_wm_event(const bd_event *ev, bd_id *route)
 	if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive &&
 	    pool[wm_drag_frame].wm_host != BD_NONE) {
 		cv = pool[wm_drag_frame].wm_host;   /* an in-progress canvas drag */
+	} else if (wm_drag_icon != BD_NONE && pool[wm_drag_icon].alive &&
+	    pool[wm_drag_icon].wm_host != BD_NONE) {
+		cv = pool[wm_drag_icon].wm_host;    /* an in-progress icon drag */
 	} else {
 		int px = ev->type == BD_EV_MOUSE_SCROLL ? mouse_x : ev->x;
 		int py = ev->type == BD_EV_MOUSE_SCROLL ? mouse_y : ev->y;
@@ -3930,9 +4051,10 @@ canvas_wm_event(const bd_event *ev, bd_id *route)
 			return 0;
 		struct wm_host h;
 		wm_host_from_canvas(c, &h);
-		/* only intercept when actually over a floating frame; otherwise let
+		/* intercept over a floating frame or a desktop icon; otherwise let
 		 * the canvas's own children (dock, backdrop) handle the event */
-		if (wm_frame_at(&h, px, py) == BD_NONE)
+		if (wm_frame_at(&h, px, py) == BD_NONE &&
+		    wm_icon_at(&h, px, py) == BD_NONE)
 			return 0;
 	}
 

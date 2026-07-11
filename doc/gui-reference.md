@@ -200,12 +200,19 @@ void  bd_window_move(bd_id frame, int x, int y);  /* float at (x,y), clear gravi
 void  bd_window_set_locked(bd_id frame, int locked);   int bd_window_locked(bd_id frame);
 int   bd_window_gravity(bd_id frame);
 bd_id bd_frame_for_window(int window_id);         /* native backend: OS window id -> frame */
+void  bd_window_minimize(bd_id frame);   void bd_window_restore(bd_id frame);   int bd_window_minimized(bd_id frame);
+/* embedded WM: a BD_MANAGED_CANVAS hosts floating frames inside a widget rect */
+bd_id bd_managed_canvas_create(bd_id parent, ...);   bd_id bd_managed_canvas_of(bd_id descendant);
+void  bd_managed_canvas_set_icon_minimize(bd_id canvas, int on); /* minimized frame -> desktop icon */
 ```
 
 Behavior: drag the title bar to move; release near an edge/corner to snap and
 dock (gravity set); drag away to float. A docked window re-snaps on resize.
 Locking pins it (no drag) while keeping its gravity. Set the floating size
 with `BD_PREF_W_I`/`BD_PREF_H_I` and the floating position with `BD_X_I`/`BD_Y_I`.
+A minimized frame vanishes to a `BD_DOCK` tile; with
+`bd_managed_canvas_set_icon_minimize` a canvas instead (or also) shows it as a
+free-floating desktop icon (double-click restores, drag repositions).
 
 ## Extension widgets
 

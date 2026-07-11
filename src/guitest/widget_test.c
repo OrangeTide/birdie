@@ -755,8 +755,8 @@ build_ui(void)
 	desktop_tab = bd_tabview_count(tabs) - 1;
 	bd_set(deskpane, BD_PAD_I, 6, BD_GAP_I, 4, BD_END);
 	bd_create(deskpane, BD_LABEL, BD_LABEL_S,
-		"BD_MANAGED_CANVAS: drag the frame title bars; minimize (_) a frame to "
-		"the dock; click a dock tile to restore.",
+		"BD_MANAGED_CANVAS: drag the title bars; minimize (_) a frame -- it "
+		"becomes a desktop icon (double-click restores, drag moves) and a left-dock tile.",
 		BD_PREF_H_I, 16, BD_FG_C, 0x9DA3AAFFu, BD_END);
 
 	/* standalone BD_ICON app launchers + an action-bar drop target: double-
@@ -785,6 +785,10 @@ build_ui(void)
 	bd_id dk = bd_dock_create(cv, NULL, BD_END);
 	bd_dock_set_gravity(dk, BD_GRAVITY_LEFT);
 	bd_dock_set_tile_size(dk, 40);
+
+	/* also show minimized frames as free-floating desktop icons along the
+	 * canvas bottom (double-click to restore, drag to reposition) */
+	bd_managed_canvas_set_icon_minimize(cv, 1);
 
 	/* Servers: the icon-browser explorer, floating (drag to arrange, F2 rename) */
 	bd_id srvwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Servers",
