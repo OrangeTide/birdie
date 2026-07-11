@@ -235,6 +235,30 @@ static void on_click_w2(bd_id id, void *a){ (void)id; (void)a; click_w2++; }
 /* in-surface WM: which floating window's content got a click */
 static int wm_click_a, wm_click_b;
 static void on_wm_a(bd_id id, void *a){ (void)id; (void)a; wm_click_a++; }
+
+/* ---- passthrough (GLES-background) canvas recorded callbacks ---- */
+static int pass_in_calls, pass_in_type, pass_in_lx, pass_in_ly, pass_in_key;
+static int pass_drop_calls, pass_drop_lx, pass_drop_ly;
+static uint64_t pass_drop_key;
+static int on_pass_input(bd_id cv, const bd_event *ev, void *u)
+{
+	(void)cv; (void)u;
+	pass_in_calls++;
+	pass_in_type = ev->type;
+	pass_in_lx = ev->x;
+	pass_in_ly = ev->y;
+	pass_in_key = ev->key;
+	return 1;
+}
+static int on_pass_drop(bd_id cv, const bd_dnd_payload *p, int lx, int ly, void *u)
+{
+	(void)cv; (void)u;
+	pass_drop_calls++;
+	pass_drop_lx = lx;
+	pass_drop_ly = ly;
+	pass_drop_key = p->key;
+	return 1;
+}
 static void on_wm_b(bd_id id, void *a){ (void)id; (void)a; wm_click_b++; }
 
 /* ---- in-memory explorer model (3 auto-placed icons) ---- */
@@ -1030,6 +1054,86 @@ main(void)
 
 	bd_gui_render();   /* exercises the clipped canvas-frame render path */
 	check("canvas render does not crash", 1);
+	bd_gui_cleanup();
+
+	/* ---- passthrough canvas (GLES-background, v0.8.1): bare-backdrop input
+	 * routes to the app underneath, with pointer capture, keyboard focus, and
+	 * drop-into-world ---- */
+	pass_in_calls = pass_drop_calls = 0;
+	bd_gui_init(&stub, NULL);
+	bd_id pdesk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id pcv = bd_managed_canvas_create(pdesk,
+	    BD_ANCHOR_I, BD_ANCHOR_NW, BD_X_I, 100, BD_Y_I, 80,
+	    BD_PREF_W_I, 400, BD_PREF_H_I, 300, BD_END);
+	bd_canvas_cb pcb = { .on_input = on_pass_input, .on_drop = on_pass_drop };
+	bd_managed_canvas_set_passthrough(pcv, &pcb);
+
+	/* an inventory (drag source) and a plain button, both left of the canvas */
+	memset(inv_slots, 0, sizeof inv_slots);
+	inv_slots[0] = (struct inv_slot){ 42, "Gem", (bd_texture){1}, 1, 1 };
+	bd_inventory_model pim = { .get = inv_get };
+	bd_id pinvfr = bd_create(pdesk, BD_FRAME, BD_ANCHOR_I, BD_ANCHOR_NW,
+	    BD_X_I, 0, BD_Y_I, 0, BD_PREF_W_I, 90, BD_PREF_H_I, 400,
+	    BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 4, BD_END);
+	bd_id pinv = bd_inventory_create(pinvfr, 1, 4, &pim, NULL, BD_GROW_I, 1, BD_END);
+	bd_inventory_set_cell_size(pinv, 44);
+	bd_create(pdesk, BD_BUTTON, BD_LABEL_S, "x",
+	    BD_ANCHOR_I, BD_ANCHOR_NW, BD_X_I, 0, BD_Y_I, 420,
+	    BD_PREF_W_I, 60, BD_PREF_H_I, 24, BD_END);
+	bd_gui_layout(800, 500);
+
+	int prx, pry, prw, prh;
+	check("passthrough canvas reports its rect",
+	    bd_managed_canvas_rect(pcv, &prx, &pry, &prw, &prh) &&
+	    prx == 100 && pry == 80 && prw == 400 && prh == 300);
+
+	/* a left press on bare backdrop reaches on_input in canvas-local coords */
+	int pconsumed = bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN,
+	    .button=BD_MOUSE_LEFT, .x=150, .y=120 });
+	check("a backdrop press is consumed and forwarded in local coords",
+	    pconsumed == 1 && pass_in_calls == 1 &&
+	    pass_in_type == BD_EV_MOUSE_DOWN &&
+	    pass_in_lx == 50 && pass_in_ly == 40);
+
+	/* the press captured the pointer: a move leaving the canvas rect still
+	 * routes to the app (negative local coords) until release */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=50, .y=90 });
+	check("pointer capture keeps a world drag on the canvas past its edge",
+	    pass_in_type == BD_EV_MOUSE_MOVE && pass_in_lx == -50 && pass_in_ly == 10);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x=50, .y=90 });
+
+	/* the press also took keyboard focus: keys route to on_input */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A });
+	check("a focused passthrough canvas receives keyboard events",
+	    pass_in_type == BD_EV_KEY_DOWN && pass_in_key == BD_KEY_A);
+
+	/* clicking a widget moves focus off the canvas: keys stop arriving */
+	int pk = pass_in_calls;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x=20, .y=430 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x=20, .y=430 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_A });
+	check("a widget click takes keyboard focus from the canvas",
+	    pass_in_calls == pk);
+
+	/* drop-into-world: drag the Gem out of the inventory and release over the
+	 * bare backdrop -> on_drop fires with the payload and world coordinates */
+	int pgx, pgy;
+	bd_widget_rect(pinv, &pgx, &pgy, NULL, NULL);
+	int g0x = pgx + 20, g0y = pgy + 20;   /* slot-0 center, left of the canvas */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x=g0x, .y=g0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=g0x+30, .y=g0y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=300, .y=230 });
+	bd_gui_render();   /* draws the drag ghost; must not crash */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x=300, .y=230 });
+	check("dropping a drag onto the backdrop fires on_drop in world coords",
+	    pass_drop_calls == 1 && pass_drop_key == 42 &&
+	    pass_drop_lx == 200 && pass_drop_ly == 150);
 	bd_gui_cleanup();
 
 	/* ---- layout: cross-axis gravity (BD_ANCHOR_I) in a column ----

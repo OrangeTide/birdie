@@ -143,6 +143,8 @@ struct mcanvas {
 	bd_id frames[MAX_CANVAS_FRAMES];
 	int   count;
 	int   icon_min;         /* opt-in: minimized frames show as desktop icons */
+	int   passthrough;      /* opt-in: live GL backdrop, forward input to on_* */
+	bd_canvas_cb cb;        /* app callbacks while in passthrough mode */
 };
 
 /* Desktop-icon geometry for the minimize-to-icon canvas mode. */
@@ -155,6 +157,11 @@ static bd_id wm_icon_click = BD_NONE;   /* last icon pressed, for double-click *
 static double wm_icon_click_t;
 static struct mcanvas canvases[MAX_CANVASES];
 static int canvas_count;
+/* A passthrough canvas that grabbed the pointer on a bare-backdrop press keeps
+ * every pointer event until release; another holds keyboard focus after such a
+ * press until focus moves to a widget. */
+static bd_id canvas_ptr_capture = BD_NONE;
+static bd_id canvas_kbd_focus   = BD_NONE;
 
 static struct mcanvas *
 mcanvas_of(bd_id id)
@@ -169,6 +176,7 @@ static void  wm_surface_host(struct wm_host *out);
 static void  wm_host_from_canvas(struct mcanvas *c, struct wm_host *out);
 static void  wm_host_for(bd_id frame, struct wm_host *out);
 static bd_id window_frame_of(bd_id id);
+static int   ancestors_visible(bd_id id);
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer */
@@ -1163,6 +1171,42 @@ bd_managed_canvas_set_icon_minimize(bd_id canvas, int on)
 		c->icon_min = on ? 1 : 0;
 }
 
+void
+bd_managed_canvas_set_passthrough(bd_id canvas, const bd_canvas_cb *cb)
+{
+	struct mcanvas *c = mcanvas_of(canvas);
+	if (!c)
+		return;
+	if (cb) {
+		c->passthrough = 1;
+		c->cb = *cb;
+		/* drop the solid backdrop so the host's GL scene shows through;
+		 * render_widget's `bg & 0xFF` guard then skips the fill */
+		pool[canvas].bg &= 0xFFFFFF00u;
+	} else {
+		c->passthrough = 0;
+		c->cb = (bd_canvas_cb){ 0 };
+		pool[canvas].bg = theme.press;   /* restore the backdrop */
+		if (canvas_ptr_capture == canvas)
+			canvas_ptr_capture = BD_NONE;
+		if (canvas_kbd_focus == canvas)
+			canvas_kbd_focus = BD_NONE;
+	}
+}
+
+int
+bd_managed_canvas_rect(bd_id canvas, int *x, int *y, int *w, int *h)
+{
+	if (!mcanvas_of(canvas) || !pool[canvas].alive ||
+	    !ancestors_visible(canvas))
+		return 0;
+	if (x) *x = pool[canvas].x;
+	if (y) *y = pool[canvas].y;
+	if (w) *w = pool[canvas].w;
+	if (h) *h = pool[canvas].h;
+	return 1;
+}
+
 bd_id
 bd_create(bd_id parent, int type, ...)
 {
@@ -1266,13 +1310,18 @@ bd_destroy(bd_id id)
 				}
 	}
 	/* drop a destroyed canvas from the registry */
-	if (w->type == BD_MANAGED_CANVAS)
+	if (w->type == BD_MANAGED_CANVAS) {
+		if (canvas_ptr_capture == id)
+			canvas_ptr_capture = BD_NONE;
+		if (canvas_kbd_focus == id)
+			canvas_kbd_focus = BD_NONE;
 		for (int i = 0; i < canvas_count; i++)
 			if (canvases[i].id == id) {
 				canvases[i] = canvases[canvas_count - 1];
 				canvas_count--;
 				break;
 			}
+	}
 
 	if (root == id)
 		root = BD_NONE;
@@ -2116,7 +2165,7 @@ render_popup(bd_id id)
 	fill_rect(px, py, pw, ph, theme.panel);
 	stroke_rect(px, py, pw, ph, theme.border);
 
-	/* pushpin row — pen advances through inline glyph + text */
+	/* pushpin row -- pen advances through inline glyph + text */
 	int pin_hover = in_rect(mouse_x, mouse_y,
 	    px, py, pw, PIN_ROW_H);
 	if (pin_hover)
@@ -2291,7 +2340,7 @@ handle_menu_event(const bd_event *ev, bd_id frame)
 			return 1;
 		}
 
-		/* click outside — close active unpinned menu */
+		/* click outside -- close active unpinned menu */
 		if (active_menu != BD_NONE) {
 			menu_close(active_menu);
 			return 1;
@@ -2764,6 +2813,8 @@ bd_gui_cleanup(void)
 	window_count = 0;
 	canvas_count = 0;
 	memset(canvases, 0, sizeof canvases);
+	canvas_ptr_capture = BD_NONE;
+	canvas_kbd_focus = BD_NONE;
 	wm_active_frame = BD_NONE;
 	wm_drag_frame = BD_NONE;
 	wm_snap_cand = BD_GRAVITY_NONE;
@@ -3552,6 +3603,7 @@ focus_advance(bd_id frame, int dir)
 		}
 	int next = (cur < 0) ? (dir > 0 ? 0 : n - 1) : ((cur + dir + n) % n);
 	focus_id = list[next];
+	canvas_kbd_focus = BD_NONE;   /* Tab moves focus off a passthrough canvas */
 }
 
 bd_id
@@ -4015,6 +4067,52 @@ canvas_at(int x, int y)
 	return BD_NONE;
 }
 
+/* Translate `ev` to canvas-local coordinates and hand it to the passthrough
+ * app. Returns 1 if the app consumed it. Keyboard events carry no position. */
+static int
+canvas_pass_input(struct mcanvas *c, const bd_event *ev)
+{
+	if (!c->passthrough || !c->cb.on_input)
+		return 0;
+	bd_event local = *ev;
+	int ox = pool[c->id].x, oy = pool[c->id].y;
+	switch (ev->type) {
+	case BD_EV_MOUSE_SCROLL:
+		local.x = mouse_x - ox;
+		local.y = mouse_y - oy;
+		break;
+	case BD_EV_KEY_DOWN:
+	case BD_EV_KEY_UP:
+	case BD_EV_CHAR:
+		break;                  /* no position */
+	default:
+		local.x = ev->x - ox;
+		local.y = ev->y - oy;
+		break;
+	}
+	return c->cb.on_input(c->id, &local, c->cb.user) ? 1 : 0;
+}
+
+/* A cross-widget drag released at surface x,y: if it lands on a passthrough
+ * canvas's bare backdrop, deliver the active payload to on_drop. Returns 1 if
+ * the app accepted it. */
+static int
+canvas_try_world_drop(int x, int y)
+{
+	bd_id cv = canvas_at(x, y);
+	if (cv == BD_NONE)
+		return 0;
+	struct mcanvas *c = mcanvas_of(cv);
+	if (!c || !c->passthrough || !c->cb.on_drop)
+		return 0;
+	struct wm_host h;
+	wm_host_from_canvas(c, &h);
+	if (wm_frame_at(&h, x, y) != BD_NONE || wm_icon_at(&h, x, y) != BD_NONE)
+		return 0;               /* over a floating frame, not the world */
+	return c->cb.on_drop(cv, &dnd_payload, x - h.ox, y - h.oy, c->cb.user)
+	    ? 1 : 0;
+}
+
 /*
  * Embedded-WM input: pointer events over a managed canvas's floating frames are
  * handled by that canvas's window manager, on any backend. Returns 1 if the
@@ -4032,6 +4130,20 @@ canvas_wm_event(const bd_event *ev, bd_id *route)
 	    ev->type == BD_EV_MOUSE_UP || ev->type == BD_EV_MOUSE_SCROLL;
 	if (!is_ptr)
 		return 0;
+
+	/* a passthrough canvas that grabbed the pointer on a bare-backdrop press
+	 * keeps every pointer event until release, even over a floating frame, so a
+	 * world click-drag is not stolen mid-gesture */
+	if (canvas_ptr_capture != BD_NONE) {
+		struct mcanvas *c = mcanvas_of(canvas_ptr_capture);
+		if (c && pool[canvas_ptr_capture].alive) {
+			canvas_pass_input(c, ev);
+			if (ev->type == BD_EV_MOUSE_UP)
+				canvas_ptr_capture = BD_NONE;
+			return 1;
+		}
+		canvas_ptr_capture = BD_NONE;   /* canvas died under the grab */
+	}
 
 	bd_id cv;
 	if (wm_drag_frame != BD_NONE && pool[wm_drag_frame].alive &&
@@ -4054,8 +4166,28 @@ canvas_wm_event(const bd_event *ev, bd_id *route)
 		/* intercept over a floating frame or a desktop icon; otherwise let
 		 * the canvas's own children (dock, backdrop) handle the event */
 		if (wm_frame_at(&h, px, py) == BD_NONE &&
-		    wm_icon_at(&h, px, py) == BD_NONE)
+		    wm_icon_at(&h, px, py) == BD_NONE) {
+			/* bare backdrop: forward to the passthrough app. A widget drag
+			 * (pointer_capture) keeps its own grab -- its drop is resolved by
+			 * the top-level MOUSE_UP handler (canvas_try_world_drop) -- so skip
+			 * passthrough while one is in flight. */
+			if (c->passthrough && pointer_capture == BD_NONE) {
+				if (ev->type == BD_EV_MOUSE_DOWN &&
+				    ev->button == BD_MOUSE_LEFT) {
+					canvas_ptr_capture = cv;  /* grab until release */
+					canvas_kbd_focus = cv;    /* click viewport: key focus */
+					focus_id = BD_NONE;       /* leave any widget focus */
+				}
+				int consumed = canvas_pass_input(c, ev);
+				/* a press/release on the region belongs to it regardless, so it
+				 * never leaks to the surface WM behind the canvas */
+				if (ev->type == BD_EV_MOUSE_DOWN ||
+				    ev->type == BD_EV_MOUSE_UP)
+					return 1;
+				return consumed;
+			}
 			return 0;
+		}
 	}
 
 	struct mcanvas *c = mcanvas_of(cv);
@@ -4221,6 +4353,21 @@ bd_gui_event(const bd_event *ev)
 		return 1;
 	}
 
+	/* a passthrough canvas holding keyboard focus routes keys to its app (Tab,
+	 * handled above, is the way out); unconsumed keys fall through */
+	if (canvas_kbd_focus != BD_NONE &&
+	    (ev->type == BD_EV_KEY_DOWN || ev->type == BD_EV_KEY_UP ||
+	     ev->type == BD_EV_CHAR)) {
+		struct mcanvas *c = mcanvas_of(canvas_kbd_focus);
+		if (c && pool[canvas_kbd_focus].alive &&
+		    ancestors_visible(canvas_kbd_focus)) {
+			if (canvas_pass_input(c, ev))
+				return 1;
+		} else {
+			canvas_kbd_focus = BD_NONE;
+		}
+	}
+
 	/* keyboard events for focused input line */
 	if (focus_id != BD_NONE &&
 	    pool[focus_id].alive &&
@@ -4311,6 +4458,9 @@ bd_gui_event(const bd_event *ev)
 	}
 
 	case BD_EV_MOUSE_DOWN:
+		/* a press that reached here landed on chrome, not a passthrough
+		 * canvas backdrop, so it takes keyboard focus away from any canvas */
+		canvas_kbd_focus = BD_NONE;
 		/* non-left press on an extension widget (e.g. right-click for an
 		 * explorer context menu): deliver without grabbing a drag */
 		if (ev->button != BD_MOUSE_LEFT) {
@@ -4401,13 +4551,16 @@ bd_gui_event(const bd_event *ev)
 			else
 				ext_event(pointer_capture, ev);
 			/* cross-widget drop: hand an active payload to the widget the
-			 * release landed on, if it is a different extension widget */
+			 * release landed on, if it is a different extension widget;
+			 * otherwise try a passthrough canvas backdrop (drop into the world) */
 			if (dnd_active) {
 				bd_id tgt = hit_extension(frame, ev->x, ev->y);
 				if (tgt != BD_NONE && tgt != pointer_capture) {
 					bd_event drop = *ev;
 					drop.type = BD_EV_DROP;
 					ext_event(tgt, &drop);
+				} else {
+					canvas_try_world_drop(ev->x, ev->y);
 				}
 				dnd_active = 0;
 			}

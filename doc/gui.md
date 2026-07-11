@@ -610,8 +610,9 @@ be enabled (each is an independent restore path). The GLES gallery's
 "Desktop" tab demonstrates the canvas + dock on the native multi-window backend;
 `test/test_gui.c` covers adoption, host-scoped listing, canvas-local placement
 and drag, body-click routing, and dock scoping. Deferred: Tab focus traversal
-into canvas frames, a host-drawn / texture backdrop (compositing widgets over a
-live GL scene), and canvases nested inside floating frames.
+into canvas frames and canvases nested inside floating frames. Compositing the
+canvas widgets over a live host-drawn GL scene (with event passthrough to the app
+underneath) is the v0.8.1 **GLES-background canvas**, below.
 
 Still to do:
 
@@ -623,6 +624,126 @@ Still to do:
 - Per-window hover-leave (moving off a floating window can leave stale hover),
   window resize handles, and per-window menu state (one open menu at a time
   across all windows).
+
+### GLES-background canvas (v0.8.1) — implemented
+
+A `BD_MANAGED_CANVAS` can host a **live GLES scene underneath its widgets**
+instead of a solid backdrop: the caller renders a game / 3D viewport into the
+canvas rect, and the toolkit composites its floating frames, docks and chrome on
+top. The canvas becomes the seam between the host's high-performance render loop
+and the retained-mode UI, and it routes input across that seam in both
+directions (click a world object, click a widget, drag a widget item into the
+world).
+
+The design goal is to keep birdie-gui **out of the fast path**: the host still
+owns the clear and the 3D draw, exactly as the SDL3 example does today. The
+canvas only stops painting over the host's pixels and forwards the events the
+chrome does not consume.
+
+**Compositing: default framebuffer + scissor.** No FBO, no offscreen texture, no
+extra blit. A canvas placed in passthrough mode paints **no backdrop** (its
+`BD_BG_C` alpha is set to 0, and `render_widget`'s existing `if (w->bg & 0xFF)`
+guard already suppresses the fill), and the host leaves the backend `clear` hook
+NULL so nothing erases the scene. Each frame:
+
+```c
+int x, y, w, h;
+bd_managed_canvas_rect(cv, &x, &y, &w, &h);  /* canvas rect in its window px */
+glScissor(x, win_h - (y + h), w, h);         /* GL origin is bottom-left */
+glEnable(GL_SCISSOR_TEST);
+render_world();                              /* host's 3D pass, clipped to cv */
+glDisable(GL_SCISSOR_TEST);
+bd_gui_render();                             /* toolkit composites chrome on top */
+```
+
+The canvas must therefore be an on-screen, axis-aligned rectangle; the 3D
+content cannot sit *behind* translucent chrome or be a freely composited movable
+layer. Those want the deferred FBO/texture-backed variant, which can be added
+later without changing the event API below.
+
+**Events: per-canvas callbacks under the existing return contract.** `bd_gui_event()`
+already returns 1 (consumed) / 0 (not), and `canvas_wm_event` already isolates
+the case "pointer over bare canvas backdrop, not over a floating frame, desktop
+icon, or scoped child widget." That un-occluded-backdrop branch is exactly the
+passthrough region. A passthrough canvas carries a callback block:
+
+```c
+typedef struct bd_canvas_cb {
+    /* Pointer / pen / touch / key over the passthrough region, in canvas-local
+       coordinates (0,0 = canvas top-left). Return 1 if the app consumed it. */
+    int (*on_input)(bd_id canvas, const bd_event *local, void *user);
+    /* A cross-widget drag released over the passthrough region. Return 1 to
+       accept; payload valid only for the call. */
+    int (*on_drop)(bd_id canvas, const bd_dnd_payload *p, int lx, int ly, void *user);
+    void *user;
+} bd_canvas_cb;
+
+void bd_managed_canvas_set_passthrough(bd_id canvas, const bd_canvas_cb *cb);
+int  bd_managed_canvas_rect(bd_id canvas, int *x, int *y, int *w, int *h);
+```
+
+The alternative, a pure return-code fall-through where the host feeds unconsumed
+events to its own app after `bd_gui_event()` returns 0, works only for a
+whole-window background (game fills the window, UI floats over it) and is still
+supported for that case: skip `set_passthrough` and read the return value.
+Callbacks are the richer surface because the toolkit owns the canvas rect and
+projection, so it hands the app **canvas-local coordinates**, disambiguates
+**which** canvas when several viewports are embedded, and gives drag-and-drop a
+real drop target. Drops need a callback either way, so input rides the same
+block.
+
+Routing mechanics, all in `widget.c` around the `canvas_wm_event` /
+`bd_gui_event` seam:
+
+- **Passthrough forward.** Where `canvas_wm_event` currently returns 0 for a
+  bare-backdrop pointer event, a passthrough canvas instead translates
+  `ev->x/y` by the `wm_host` origin to canvas-local coords and calls `on_input`.
+  Consumed → `bd_gui_event` returns 1; not consumed → keep falling through so a
+  scoped dock or status strip laid over the canvas still works.
+- **Pointer capture.** A press (`MOUSE_DOWN` / `TOUCH_DOWN` / `PEN_DOWN`) on the
+  passthrough backdrop sets a `canvas_ptr_capture`, mirroring the existing
+  `wm_drag_frame` capture. While set, `bd_gui_event` short-circuits before the
+  hit test and routes every pointer event to that canvas until the matching up,
+  so a world click-drag (camera orbit, box select) survives passing **under** a
+  floating window rather than being stolen by it.
+- **Keyboard focus.** Clicking bare backdrop gives the canvas keyboard focus
+  (a canvas-focus state alongside `focus_id`); key events then route to
+  `on_input` until focus moves to a widget. Standard "click the viewport to
+  control the game" behavior. Clicking any widget moves focus away as usual;
+  Tab traversal is unaffected.
+- **Drop into the world.** When a mouse-up carries an active `bd_dnd` payload
+  (`bd_dnd_get`) over passthrough backdrop, the toolkit calls `on_drop` with
+  canvas-local coords instead of the normal "synthesize `BD_EV_DROP` to an
+  extension widget" path. The drag-source half is unchanged: a widget calls
+  `bd_dnd_begin` as today, so drag-from-widget → drop-into-world is end to end.
+
+**Reference examples.** Both live under `examples/` (a single-surface SDL3 host is
+the natural fit: it owns its clear + scene render, which a compositing host needs,
+where the multi-window gallery's all-in-one render loop cannot expose that seam).
+The two examples deliberately show the two event-passthrough architectures:
+
+- `examples/canvas` -- the **minimal** Option B demo (`canvas_example.c`). A
+  spinning triangle drawn into a passthrough canvas rect (`bd_managed_canvas_rect`
+  scissors the pass), one "Bag" window floating over it as a canvas-managed
+  frame, and the three API calls in isolation: `set_passthrough`, `on_input`
+  (drag to spin, wheel to resize), `on_drop` (drag the item onto the bare scene
+  to drop a marker into the world). The smallest thing that exercises the feature.
+- `examples/sdl3` -- the **full** Option A demo (`sdl3_example.c`). The
+  rotatable tetrahedron fills the whole window as the background and the host
+  reads scene input by peeking at `bd_gui_event`'s return value (no canvas
+  callbacks); the UI is a rich set of surface-WM windows floating over it. This
+  is the whole-window-background variant, still fully supported.
+
+The headless toolkit test (`test/test_gui.c`) covers the Option B routing itself:
+`bd_managed_canvas_rect`, local-coordinate `on_input`, capture past the canvas
+edge, keyboard focus transfer, and `on_drop` world coordinates.
+
+Note the layering constraint Option B exposes: because `canvas_wm_event`
+intercepts before the surface WM, windows that float *over* a passthrough canvas
+must be the canvas's own managed frames (checked by `wm_frame_at` first), not
+surface-WM frames -- otherwise the passthrough would swallow clicks meant for
+them. The minimal example's Bag window is parented to the canvas for exactly this
+reason.
 
 ### Cross-widget drag-and-drop — implemented
 

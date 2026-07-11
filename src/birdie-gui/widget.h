@@ -56,7 +56,7 @@ enum bd_gravity {
 };
 
 /*
- * Widget anchor (BD_ANCHOR_I) — how a child sits within the cell the layout
+ * Widget anchor (BD_ANCHOR_I) -- how a child sits within the cell the layout
  * gives it, by compass point. BD_ANCHOR_FILL (the default) stretches the child
  * to fill the cell, matching the pre-anchor behavior.
  *   - In a FIXED container the anchor pins the child (at its preferred size) to
@@ -80,7 +80,7 @@ enum bd_anchor {
 };
 
 /*
- * Container packing (BD_PACK_I) — how a ROW/COL container distributes leftover
+ * Container packing (BD_PACK_I) -- how a ROW/COL container distributes leftover
  * main-axis space among its children when they do not fill it (i.e. no child
  * grows). BD_PACK_START (the default) leaves the slack at the end. Ignored when
  * any child has BD_GROW_I, since grow already consumes the slack.
@@ -94,7 +94,7 @@ enum bd_pack {
 };
 
 /*
- * Attribute IDs — low 4 bits encode the value type so the varargs
+ * Attribute IDs -- low 4 bits encode the value type so the varargs
  * reader knows which va_arg width to pull:
  *   0=end  1=int  2=string  3=pointer  4=callback  5=color  6=bool
  */
@@ -160,7 +160,7 @@ bd_id       bd_parent(bd_id id);
 bd_id       bd_first_child(bd_id id);
 bd_id       bd_next_sibling(bd_id id);
 
-/* GUI lifecycle — driven by the host's main loop. bd_gui_init() takes the
+/* GUI lifecycle -- driven by the host's main loop. bd_gui_init() takes the
  * renderer/window backend the toolkit will draw through and an optional chrome
  * theme (NULL = bd_theme_default()); bd_gui_event() consumes neutral events
  * the host translates from its native ones. */
@@ -342,6 +342,46 @@ bd_id bd_managed_canvas_of(bd_id descendant);
  * as a free-floating desktop icon on the canvas (double-click restores it, drag
  * repositions it), instead of only vanishing to a BD_DOCK. Off by default. */
 void bd_managed_canvas_set_icon_minimize(bd_id canvas, int on);
+
+/*
+ * GLES-background canvas (compositing widgets over a live host-drawn scene).
+ * A canvas put into passthrough mode paints no backdrop -- the host's GL scene,
+ * rendered into the canvas rect before bd_gui_render(), shows through -- and
+ * routes input that lands on bare canvas backdrop (not over a managed frame,
+ * desktop icon, or scoped child widget) to the app underneath as canvas-local
+ * events.
+ *
+ * The host owns the clear and the 3D draw (leave the backend `clear` hook NULL);
+ * each frame it queries bd_managed_canvas_rect, scissors its scene to that rect,
+ * renders, then calls bd_gui_render to composite the chrome on top.
+ *
+ *   on_input: pointer / mouse / scroll / key over the passthrough region, in
+ *             canvas-local coordinates (0,0 = canvas top-left; keyboard events
+ *             carry no position). Return 1 if the app consumed the event.
+ *   on_drop:  a cross-widget drag (bd_dnd_begin) released over the passthrough
+ *             region. `lx`,`ly` are canvas-local; the payload is valid only for
+ *             the call. Return 1 to accept the drop.
+ *
+ * A left press on bare backdrop captures the pointer until release (so a world
+ * click-drag survives passing under a floating frame) and gives the canvas
+ * keyboard focus (keys then flow to on_input until focus moves to a widget).
+ */
+struct bd_dnd_payload;   /* defined in widget_ext.h */
+typedef struct bd_canvas_cb {
+	int (*on_input)(bd_id canvas, const bd_event *local, void *user);
+	int (*on_drop)(bd_id canvas, const struct bd_dnd_payload *p,
+	               int lx, int ly, void *user);
+	void *user;
+} bd_canvas_cb;
+
+/* Enable passthrough on `canvas` with the given callbacks (copied), or pass
+ * cb == NULL to turn it off and restore the solid backdrop. */
+void bd_managed_canvas_set_passthrough(bd_id canvas, const bd_canvas_cb *cb);
+
+/* The canvas rect in its OS window's pixels (origin top-left), for the host to
+ * scissor its 3D pass into. Returns 1 and fills *x,*y,*w,*h when the canvas is
+ * laid out and visible, else 0 (any of the out pointers may be NULL). */
+int bd_managed_canvas_rect(bd_id canvas, int *x, int *y, int *w, int *h);
 
 /* Enumerate the top-level frames of one WM host: the surface desktop when
  * host == BD_NONE (== bd_window_list), else the frames managed by that canvas.
