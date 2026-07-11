@@ -174,6 +174,14 @@ What is built:
   or faceted cut-glass jewel lens) drawn in a fragment shader. Its state is an
   index into a string-parsed color list (names or `#hex`), state 0 = off;
   optionally a clickable lamp button that cycles. `bd_widget_indicator.{c,h}`.
+- **Meters** (extension) — a compact 0..1 instrument in five styles: a level
+  `BAR` (smooth or LED-segmented), a `VU` needle on a cream arc, a magic-eye
+  `EYE` tube and a liquid `VIAL` orb (both fragment shaders), and a `PIE`. One
+  value drives all: color zones (a low->high color list split by break points)
+  color the moving element, an optional peak-hold marker tracks the recent max,
+  and optional VU / peak-hold ballistics ease the needle over ~300 ms.
+  `bd_widget_meter.{c,h}`. A plain determinate/indeterminate progress bar is the
+  simpler sibling `bd_widget_progress.{c,h}`.
 - **Editor widget** (extension) — rich-text, row-oriented text editor (style
   runs: fg/bg/underline/strike/bold/super-sub) for code or ABC-notation music.
 - **Explorer widget** (extension) — model-driven icon grid with selection

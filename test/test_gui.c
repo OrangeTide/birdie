@@ -21,11 +21,14 @@
 #include "bd_widget_actionbar.h"
 #include "bd_widget_tabview.h"
 #include "bd_widget_indicator.h"
+#include "bd_widget_meter.h"
+#include "bd_widget_progress.h"
 #include "bd_asset.h"
 #include "bd_utf8.h"
 #include "bd_draw.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <unistd.h>
 
 /* ---- table model: deliberately unsorted, with string!=numeric port order ---- */
@@ -2215,6 +2218,63 @@ main(void)
 	check("tile: malformed-UTF-8 label lays out without over-read", 1);
 	bd_gui_cleanup();
 	}
+
+	/* ---- BD_METER: value clamp, zones, peak, every style renders ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id mroot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
+	bd_id mb = bd_meter_create(mroot, &(bd_meter_desc){
+	    .style = BD_METER_BAR, .value = 0.4f,
+	    .zones = "green amber red", .stops = "0.6 0.85", .peak = 1 }, BD_END);
+	check("meter get returns the set value (exact mode)",
+	    fabsf(bd_meter_get(mb) - 0.4f) < 0.001f);
+	bd_meter_set(mb, 1.5f);
+	check("meter clamps a value above 1", bd_meter_get(mb) == 1.0f);
+	bd_meter_set(mb, -0.2f);
+	check("meter clamps a value below 0", bd_meter_get(mb) == 0.0f);
+	bd_meter_set(mb, 0.5f);
+	bd_meter_reset_peak(mb);
+	check("meter reset_peak leaves the live value", bd_meter_get(mb) == 0.5f);
+
+	/* one of each style, then a layout+render pass must not crash (EYE/VIAL
+	 * exercise the shader path, PIE/VU the quad path) */
+	bd_meter_create(mroot, &(bd_meter_desc){ .style = BD_METER_VU,
+	    .value = 0.6f, .zones = "green amber red" }, BD_END);
+	bd_meter_create(mroot, &(bd_meter_desc){ .style = BD_METER_EYE,
+	    .value = 0.7f, .label = "SIG" }, BD_END);
+	bd_meter_create(mroot, &(bd_meter_desc){ .style = BD_METER_PIE,
+	    .value = 0.3f, .peak = 1 }, BD_END);
+	bd_meter_create(mroot, &(bd_meter_desc){ .style = BD_METER_VIAL,
+	    .value = 0.8f, .zones = "red amber green" }, BD_END);
+	bd_gui_layout(480, 480);
+	bd_gui_render();
+	check("meter renders every style without crashing", 1);
+	bd_meter_set_zones(mb, "blue white", "0.5");
+	bd_gui_render();
+	check("meter set_zones re-parses without crashing", 1);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_PROGRESS: clamp, determinate + indeterminate render ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id proot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_id pb = bd_progress_create(proot, &(bd_progress_desc){
+	    .value = 0.5f, .show_percent = 1, .label = "Load" }, BD_END);
+	check("progress get returns the set value",
+	    fabsf(bd_progress_get(pb) - 0.5f) < 0.001f);
+	bd_progress_set(pb, 2.0f);
+	check("progress clamps to 1", bd_progress_get(pb) == 1.0f);
+	bd_gui_layout(400, 80);
+	bd_gui_render();
+	check("progress renders determinate without crashing", 1);
+	bd_progress_set_indeterminate(pb, 1);
+	bd_gui_render();
+	check("progress renders indeterminate without crashing", 1);
+	}
+	bd_gui_cleanup();
 
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;

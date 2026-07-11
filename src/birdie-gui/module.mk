@@ -42,7 +42,9 @@ birdie_gui_SRCS = \
 	bd_widget_dock.c \
 	bd_widget_actionbar.c \
 	bd_widget_tabview.c \
-	bd_widget_indicator.c
+	bd_widget_indicator.c \
+	bd_widget_meter.c \
+	bd_widget_progress.c
 
 # The core has no terminal dependency now (BD_TERMINAL moved to birdie_gui_vt);
 # it only bakes the stb single-headers, vendored under this directory's own

@@ -21,6 +21,9 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_table.h`     | sortable multi-column table                                     |
 | `bd_widget_inventory.h` | fixed grid of icon cells (game inventory)                       |
 | `bd_widget_canvas.h`    | pressure-sensitive drawing canvas                               |
+| `bd_widget_indicator.h` | panel-mount LED indicator lamp                                  |
+| `bd_widget_meter.h`     | 0..1 meters (bar / VU / magic eye / pie / liquid vial)          |
+| `bd_widget_progress.h`  | determinate / indeterminate progress bar                        |
 | `bd_backend_ludica.h` / `bd_backend_sdl3.h` | reference backends                            |
 
 ## Core lifecycle
@@ -299,6 +302,35 @@ bd_id bd_canvas_create(bd_id parent, ...);
 void  bd_canvas_set_ink(bd_id, uint32_t rgba);   void bd_canvas_set_alt_ink(bd_id, uint32_t rgba);
 void  bd_canvas_set_nib(bd_id, float px);        void bd_canvas_clear(bd_id);
 int   bd_canvas_stroke_count(bd_id);
+```
+
+### Meters (`bd_widget_meter.h`)
+
+A 0..1 quantity as a physical instrument, output-only. `style` picks the look;
+`zones` is a low->high color list (names or `#hex`) split by `stops` (or evenly)
+into bands that color the moving element; `peak` holds a marker at the recent
+max; `ballistic` eases the value (`BD_METER_EXACT` / `_VU_BALLISTIC` / `_PEAK_HOLD`).
+
+```c
+enum { BD_METER_BAR, BD_METER_VU, BD_METER_EYE, BD_METER_PIE, BD_METER_VIAL };
+enum { BD_METER_EXACT, BD_METER_VU_BALLISTIC, BD_METER_PEAK_HOLD };
+bd_id bd_meter_create(bd_id parent, const bd_meter_desc *desc, ...);
+void  bd_meter_set(bd_id, float value);          float bd_meter_get(bd_id);
+void  bd_meter_set_zones(bd_id, const char *zones, const char *stops);
+void  bd_meter_reset_peak(bd_id);
+/* desc: style, value, zones, stops, peak, ballistic, orient, segments, size, label, color */
+```
+
+### Progress bar (`bd_widget_progress.h`)
+
+The simple sibling of `BD_METER_BAR`: a determinate fill, an optional `NN%`
+readout, or an indeterminate marquee. (A round "ball" progress is `BD_METER_VIAL`.)
+
+```c
+bd_id bd_progress_create(bd_id parent, const bd_progress_desc *desc, ...);
+void  bd_progress_set(bd_id, float value);       float bd_progress_get(bd_id);
+void  bd_progress_set_indeterminate(bd_id, int on);
+/* desc: value, indeterminate, show_percent, orient, color, label */
 ```
 
 ## Theme (`bd_theme.h`)
