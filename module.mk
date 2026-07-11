@@ -194,6 +194,8 @@ DIST_SOURCES := widget.c bd_draw.c bd_embed_font.h bd_asset.c bd_utf8.c bd_color
                 bd_embed_pushpin.h \
                 pushpin_out_10.xbm pushpin_in_10.xbm \
                 pushpin_out_14.xbm pushpin_in_14.xbm \
+                bd_embed_padlock.h \
+                padlock_closed_14.xbm padlock_open_14.xbm \
                 bd_backend_gles_core.c bd_gl.c \
                 bd_backend_ludica.c bd_backend_ludica.h \
                 bd_backend_sdl3.c bd_backend_sdl3.h

@@ -10,6 +10,7 @@
 
 #include "bd_embed_font.h"   /* embedded 8x8 + 8x16 bitmap faces + codepoint maps */
 #include "bd_embed_pushpin.h" /* embedded 1-bit pushpin glyphs (10px + 14px tiers) */
+#include "bd_embed_padlock.h" /* embedded 1-bit padlock glyphs (open / closed) */
 
 /*
  * Toolkit renderer on the backend GPU interface. One shader (textured *
@@ -96,6 +97,13 @@ static int         embed_baked_h;
 static bd_texture pin_tex;
 static int        pin_atlas_w, pin_atlas_h;
 static struct { int x, y, w, h; } pin_rect[2][2];
+
+/* Embedded padlock glyphs, baked once into a private texture (lock_tex, id 0 =
+ * not baked). lock_rect[state] is the glyph's rectangle in that texture.
+ * See bd_embed_padlock.h for the two states. */
+static bd_texture lock_tex;
+static int        lock_atlas_w, lock_atlas_h;
+static struct { int x, y, w, h; } lock_rect[2];
 
 /* Per-face parallel arrays, indexed by BD_FONT_BOLD|ITALIC|MONO. Each face is
  * resolved as: an explicit bd_font_face from the caller, else a source
@@ -500,6 +508,10 @@ bd_draw_shutdown(void)
 		be->destroy_texture(pin_tex);
 		pin_tex.id = 0;
 	}
+	if (lock_tex.id) {
+		be->destroy_texture(lock_tex);
+		lock_tex.id = 0;
+	}
 	be->destroy_texture(white);
 	be->destroy_shader(shader);
 	be = NULL;
@@ -854,6 +866,66 @@ bd_draw_pushpin(int pinned, float x, float y, int font_px, uint32_t rgba)
 	quad(pin_tex, x, y, (float)w, (float)h,
 	    rx / (float)pin_atlas_w, ry / (float)pin_atlas_h,
 	    (rx + w) / (float)pin_atlas_w, (ry + h) / (float)pin_atlas_h, rgba);
+}
+
+/* Bake the two padlock glyphs (open | closed) side by side into lock_tex. */
+static void
+ensure_locks(void)
+{
+	if (lock_tex.id || !be)
+		return;
+	int colw = bd_padlocks[BD_LOCK_OPEN].w + 2;
+	for (int s = 0; s < 2; s++) {
+		lock_rect[s].x = s == BD_LOCK_CLOSED ? colw : 0;
+		lock_rect[s].y = 0;
+		lock_rect[s].w = bd_padlocks[s].w;
+		lock_rect[s].h = bd_padlocks[s].h;
+	}
+	lock_atlas_w = colw + bd_padlocks[BD_LOCK_CLOSED].w;
+	lock_atlas_h = bd_padlocks[0].h > bd_padlocks[1].h
+	    ? bd_padlocks[0].h : bd_padlocks[1].h;
+
+	unsigned char *rgba = calloc((size_t)lock_atlas_w * lock_atlas_h * 4, 1);
+	if (!rgba)
+		return;
+	for (int s = 0; s < 2; s++) {
+		const struct bd_padlock_bitmap *b = &bd_padlocks[s];
+		int stride = (b->w + 7) / 8;
+		int rx = lock_rect[s].x, ry = lock_rect[s].y;
+		for (int yy = 0; yy < b->h; yy++)
+			for (int xx = 0; xx < b->w; xx++) {
+				if (b->bits[yy * stride + (xx >> 3)] & (1u << (xx & 7)))
+					continue;   /* ink = cleared bit */
+				unsigned char *p =
+				    &rgba[(((size_t)(ry + yy)) * lock_atlas_w + (rx + xx)) * 4];
+				p[0] = p[1] = p[2] = p[3] = 255;
+			}
+	}
+	lock_tex = be->make_texture(lock_atlas_w, lock_atlas_h, rgba);
+	free(rgba);
+}
+
+void
+bd_draw_padlock_size(int locked, int *w, int *h)
+{
+	const struct bd_padlock_bitmap *b =
+	    &bd_padlocks[locked ? BD_LOCK_CLOSED : BD_LOCK_OPEN];
+	if (w) *w = b->w;
+	if (h) *h = b->h;
+}
+
+void
+bd_draw_padlock(int locked, float x, float y, uint32_t rgba)
+{
+	ensure_locks();
+	if (!lock_tex.id)
+		return;
+	int s = locked ? BD_LOCK_CLOSED : BD_LOCK_OPEN;
+	int rx = lock_rect[s].x, ry = lock_rect[s].y;
+	int w = lock_rect[s].w, h = lock_rect[s].h;
+	quad(lock_tex, x, y, (float)w, (float)h,
+	    rx / (float)lock_atlas_w, ry / (float)lock_atlas_h,
+	    (rx + w) / (float)lock_atlas_w, (ry + h) / (float)lock_atlas_h, rgba);
 }
 
 float bd_draw_text_width(const char *s)

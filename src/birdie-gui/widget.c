@@ -3226,31 +3226,18 @@ render_frame(bd_id frame, int w, int h)
 	bd_draw_end();
 }
 
-/* A padlock glyph inside an WM_BTN_SZ box at (bx,by), drawn over the title-bar
- * `face` color: a solid body with a keyhole and a 2px inverted-U shackle. When
- * locked the shackle is closed onto the body; when unlocked it is raised and
- * hinged aside so it reads as an open hasp. */
+/* The title-bar lock button glyph inside an WM_BTN_SZ box at (bx,by): an
+ * embedded 1-bit padlock (bd_draw_padlock), tinted `color` and centered in the
+ * box. `locked` draws the closed padlock, else the open one. */
 static void
 draw_padlock(int bx, int by, int locked, uint32_t color, uint32_t face)
 {
-	int bw = 9, bh = 6;
-	int body_x = bx + (WM_BTN_SZ - bw) / 2;
-	int body_y = by + WM_BTN_SZ - bh - 2;
-
-	/* shackle as a 2px ring: fill the outer arch, then punch the interior
-	 * (and its open bottom) back to the face color */
-	int sw = bw - 3;                       /* arch outer width */
-	int sh = 6;                            /* arch height */
-	int sx = body_x + (bw - sw) / 2;
-	int sy = body_y - sh + (locked ? 2 : 0);
-	if (!locked)
-		sx += sw - 2;                  /* pivot to one leg: unlatched */
-	fill_rect(sx, sy, sw, sh, color);
-	fill_rect(sx + 2, sy + 2, sw - 4 > 0 ? sw - 4 : 1, sh, face);
-
-	/* body, then a keyhole notched out of it */
-	fill_rect(body_x, body_y, bw, bh, color);
-	fill_rect(body_x + bw / 2 - 1, body_y + 2, 2, 2, face);
+	(void)face;
+	int gw = 0, gh = 0;
+	bd_draw_padlock_size(locked, &gw, &gh);
+	int ox = bx + (WM_BTN_SZ - gw) / 2;
+	int oy = by + (WM_BTN_SZ - gh) / 2;
+	bd_draw_padlock(locked, (float)ox, (float)oy, color);
 }
 
 /* A minimize glyph inside an WM_BTN_SZ box at (bx,by): a short bar near the

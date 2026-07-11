@@ -154,4 +154,11 @@ void  bd_draw_cell(uint32_t cp, float x, float y, int cell_h, uint32_t rgba);
 void  bd_draw_pushpin(int pinned, float x, float y, int font_px, uint32_t rgba);
 void  bd_draw_pushpin_size(int pinned, int font_px, int *w, int *h);
 
+/* Embedded padlock glyph for the window-manager lock button, drawn like a
+ * tinted text glyph: a 1-bit mask baked into the toolkit (no asset file).
+ * `locked` picks the closed (locked) vs open (unlocked) state; `rgba` tints it.
+ * bd_draw_padlock_size reports its pixel size (either w or h may be NULL). */
+void  bd_draw_padlock(int locked, float x, float y, uint32_t rgba);
+void  bd_draw_padlock_size(int locked, int *w, int *h);
+
 #endif
