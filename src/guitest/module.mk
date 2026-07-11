@@ -1,5 +1,5 @@
 #
-# src/guitest/module.mk — standalone widget gallery on the raw X11/EGL/GLES
+# src/guitest/module.mk -- standalone widget gallery on the raw X11/EGL/GLES
 # backend.
 #
 # birdie-gui-gallery exhibits and exercises every working widget on a non-ludica

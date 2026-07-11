@@ -1,5 +1,5 @@
 /*
- * bd_color.c — parse human-authored color names / #hex into packed RGBA8.
+ * bd_color.c -- parse human-authored color names / #hex into packed RGBA8.
  *
  * Adopted from the copy that lived in bd_widget_indicator.c and was duplicated
  * verbatim in bd_widget_meter.c; both now call these. See bd_color.h.

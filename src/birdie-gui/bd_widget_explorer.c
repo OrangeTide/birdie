@@ -7,7 +7,7 @@
 #include <string.h>
 
 /*
- * Explorer / icon-browser widget — skeleton.
+ * Explorer / icon-browser widget -- skeleton.
  *
  * Implemented: model query + grid/free layout, rendering (recessed panel,
  * icons or a placeholder, labels, selection highlight, disabled dimming),

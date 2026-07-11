@@ -123,7 +123,7 @@ nib_halfwidth(const struct sketch *c, const bd_event *ev)
 	return w * 0.5f;
 }
 
-/* Remove strokes with any point within r of (px,py) — the eraser. */
+/* Remove strokes with any point within r of (px,py) -- the eraser. */
 static void
 sketch_erase_at(struct sketch *c, float px, float py, float r)
 {

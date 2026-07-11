@@ -1,5 +1,5 @@
 /*
- * widget_test.c — birdie-gui widget gallery.
+ * widget_test.c -- birdie-gui widget gallery.
  *
  * A standalone sample that exhibits and exercises every working widget on the
  * raw-GLES backend (bd_backend_gles + window.h), independent of ludica. birdie

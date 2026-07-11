@@ -1,5 +1,5 @@
 /*
- * bd_utf8.h — UTF-8 encoding and decoding for birdie-gui.
+ * bd_utf8.h -- UTF-8 encoding and decoding for birdie-gui.
  *
  * A small, length-bounded UTF-8 codec. Decoding takes an explicit byte count
  * so it can never read past the end of a buffer on a truncated sequence, which

@@ -1,5 +1,5 @@
 /*
- * bd_backend_sdl3.c — SDL3 + OpenGL ES 3 binding for the bd_backend interface.
+ * bd_backend_sdl3.c -- SDL3 + OpenGL ES 3 binding for the bd_backend interface.
  *
  * Window and context management, the bd_backend vtable (shaders, a dynamic
  * quad batch, textures, scissor, clipboard, IME), and SDL-event translation.

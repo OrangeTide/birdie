@@ -3,7 +3,7 @@
 #
 # Pulls in the vendored ludica tree (src/thirdparty/ludica/) plus birdie's
 # own sources under src/birdie/. We deliberately do *not* include ludica's
-# own src/module.mk — its SUBDIRS pull in samples/imgui/tools which we
+# own src/module.mk -- its SUBDIRS pull in samples/imgui/tools which we
 # don't need, and its shader rule assumes `tools/glsl2h` lives at the
 # make-invocation root. Instead we SUBDIR into just the ludica library
 # dirs we care about and redeclare the shader rule with the vendored path.
@@ -38,11 +38,11 @@ endif
 
 # GL Loader configuration:
 #
-#   BD_GL_LOADER=builtin (default)  — birdie-gui provides a built-in GLES loader.
+#   BD_GL_LOADER=builtin (default)  -- birdie-gui provides a built-in GLES loader.
 #                                      All GL entry points are resolved at runtime
 #                                      via bd_gles_load_gl(getproc). No link-time
 #                                      GL libs needed. Portable across Linux/Windows.
-#   BD_GL_LOADER=external           — birdie-gui assumes GL entry points are
+#   BD_GL_LOADER=external           -- birdie-gui assumes GL entry points are
 #                                      already available (GLEW, GLAD, Galogen,
 #                                      direct linking, or a custom loader).
 #                                      bd_gles_load_gl() becomes a no-op.
@@ -208,7 +208,7 @@ DIST_STB_FILES := stb_truetype.h stb_image.h
 # can build the GLES-core backend with the default built-in loader on a platform
 # without system GLES headers (notably Windows). Mirrors the in-tree layout.
 DIST_KHRONOS := src/birdie-gui/thirdparty/khronos
-# the terminal library (VT engine + widget) — bundled so BD_TERMINAL compiles
+# the terminal library (VT engine + widget) -- bundled so BD_TERMINAL compiles
 DIST_VT     := src/birdie-gui/bd_vt
 
 .PHONY : dist

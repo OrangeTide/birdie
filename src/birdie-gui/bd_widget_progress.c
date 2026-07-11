@@ -1,5 +1,5 @@
 /*
- * bd_widget_progress.c — a plain determinate/indeterminate progress bar.
+ * bd_widget_progress.c -- a plain determinate/indeterminate progress bar.
  *
  * The simple sibling of BD_METER_BAR: a track with a fill to a 0..1 fraction,
  * an optional percent readout, and an optional indeterminate marquee. Pure

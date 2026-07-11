@@ -6,7 +6,7 @@
 #include <stdarg.h>
 
 /*
- * Extension API — the second consumer tier of the toolkit. Where widget.h is
+ * Extension API -- the second consumer tier of the toolkit. Where widget.h is
  * for apps that *use* widgets, this header is for code that *defines new kinds
  * of widgets*, the way the VT terminal does. An extension fills a
  * bd_widget_class, registers it to obtain a type id, then builds its own

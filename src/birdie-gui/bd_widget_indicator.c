@@ -1,5 +1,5 @@
 /*
- * bd_widget_indicator.c — panel-mount LED indicator lamp.
+ * bd_widget_indicator.c -- panel-mount LED indicator lamp.
  *
  * An extension widget built on widget_ext.h and drawn in a fragment shader,
  * the same recipe as the knob and toggle in bd_widget_value.c. The state is an

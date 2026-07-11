@@ -1,5 +1,5 @@
 /*
- * bd_widget_tabview — a tabbed container. See bd_widget_tabview.h.
+ * bd_widget_tabview -- a tabbed container. See bd_widget_tabview.h.
  *
  * A thin, composite extension widget: it owns a core BD_TAB_BAR strip and a
  * BD_LAYOUT_FIXED content panel, and adds one BD_PANEL pane per tab as a child

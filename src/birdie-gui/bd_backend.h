@@ -4,7 +4,7 @@
 #include <stddef.h>   /* size_t (resolve_asset) */
 
 /*
- * bd_backend — thin portability layer between the widget toolkit and the
+ * bd_backend -- thin portability layer between the widget toolkit and the
  * underlying windowing/rendering library. The toolkit (widget.c) never
  * touches ludica, SDL, raylib, or GLFW directly; it speaks only to a
  * bd_backend vtable and the neutral bd_event below. A host implements the

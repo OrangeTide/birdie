@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /*
- * Sketch pad — a pressure-sensitive drawing surface built on the extension
+ * Sketch pad -- a pressure-sensitive drawing surface built on the extension
  * API (widget_ext.h) and the stylus event routing in core (BD_EV_PEN_*). It
  * turns pen input into variable-width ink strokes: tip pressure sets the nib
  * width, tilt widens it, the barrel button switches to a second ink, and the

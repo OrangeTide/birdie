@@ -1,5 +1,5 @@
 #
-# src/birdie-gui/bd_vt/module.mk — the terminal (VT) library.
+# src/birdie-gui/bd_vt/module.mk -- the terminal (VT) library.
 #
 # birdie_gui_vt bundles the terminal escape-sequence engine (the vt_* / rune_width
 # sources, formerly the standalone libvt) together with the terminal *widget*

@@ -2,7 +2,7 @@
 #define BD_BACKEND_GLES_CORE_H
 
 /*
- * bd_backend_gles_core — the GPU half of a bd_backend, implemented once
+ * bd_backend_gles_core -- the GPU half of a bd_backend, implemented once
  * against raw OpenGL ES 3. Shaders, a streaming quad batch, textures, and
  * scissor are identical across every GLES host, so the SDL3 backend and the
  * raw X11/EGL/GLES gallery backend both bind their vtable rows to these

@@ -121,7 +121,7 @@ float bd_draw_text_width(const char *s);
 float bd_draw_line_height(void);   /* baked font ascent+descent+gap, pixels */
 float bd_draw_ascent(void);        /* baked font ascent, pixels */
 
-/* Font style: a bitmask selecting one of eight baked faces — bold/italic in a
+/* Font style: a bitmask selecting one of eight baked faces -- bold/italic in a
  * proportional or a fixed-width (BD_FONT_MONO) family. A variant whose TTF was
  * not found falls back to the regular proportional face. */
 enum {

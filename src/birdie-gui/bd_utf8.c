@@ -1,5 +1,5 @@
 /*
- * bd_utf8.c — UTF-8 encoding and decoding for birdie-gui. See bd_utf8.h.
+ * bd_utf8.c -- UTF-8 encoding and decoding for birdie-gui. See bd_utf8.h.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */

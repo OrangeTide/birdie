@@ -1,5 +1,5 @@
 /*
- * bd_backend_gles.c — birdie-gui backend on raw OpenGL ES 3.
+ * bd_backend_gles.c -- birdie-gui backend on raw OpenGL ES 3.
  *
  * Implements the bd_backend GPU vtable (shaders, vertex draws, uniforms,
  * textures, scissor) directly against GLES3, paired with the window.h

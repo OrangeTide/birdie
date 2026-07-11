@@ -1,5 +1,5 @@
 #
-# src/birdie-gui/module.mk — the birdie-gui widget toolkit, as a library.
+# src/birdie-gui/module.mk -- the birdie-gui widget toolkit, as a library.
 #
 # Declares one library:
 #

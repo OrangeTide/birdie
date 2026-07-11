@@ -38,7 +38,7 @@ float bd_slider_get(bd_id id);
 enum {
 	BD_DIAL_NONE = 0,   /* no markings */
 	BD_DIAL_DOTS,       /* evenly spaced dots (one per detent if step set,
-	                       else 11) — the default */
+	                       else 11) -- the default */
 	BD_DIAL_BALANCE,    /* three dots: both ends and the center */
 	BD_DIAL_LABELS,     /* numeric labels at the ends and round values
 	                       between, decimal or hex (see .hex) */

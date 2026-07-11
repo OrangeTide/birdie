@@ -1,5 +1,5 @@
 #
-# examples/sdl3/module.mk — the birdie-gui SDL3 example.
+# examples/sdl3/module.mk -- the birdie-gui SDL3 example.
 #
 # Compiles the demo host (sdl3_example.c) together with the SDL3 backend and the
 # birdie-gui toolkit sources from the parent tree, including the terminal

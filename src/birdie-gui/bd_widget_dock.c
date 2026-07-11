@@ -1,8 +1,8 @@
 /*
- * bd_widget_dock — a NeXTSTEP / WindowMaker-style dock. See bd_widget_dock.h
+ * bd_widget_dock -- a NeXTSTEP / WindowMaker-style dock. See bd_widget_dock.h
  * and doc/gui/dock-design.md.
  *
- * The tile set is derived, not owned: each frame → tile projection of the WM's
+ * The tile set is derived, not owned: each frame -> tile projection of the WM's
  * minimized-window set (bd_window_list + bd_window_minimized), rebuilt every
  * layout/render. The dock sizes itself to its tiles and anchors to its gravity
  * edge via BD_ANCHOR_I, so a BD_LAYOUT_FIXED parent (the desktop root) places

@@ -1,5 +1,5 @@
 /*
- * bd_backend_gles_core.c — GPU half of a bd_backend on raw OpenGL ES 3.
+ * bd_backend_gles_core.c -- GPU half of a bd_backend on raw OpenGL ES 3.
  *
  * Shaders, a streaming quad batch, textures, viewport/clear/scissor: the code
  * every GLES host shares. The SDL3 backend and the raw X11/EGL/GLES gallery

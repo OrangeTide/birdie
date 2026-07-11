@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /*
- * VT terminal — an extension widget built on the toolkit's widget-class API
+ * VT terminal -- an extension widget built on the toolkit's widget-class API
  * (widget_ext.h). It is the reference example of "define a new kind of widget"
  * and the one widget that depends on libvt; core widget.c knows nothing about
  * it.

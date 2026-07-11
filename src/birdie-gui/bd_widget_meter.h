@@ -10,16 +10,16 @@
  * instrument. Output-only, drawn like the knob/indicator. One widget, several
  * appearances chosen with `style`:
  *
- *   BD_METER_BAR  — a level bar (horizontal or vertical), lit up to the value,
+ *   BD_METER_BAR  -- a level bar (horizontal or vertical), lit up to the value,
  *                   colored by zone; cheap, legible, reusable. `segments` gives
  *                   an LED-bargraph look instead of a smooth fill.
- *   BD_METER_VU   — a cream-faced arc with a swinging needle and a red zone near
+ *   BD_METER_VU   -- a cream-faced arc with a swinging needle and a red zone near
  *                   full, the classic D'Arsonval VU/panel meter.
- *   BD_METER_EYE  — a "magic eye" tuning tube: a green fluorescent disc whose
+ *   BD_METER_EYE  -- a "magic eye" tuning tube: a green fluorescent disc whose
  *                   dark shadow wedge closes as the value rises (a shader).
- *   BD_METER_PIE  — a filled pie/sector that grows with the value; abstract and
+ *   BD_METER_PIE  -- a filled pie/sector that grows with the value; abstract and
  *                   instantly readable.
- *   BD_METER_VIAL — a glass globe of liquid that fills with the value, the
+ *   BD_METER_VIAL -- a glass globe of liquid that fills with the value, the
  *                   action-RPG life/mana orb (a shader): colored liquid to a
  *                   bright meniscus inside a glass rim with a specular highlight.
  *
@@ -34,7 +34,7 @@
  * Peak marker: set `peak` to hold a marker at the recent maximum (it decays
  * slowly back toward the live value), like a PPM's peak hold.
  *
- * Ballistics: `ballistic` picks how the moving element chases a new value —
+ * Ballistics: `ballistic` picks how the moving element chases a new value --
  * BD_METER_EXACT jumps to it (deterministic; the default), BD_METER_VU_BALLISTIC
  * eases over ~300 ms like a real VU movement, BD_METER_PEAK_HOLD snaps up and
  * falls slowly. The eased modes animate, so they need the backend clock and a

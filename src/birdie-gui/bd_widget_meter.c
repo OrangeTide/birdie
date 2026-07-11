@@ -1,5 +1,5 @@
 /*
- * bd_widget_meter.c — compact 0..1 meters in several instrument styles.
+ * bd_widget_meter.c -- compact 0..1 meters in several instrument styles.
  *
  * Output-only extension widget (widget_ext.h), the same recipe as the knob and
  * indicator. One value drives five appearances: a level bar, a VU needle, a

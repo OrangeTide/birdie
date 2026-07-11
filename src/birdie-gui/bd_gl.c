@@ -1,5 +1,5 @@
 /*
- * bd_gl.c — OpenGL ES 3.0 function pointer loader.
+ * bd_gl.c -- OpenGL ES 3.0 function pointer loader.
  *
  * Resolves GLES entry points from a getproc callback. This decouples birdie-gui
  * from how GL symbols are made available (system linker, GLEW, GLAD, Galogen,

@@ -1,5 +1,5 @@
 #
-# test/module.mk — headless unit test for the birdie-gui toolkit.
+# test/module.mk -- headless unit test for the birdie-gui toolkit.
 #
 # test_gui links the toolkit library (birdie_gui, which pulls in libvt) against
 # a recording stub backend defined inside the test itself. No window, no ludica,

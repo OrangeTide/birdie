@@ -1,5 +1,5 @@
 /*
- * sdl3_example.c — birdie-gui on an SDL3 window + OpenGL ES 3 context, mixing
+ * sdl3_example.c -- birdie-gui on an SDL3 window + OpenGL ES 3 context, mixing
  * the toolkit's 2D UI with a hand-written 3D scene.
  *
  * The window shows a rotatable 3D tetrahedron drawn with raw GLES3 as the

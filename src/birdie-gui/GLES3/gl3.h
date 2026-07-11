@@ -1,5 +1,5 @@
 /*
- * GLES3/gl3.h — Shim header that provides OpenGL ES 3.0 function pointers
+ * GLES3/gl3.h -- Shim header that provides OpenGL ES 3.0 function pointers
  * when birdie-gui is built with the built-in GL loader (BD_GL_LOADER_BUILTIN).
  *
  * When the built-in loader is enabled, this shim sits on the include path

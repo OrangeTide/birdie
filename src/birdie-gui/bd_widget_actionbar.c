@@ -1,5 +1,5 @@
 /*
- * bd_widget_actionbar — a game hotbar / floating tool palette. See
+ * bd_widget_actionbar -- a game hotbar / floating tool palette. See
  * bd_widget_actionbar.h.
  *
  * The mutable sibling of bd_widget_dock: same beveled tiles (bd_draw_tile) and

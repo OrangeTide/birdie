@@ -1,5 +1,5 @@
 /*
- * bd_gl.h — OpenGL ES 3.0 function pointers and loader.
+ * bd_gl.h -- OpenGL ES 3.0 function pointers and loader.
  *
  * When BD_GL_LOADER_BUILTIN is defined (the default), this module supplies
  * function pointers for all GLES functions birdie-gui uses. Call bd_gl_load()
