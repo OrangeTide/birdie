@@ -55,17 +55,20 @@ is_vertical(int g)
 	return g != BD_GRAVITY_TOP && g != BD_GRAVITY_BOTTOM;
 }
 
-/* the anchor corner the strip pins to, from its gravity */
+/* the anchor point (edge-center or corner) the strip pins to, from its gravity */
 static int
 dock_anchor(int g)
 {
 	switch (g) {
-	case BD_GRAVITY_RIGHT:
+	case BD_GRAVITY_LEFT:         return BD_ANCHOR_W;
+	case BD_GRAVITY_RIGHT:        return BD_ANCHOR_E;
+	case BD_GRAVITY_TOP:          return BD_ANCHOR_N;
+	case BD_GRAVITY_BOTTOM:       return BD_ANCHOR_S;
+	case BD_GRAVITY_TOP_LEFT:     return BD_ANCHOR_NW;
 	case BD_GRAVITY_TOP_RIGHT:    return BD_ANCHOR_NE;
+	case BD_GRAVITY_BOTTOM_LEFT:  return BD_ANCHOR_SW;
 	case BD_GRAVITY_BOTTOM_RIGHT: return BD_ANCHOR_SE;
-	case BD_GRAVITY_BOTTOM_LEFT:
-	case BD_GRAVITY_BOTTOM:       return BD_ANCHOR_SW;
-	default:                      return BD_ANCHOR_NW; /* LEFT/TOP_LEFT/TOP/NONE */
+	default:                      return BD_ANCHOR_NW; /* NONE */
 	}
 }
 

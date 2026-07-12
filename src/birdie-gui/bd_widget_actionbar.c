@@ -87,18 +87,22 @@ is_vertical(const struct actionbar *a)
 	}
 }
 
-/* the anchor corner the bar pins to, from its gravity (mirrors the dock) */
+/* the anchor point (edge-center or corner) the bar pins to, from its gravity
+ * (mirrors the dock) */
 static int
 ab_anchor(int g)
 {
 	switch (g) {
-	case BD_GRAVITY_RIGHT:
+	case BD_GRAVITY_LEFT:         return BD_ANCHOR_W;
+	case BD_GRAVITY_RIGHT:        return BD_ANCHOR_E;
+	case BD_GRAVITY_TOP:          return BD_ANCHOR_N;
+	case BD_GRAVITY_BOTTOM:       return BD_ANCHOR_S;
+	case BD_GRAVITY_TOP_LEFT:     return BD_ANCHOR_NW;
 	case BD_GRAVITY_TOP_RIGHT:    return BD_ANCHOR_NE;
+	case BD_GRAVITY_BOTTOM_LEFT:  return BD_ANCHOR_SW;
 	case BD_GRAVITY_BOTTOM_RIGHT: return BD_ANCHOR_SE;
-	case BD_GRAVITY_BOTTOM_LEFT:
-	case BD_GRAVITY_BOTTOM:       return BD_ANCHOR_SW;
 	case BD_GRAVITY_NONE:         return BD_ANCHOR_NW; /* float at X/Y */
-	default:                      return BD_ANCHOR_NW; /* LEFT/TOP_LEFT/TOP */
+	default:                      return BD_ANCHOR_NW;
 	}
 }
 

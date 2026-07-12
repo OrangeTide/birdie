@@ -956,7 +956,7 @@ main(void)
 	bd_id dskt = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
 	    BD_PAD_I, 0, BD_END);                    /* desktop (FIXED so the dock anchors) */
 	bd_id dock = bd_dock_create(dskt, NULL, BD_END);
-	bd_dock_set_gravity(dock, BD_GRAVITY_LEFT);  /* vertical strip, top-left */
+	bd_dock_set_gravity(dock, BD_GRAVITY_TOP_LEFT); /* vertical strip, top-left corner */
 	bd_id da = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Aa",
 	    BD_PREF_W_I, 200, BD_PREF_H_I, 150, BD_X_I, 300, BD_Y_I, 100, BD_END);
 	bd_id db = bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "Bb",
