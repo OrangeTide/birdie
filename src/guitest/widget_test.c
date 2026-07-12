@@ -781,9 +781,9 @@ build_ui(void)
 	bd_id cv = bd_managed_canvas_create(deskpane, BD_GROW_I, 1,
 		BD_BG_C, 0x1E2024FFu, BD_END);
 
-	/* a left-edge dock scoped to this canvas (empty until a frame is minimized) */
+	/* a top-left dock scoped to this canvas (empty until a frame is minimized) */
 	bd_id dk = bd_dock_create(cv, NULL, BD_END);
-	bd_dock_set_gravity(dk, BD_GRAVITY_LEFT);
+	bd_dock_set_gravity(dk, BD_GRAVITY_TOP_LEFT);
 	bd_dock_set_tile_size(dk, 40);
 
 	/* also show minimized frames as free-floating desktop icons along the

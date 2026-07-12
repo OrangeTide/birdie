@@ -601,11 +601,11 @@ build_ui(void)
 	bd_create(palette, BD_BUTTON, BD_LABEL_S, "Minimize", BD_PREF_H_I, 26,
 	    BD_ON_CLICK_F, on_palette_minimize, BD_END);
 
-	/* A NeXTSTEP-style dock hugging the left edge. It is derived state: a tile
+	/* A NeXTSTEP-style dock in the top-left corner. It is derived state: a tile
 	 * appears for each minimized window (click the title-bar "_" button), and
 	 * clicking a tile restores that window. Empty until something is minimized. */
 	bd_id dock = bd_dock_create(root, NULL, BD_END);
-	bd_dock_set_gravity(dock, BD_GRAVITY_LEFT);
+	bd_dock_set_gravity(dock, BD_GRAVITY_TOP_LEFT);
 	bd_dock_set_tile_size(dock, 48);
 
 	/* A CRPG-style action bar (hotbar): a floating strip of six empty slots.
