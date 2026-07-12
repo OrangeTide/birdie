@@ -958,8 +958,7 @@ register_window(bd_id id)
 	if (w->type != BD_FRAME || w->parent != BD_NONE)
 		return;
 	if (window_count < MAX_WINDOWS)
-		windows[window_count] = id;
-	window_count++;
+		windows[window_count++] = id;
 	w->focused = 1;                 /* assume focused until a FOCUS_OUT arrives */
 
 	if (!be || !be->multi_window) {

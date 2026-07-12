@@ -78,7 +78,7 @@ draw_glass_tube(uint32_t color, float value, int vert,
 		tube_shader = be->make_shader(BD_SHADER_QUAD_VERT, TUBE_FRAG);
 	float cr = ((color>>24)&0xFF)/255.0f, cg = ((color>>16)&0xFF)/255.0f,
 	      cb = ((color>>8)&0xFF)/255.0f;
-	float aspect = vert ? (h > 0 ? (float)h / w : 1.0f)
+	float aspect = vert ? (w > 0 ? (float)h / w : 1.0f)
 	                    : (h > 0 ? (float)w / h : 1.0f);
 	if (aspect < 1.0f) aspect = 1.0f;
 	be->set_uniform_vec3(tube_shader, "u_color", cr, cg, cb);
