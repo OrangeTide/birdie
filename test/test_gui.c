@@ -2134,6 +2134,35 @@ main(void)
 	bd_gui_cleanup();
 	}
 
+	/* ---- action bar: gravity anchors it inside a FIXED desktop ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	/* a FIXED desktop so anchored children pin to its content box */
+	bd_id desk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id gbar = bd_actionbar_create(desk, 5, NULL, BD_END);
+
+	/* BD_GRAVITY_BOTTOM: horizontal bar, centered on the bottom edge */
+	bd_actionbar_set_gravity(gbar, BD_GRAVITY_BOTTOM);
+	bd_gui_layout(800, 600);
+	int gx, gy, gw, gh;
+	bd_widget_rect(gbar, &gx, &gy, &gw, &gh);
+	check("BOTTOM bar runs horizontally", gw > gh);
+	check("BOTTOM bar is centered horizontally", gx == (800 - gw) / 2);
+	check("BOTTOM bar hugs the bottom edge", gy + gh == 600);
+
+	/* BD_GRAVITY_BOTTOM_RIGHT: distinct point -- pinned to the corner, not
+	 * centered (guards the 8-gravity-points mapping) */
+	bd_actionbar_set_gravity(gbar, BD_GRAVITY_BOTTOM_RIGHT);
+	bd_gui_layout(800, 600);
+	bd_widget_rect(gbar, &gx, &gy, &gw, &gh);
+	check("BOTTOM_RIGHT bar pins to the right edge", gx + gw == 800);
+	check("BOTTOM_RIGHT bar pins to the bottom edge", gy + gh == 600);
+	check("BOTTOM_RIGHT differs from BOTTOM (not centered)",
+	    gx != (800 - gw) / 2);
+	bd_gui_cleanup();
+	}
+
 	/* ---- tab view: swap complex panes, only the active one shows / hits ---- */
 	{
 	bd_gui_init(&stub, NULL);
