@@ -2662,6 +2662,22 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- bd_gui_config: runtime cap on top-level frames ---- */
+	bd_gui_init_cfg(&stub, &(bd_gui_config){ .max_windows = 3 });
+	{
+	/* create one more frame than the cap; the extra is dropped, not tracked,
+	 * and no window-iterating loop reads past the array (asan would trip). */
+	bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "a", BD_END);
+	bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "b", BD_END);
+	bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "c", BD_END);
+	bd_create(BD_NONE, BD_FRAME, BD_LABEL_S, "d", BD_END);   /* over the cap */
+	check("window list is capped at max_windows", bd_window_list(NULL, 0) == 3);
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+	check("layout/render stay in bounds past the window cap", 1);
+	}
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

@@ -95,15 +95,18 @@ struct widget {
 /* module state                                                       */
 /* ------------------------------------------------------------------ */
 
-#define MAX_WINDOWS 16
+/* Default cap on top-level frames when bd_gui_config.max_windows is unset. */
+#define BD_DEFAULT_MAX_WINDOWS 16
 
 static struct widget pool[MAX_WIDGETS];
 static int pool_next = 1;
 static bd_id root = BD_NONE;
 /* Top-level frames, in creation order; windows[0] == root is the primary. With
- * a multi_window backend each maps to a native window (pool[].win_id). */
-static bd_id windows[MAX_WINDOWS];
-static int   window_count;
+ * a multi_window backend each maps to a native window (pool[].win_id). The
+ * array is allocated by bd_gui_init_cfg() and holds up to window_cap frames. */
+static bd_id *windows;
+static int    window_cap;
+static int    window_count;
 /* In-surface window manager (single-surface backends): windows[0] is the
  * desktop, windows[1..] are floating frames drawn/decorated by the toolkit.
  * The array order is the z-order (back to front). */
@@ -957,7 +960,7 @@ register_window(bd_id id)
 
 	if (w->type != BD_FRAME || w->parent != BD_NONE)
 		return;
-	if (window_count < MAX_WINDOWS)
+	if (window_count < window_cap)
 		windows[window_count++] = id;
 	w->focused = 1;                 /* assume focused until a FOCUS_OUT arrives */
 
@@ -2772,25 +2775,44 @@ tabbar_activate(bd_id id, int idx)
 /* ------------------------------------------------------------------ */
 
 void
-bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
-    const bd_font_set *fonts)
+bd_gui_init_cfg(const bd_backend *backend, const bd_gui_config *cfg)
 {
+	bd_gui_config c = cfg ? *cfg : (bd_gui_config){ 0 };
+
 	be = backend;
-	if (th)
-		theme = *th;
+	if (c.theme)
+		theme = *c.theme;
+
+	/* runtime cap on top-level frames; a fresh array each init (freed by the
+	 * previous bd_gui_cleanup, or here if init is called twice). */
+	window_cap = c.max_windows > 0 ? c.max_windows : BD_DEFAULT_MAX_WINDOWS;
+	free(windows);
+	windows = calloc((size_t)window_cap, sizeof *windows);
+	if (!windows) {
+		fprintf(stderr, "bd: out of memory for %d windows\n", window_cap);
+		window_cap = 0;
+	}
+	window_count = 0;
 
 	/* fonts may be NULL; bd_draw_init_fonts then resolves every face from the
 	 * bd_asset registry (by id) or the built-in defaults. */
-	if (!bd_draw_init_fonts(be, fonts, theme.font_size))
+	if (!bd_draw_init_fonts(be, c.fonts, theme.font_size))
 		fprintf(stderr, "bd: renderer init failed\n");
 	/* pushpins are embedded 1-bit glyphs baked by bd_draw (bd_draw_pushpin);
 	 * nothing to load here. */
 }
 
 void
+bd_gui_init_fonts(const bd_backend *backend, const bd_theme *th,
+    const bd_font_set *fonts)
+{
+	bd_gui_init_cfg(backend, &(bd_gui_config){ .theme = th, .fonts = fonts });
+}
+
+void
 bd_gui_init(const bd_backend *backend, const bd_theme *th)
 {
-	bd_gui_init_fonts(backend, th, NULL);
+	bd_gui_init_cfg(backend, &(bd_gui_config){ .theme = th });
 }
 
 void
@@ -2809,6 +2831,9 @@ bd_gui_cleanup(void)
 	memset(pool, 0, sizeof pool);
 	pool_next = 1;
 	root = BD_NONE;
+	free(windows);
+	windows = NULL;
+	window_cap = 0;
 	window_count = 0;
 	canvas_count = 0;
 	memset(canvases, 0, sizeof canvases);

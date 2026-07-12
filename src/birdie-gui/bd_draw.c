@@ -558,6 +558,8 @@ const char *const BD_SHADER_QUAD_VERT =
 void
 bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h)
 {
+	if (w <= 0 || h <= 0)   /* degenerate rect: nothing to rasterize */
+		return;
 	float fx = (float)x, fy = (float)y, fw = (float)w, fh = (float)h;
 	bd_vertex q[6] = {
 		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
@@ -576,6 +578,8 @@ bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h)
 void
 bd_draw_rect(float x, float y, float w, float h, uint32_t rgba)
 {
+	if (w <= 0 || h <= 0)   /* degenerate rect: nothing to fill */
+		return;
 	quad(white, x, y, w, h, 0, 0, 1, 1, rgba);
 }
 

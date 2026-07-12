@@ -220,7 +220,9 @@ vt_state_putchar(struct vt_state *st, uint32_t cp, int width)
 				    st->scroll_bot, 1);
 			}
 		} else {
-			st->cursor_col = cols - width;
+			/* no autowrap: park at the last cell the glyph fits in;
+			 * clamp so a narrow terminal (cols < width) stays >= 0 */
+			st->cursor_col = cols > width ? cols - width : 0;
 		}
 	}
 

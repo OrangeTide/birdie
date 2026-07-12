@@ -160,10 +160,24 @@ bd_id       bd_parent(bd_id id);
 bd_id       bd_first_child(bd_id id);
 bd_id       bd_next_sibling(bd_id id);
 
-/* GUI lifecycle -- driven by the host's main loop. bd_gui_init() takes the
- * renderer/window backend the toolkit will draw through and an optional chrome
- * theme (NULL = bd_theme_default()); bd_gui_event() consumes neutral events
- * the host translates from its native ones. */
+/* Optional configuration for bd_gui_init_cfg(). Zero-initialize it
+ * (bd_gui_config cfg = {0}) and set only the fields you need; a zero/NULL field
+ * selects the built-in default. Fields are only ever appended, so existing
+ * callers keep compiling and behaving as new options are added. */
+typedef struct bd_gui_config {
+	const bd_theme    *theme;        /* NULL = bd_theme_default() */
+	const bd_font_set *fonts;        /* NULL = built-in DejaVu defaults */
+	int                max_windows;  /* <= 0 = default; cap on top-level frames */
+} bd_gui_config;
+
+/* GUI lifecycle -- driven by the host's main loop. bd_gui_init_cfg() takes the
+ * renderer/window backend the toolkit will draw through and an optional config
+ * (NULL = all defaults). bd_gui_event() consumes neutral events the host
+ * translates from its native ones. */
+void bd_gui_init_cfg(const bd_backend *backend, const bd_gui_config *cfg);
+
+/* Convenience over bd_gui_init_cfg() with only a chrome theme
+ * (NULL = bd_theme_default()) and otherwise-default configuration. */
 void bd_gui_init(const bd_backend *backend, const bd_theme *theme);
 
 /* As bd_gui_init, but baking an explicit font set (each face an in-memory

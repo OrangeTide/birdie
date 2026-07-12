@@ -208,6 +208,8 @@ ind_render(bd_id id, void *state)
 	int qs = (int)lroundf(diam * IND_FOOTPRINT);
 	if (qs > h)                    /* keep the footprint inside the row */
 		qs = h;
+	if (qs < 1)                    /* a zero/negative-height row: nothing to draw */
+		return;
 	float lensr = (float)diam / qs;
 	float bezelr = 1.25f * diam / qs;
 	if (bezelr > 0.98f)
