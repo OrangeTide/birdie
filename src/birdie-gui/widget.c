@@ -145,7 +145,10 @@ struct mcanvas {
 	bd_id id;
 	bd_id frames[MAX_CANVAS_FRAMES];
 	int   count;
-	int   icon_min;         /* opt-in: minimized frames show as desktop icons */
+	int   icon_min;         /* minimized frames show as WM desktop icons (default on) */
+	bd_id min_dock;         /* a dock claiming the minimize target: while set (and
+	                           alive) it is the exclusive receiver and the WM draws
+	                           no desktop icons; BD_NONE = default WM icons */
 	int   passthrough;      /* opt-in: live GL backdrop, forward input to on_* */
 	bd_canvas_cb cb;        /* app callbacks while in passthrough mode */
 	int   has_backdrop;     /* opt-in: draw a textured wallpaper via backdrop_fx */
@@ -176,6 +179,19 @@ mcanvas_of(bd_id id)
 		if (canvases[i].id == id)
 			return &canvases[i];
 	return NULL;
+}
+
+/* Whether the WM should draw and hit-test its own minimize desktop icons for
+ * this canvas: only when icon minimize is enabled and no live dock has claimed
+ * the minimize target (an attached dock is the exclusive receiver instead). */
+static int
+mcanvas_shows_icons(const struct mcanvas *c)
+{
+	if (!c || !c->icon_min)
+		return 0;
+	if (c->min_dock != BD_NONE && pool[c->min_dock].alive)
+		return 0;
+	return 1;
 }
 
 static void  wm_surface_host(struct wm_host *out);
@@ -997,7 +1013,8 @@ create_finish(bd_id id)
 		w->pref_w = (int)(chrome_text_w(w->label) + CHROME_FONT_SZ);
 	if (w->type == BD_MANAGED_CANVAS && !mcanvas_of(id) &&
 	    canvas_count < MAX_CANVASES)
-		canvases[canvas_count++] = (struct mcanvas){ .id = id };
+			canvases[canvas_count++] =
+			    (struct mcanvas){ .id = id, .icon_min = 1 };
 	register_window(id);
 }
 
@@ -1174,6 +1191,21 @@ bd_managed_canvas_set_icon_minimize(bd_id canvas, int on)
 	struct mcanvas *c = mcanvas_of(canvas);
 	if (c)
 		c->icon_min = on ? 1 : 0;
+}
+
+void
+bd_managed_canvas_set_minimize_dock(bd_id canvas, bd_id dock)
+{
+	struct mcanvas *c = mcanvas_of(canvas);
+	if (c)
+		c->min_dock = dock;
+}
+
+bd_id
+bd_managed_canvas_minimize_dock(bd_id canvas)
+{
+	struct mcanvas *c = mcanvas_of(canvas);
+	return c ? c->min_dock : BD_NONE;
 }
 
 void
@@ -3070,7 +3102,7 @@ wm_icon_at(const struct wm_host *host, int x, int y)
 	if (host->canvas == BD_NONE)
 		return BD_NONE;
 	struct mcanvas *c = mcanvas_of(host->canvas);
-	if (!c || !c->icon_min)
+	if (!mcanvas_shows_icons(c))
 		return BD_NONE;
 	for (int i = 0; i < host->count; i++) {
 		bd_id f = host->list[i];
@@ -3498,7 +3530,7 @@ render_canvas_frames(bd_id winframe)
 		}
 		/* icon-minimize mode: draw a desktop icon per minimized frame,
 		 * assigning an unplaced one a bottom-row slot now that dims exist */
-		if (c->icon_min) {
+		if (mcanvas_shows_icons(c)) {
 			bd_draw_begin(h.proj_w, h.proj_h);
 			be->scissor(h.ox, h.oy, h.w, h.h);
 			int isz = WM_ICON_CELL - 2 * WM_ICON_PAD;

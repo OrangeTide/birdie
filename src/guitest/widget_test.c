@@ -854,14 +854,13 @@ build_ui(void)
 	bd_backend_gles.use_shader(wall_fx);
 	bd_backend_gles.set_uniform_int(wall_fx, "u_tex", 0);
 
-	/* a top-left dock scoped to this canvas (empty until a frame is minimized) */
+	/* a top-left dock scoped to this canvas (empty until a frame is minimized),
+	 * claimed as the canvas's exclusive minimize target so a minimized frame
+	 * lands in the dock instead of also becoming a WM desktop icon */
 	bd_id dk = bd_dock_create(cv, NULL, BD_END);
 	bd_dock_set_gravity(dk, BD_GRAVITY_TOP_LEFT);
 	bd_dock_set_tile_size(dk, 40);
-
-	/* also show minimized frames as free-floating desktop icons along the
-	 * canvas bottom (double-click to restore, drag to reposition) */
-	bd_managed_canvas_set_icon_minimize(cv, 1);
+	bd_managed_canvas_set_minimize_dock(cv, dk);
 
 	/* Servers: the icon-browser explorer, floating (drag to arrange, F2 rename) */
 	bd_id srvwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Servers",

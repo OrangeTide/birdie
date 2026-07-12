@@ -2691,6 +2691,43 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- minimize target: an attached dock is exclusive, no WM icons ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id desk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id cv = bd_managed_canvas_create(desk, BD_ANCHOR_I, BD_ANCHOR_NW,
+	    BD_X_I, 0, BD_Y_I, 0, BD_PREF_W_I, 400, BD_PREF_H_I, 300, BD_END);
+	check("a fresh canvas leaves the minimize target with the WM",
+	    bd_managed_canvas_minimize_dock(cv) == BD_NONE);
+	bd_id dk = bd_dock_create(cv, NULL, BD_END);
+	check("a dock created inside a canvas claims the minimize target",
+	    bd_managed_canvas_minimize_dock(cv) == dk);
+
+	bd_id fr = bd_create(cv, BD_FRAME, BD_LABEL_S, "W", BD_PREF_W_I, 100,
+	    BD_PREF_H_I, 80, BD_X_I, 120, BD_Y_I, 20, BD_END);
+	bd_gui_layout(400, 300);
+	bd_window_minimize(fr);
+	bd_gui_layout(400, 300);
+	bd_gui_render();   /* dock owns the target: no WM desktop icon is placed */
+	check("a minimized frame lands in the attached dock", bd_dock_count(dk) == 1);
+
+	/* detach: the WM reclaims the minimize target */
+	bd_managed_canvas_set_minimize_dock(cv, BD_NONE);
+	check("detaching the dock returns the minimize target to the WM",
+	    bd_managed_canvas_minimize_dock(cv) == BD_NONE);
+	bd_gui_layout(400, 300);
+	bd_gui_render();   /* WM owns it again: draws + places the desktop icon */
+	int cvx, cvy, cvw, cvh;
+	bd_widget_rect(cv, &cvx, &cvy, &cvw, &cvh);
+	bd_event kd = mouse(BD_EV_MOUSE_DOWN, cvx + 30, cvy + cvh - 30);
+	int consumed = bd_gui_event(&kd);
+	bd_event ku = mouse(BD_EV_MOUSE_UP, cvx + 30, cvy + cvh - 30);
+	bd_gui_event(&ku);
+	check("the WM handles a press on the reclaimed desktop icon", consumed == 1);
+	}
+	bd_gui_cleanup();
+
 	/* ---- bd_gui_config: runtime cap on top-level frames ---- */
 	bd_gui_init_cfg(&stub, &(bd_gui_config){ .max_windows = 3 });
 	{

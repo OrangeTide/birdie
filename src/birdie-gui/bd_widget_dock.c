@@ -251,6 +251,14 @@ bd_dock_create(bd_id parent, const bd_dock_model *model, ...)
 		d->model = *model;
 		d->has_model = 1;
 	}
+	/* claim the host canvas's minimize target if it is still free, so a dock
+	 * dropped into an MDI becomes the exclusive receiver and the WM stops
+	 * drawing its own desktop icons (no doubled minimize icon) */
+	if (id != BD_NONE) {
+		bd_id cv = bd_managed_canvas_of(id);
+		if (cv != BD_NONE && bd_managed_canvas_minimize_dock(cv) == BD_NONE)
+			bd_managed_canvas_set_minimize_dock(cv, id);
+	}
 	return id;
 }
 
