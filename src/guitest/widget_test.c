@@ -55,6 +55,12 @@ static bd_id m_hpbar, m_mpbar;   /* glass liquid tubes (bar-form BD_METER_VIAL) 
 static bd_id focus_led;   /* mirrors bd_gui_focused() each frame */
 static int   running = 1;
 
+/* Desktop-tab wallpaper: a procedural texture run through an effect shader as
+ * the managed canvas backdrop, toggled on/off from the Settings dialog. */
+static bd_id      desk_canvas;
+static bd_texture wall_tex;
+static bd_shader  wall_fx;
+
 /* Echo a line to both the status bar and the terminal log, so every widget
  * interaction is visible. */
 static void
@@ -435,6 +441,64 @@ section(bd_id parent, const char *title, int layout, int height)
 	return row;
 }
 
+/* A procedural desktop wallpaper: a diagonal indigo gradient with a faint grid,
+ * uploaded as an RGBA texture the effect shader samples. */
+static bd_texture
+make_wallpaper(void)
+{
+	enum { N = 256 };
+	static unsigned char px[N * N * 4];
+	for (int y = 0; y < N; y++)
+		for (int x = 0; x < N; x++) {
+			float fx = x / (float)N, fy = y / (float)N;
+			float g = 0.5f * (fx + fy);
+			float r = 0.10f + 0.10f * g;
+			float gg = 0.13f + 0.16f * (1.0f - g);
+			float b = 0.22f + 0.30f * (1.0f - fy);
+			if ((x & 31) == 0 || (y & 31) == 0)      /* grid lines */
+				{ r += 0.05f; gg += 0.06f; b += 0.09f; }
+			unsigned char *p = &px[(y * N + x) * 4];
+			p[0] = (unsigned char)(fminf(r, 1.0f) * 255.0f);
+			p[1] = (unsigned char)(fminf(gg, 1.0f) * 255.0f);
+			p[2] = (unsigned char)(fminf(b, 1.0f) * 255.0f);
+			p[3] = 255;
+		}
+	return bd_backend_gles.make_texture(N, N, px);
+}
+
+/* The wallpaper effect: a slow drifting ripple, a moving sheen band, and a
+ * vignette over the sampled texture. Pairs with BD_SHADER_QUAD_VERT (v_uv). */
+static const char *const WALL_FRAG =
+	"#version 300 es\n"
+	"precision mediump float;\n"
+	"in vec2 v_uv;\n"
+	"uniform sampler2D u_tex;\n"
+	"uniform float u_time;\n"
+	"out vec4 frag;\n"
+	"void main() {\n"
+	"    vec2 uv = v_uv;\n"
+	"    uv += 0.008 * vec2(sin(uv.y*10.0 + u_time*0.8),\n"
+	"                       cos(uv.x*9.0  + u_time*0.6));\n"
+	"    vec3 c = texture(u_tex, uv).rgb;\n"
+	"    float band = fract(uv.x*0.5 - u_time*0.05)*2.0 - 1.0;\n"
+	"    c += 0.06 * smoothstep(0.5, 0.0, abs(band));\n"    /* sheen */
+	"    c *= 0.9 + 0.1 * sin(u_time*0.5);\n"               /* breathing */
+	"    vec2 d = v_uv - 0.5;\n"
+	"    c *= 1.0 - 0.6 * dot(d, d);\n"                     /* vignette */
+	"    frag = vec4(c, 1.0);\n"
+	"}\n";
+
+/* Settings-dialog toggle: swap the canvas between its solid backdrop and the
+ * GLES wallpaper (a texture drawn through WALL_FRAG). */
+static void
+on_wallpaper(bd_id id, void *arg, int on)
+{
+	(void)id; (void)arg;
+	bd_managed_canvas_set_backdrop(desk_canvas, wall_tex,
+	    on ? wall_fx : (bd_shader){ 0 });
+	report(on ? "GLES wallpaper on" : "solid background");
+}
+
 static void
 build_ui(void)
 {
@@ -755,8 +819,8 @@ build_ui(void)
 	desktop_tab = bd_tabview_count(tabs) - 1;
 	bd_set(deskpane, BD_PAD_I, 6, BD_GAP_I, 4, BD_END);
 	bd_create(deskpane, BD_LABEL, BD_LABEL_S,
-		"BD_MANAGED_CANVAS: drag the title bars; minimize (_) a frame -- it "
-		"becomes a desktop icon (double-click restores, drag moves) and a left-dock tile.",
+		"BD_MANAGED_CANVAS: terminal / editor / dialog windows; minimize (_) one "
+		"to a dock tile or desktop icon (click restores). Settings toggles a GLES wallpaper.",
 		BD_PREF_H_I, 16, BD_FG_C, 0x9DA3AAFFu, BD_END);
 
 	/* standalone BD_ICON app launchers + an action-bar drop target: double-
@@ -780,6 +844,15 @@ build_ui(void)
 
 	bd_id cv = bd_managed_canvas_create(deskpane, BD_GROW_I, 1,
 		BD_BG_C, 0x1E2024FFu, BD_END);
+	desk_canvas = cv;
+
+	/* build the wallpaper texture + effect shader now that GL is up; the
+	 * Settings dialog's toggle swaps it in as the canvas backdrop. The sampler
+	 * unit is fixed at 0; u_time is fed by the toolkit from the backend clock. */
+	wall_tex = make_wallpaper();
+	wall_fx = bd_backend_gles.make_shader(BD_SHADER_QUAD_VERT, WALL_FRAG);
+	bd_backend_gles.use_shader(wall_fx);
+	bd_backend_gles.set_uniform_int(wall_fx, "u_tex", 0);
 
 	/* a top-left dock scoped to this canvas (empty until a frame is minimized) */
 	bd_id dk = bd_dock_create(cv, NULL, BD_END);
@@ -817,6 +890,32 @@ build_ui(void)
 		BD_LABEL_S, "* connected to Aardwolf\n* MOTD received\n"
 		"> look\nYou are in a small room.\n> north\nYou cannot go that way.",
 		BD_ON_CLICK_F, on_btn, BD_ON_CLICK_P, (void *)"log line", BD_END);
+
+	/* Terminal: a real BD_TERMINAL (libvt) in a floating frame, minimizable to
+	 * the dock like the others */
+	bd_id termwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Terminal",
+		BD_PREF_W_I, 360, BD_PREF_H_I, 170, BD_X_I, 300, BD_Y_I, 150,
+		BD_BG_C, 0x101418FFu, BD_END);
+	bd_id dterm = bd_terminal_create(termwin, BD_GROW_I, 1, BD_END);
+	bd_terminal_write(dterm,
+		"\x1b[1;32mAardwolf\x1b[0m MUD  --  \x1b[36mterminal window\x1b[0m\r\n"
+		"> \x1b[1mnorth\x1b[0m\r\n"
+		"You walk north into a torch-lit hall.\r\n"
+		"\x1b[33mA guard\x1b[0m eyes you warily.\r\n> ", -1);
+
+	/* Settings: a dialog window whose toggle switches the desktop background
+	 * between the solid color and the GLES wallpaper */
+	bd_id setwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Settings",
+		BD_PREF_W_I, 214, BD_PREF_H_I, 92, BD_X_I, 470, BD_Y_I, 300,
+		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PAD_I, 10, BD_GAP_I, 8,
+		BD_BG_C, 0x2B2D30FFu, BD_END);
+	bd_create(setwin, BD_LABEL, BD_LABEL_S, "Desktop background",
+		BD_PREF_H_I, 16, BD_FG_C, 0xDCE3EAFFu, BD_BG_C, 0u, BD_END);
+	bd_id setrow = bd_create(setwin, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 28, BD_GAP_I, 8, BD_END);
+	bd_toggle_create(setrow, 0, on_wallpaper, NULL, BD_PREF_W_I, 52, BD_END);
+	bd_create(setrow, BD_LABEL, BD_LABEL_S, "GLES wallpaper", BD_GROW_I, 1,
+		BD_FG_C, 0xB8C0C8FFu, BD_BG_C, 0u, BD_END);
 
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,
@@ -859,6 +958,8 @@ main(void)
 		bd_tabview_set_active(tab_view, desktop_tab);
 		if (getenv("GALLERY_AUTOMIN"))   /* minimize a frame to show the dock */
 			bd_window_minimize(desk_logwin);
+		if (getenv("GALLERY_AUTOWALL"))  /* turn the GLES wallpaper on for a shot */
+			bd_managed_canvas_set_backdrop(desk_canvas, wall_tex, wall_fx);
 	}
 	if (getenv("GALLERY_AUTODLG"))   /* open a second window for testing */
 		on_new_window(BD_NONE, NULL);

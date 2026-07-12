@@ -367,6 +367,20 @@ bd_id bd_managed_canvas_of(bd_id descendant);
 void bd_managed_canvas_set_icon_minimize(bd_id canvas, int on);
 
 /*
+ * Give a canvas a textured wallpaper drawn by a custom effect shader in place
+ * of its solid BD_BG_C backdrop (a cheap, flexible desktop background). Pair
+ * `effect` with BD_SHADER_QUAD_VERT: the fragment reads `in vec2 v_uv` (0..1
+ * across the canvas), samples `wallpaper` through a `uniform sampler2D` set to
+ * texture unit 0, and may read `uniform vec2 u_res`. For animation the toolkit
+ * sets `uniform float u_time` (seconds) each frame when the backend supplies a
+ * clock (bd_backend.time); on a backend without one the app sets u_time itself.
+ * Set any other uniforms (the sampler, tints) on `effect` once after creating
+ * it. Pass effect == (bd_shader){0} to revert to the solid backdrop.
+ */
+void bd_managed_canvas_set_backdrop(bd_id canvas, bd_texture wallpaper,
+                                    bd_shader effect);
+
+/*
  * GLES-background canvas (compositing widgets over a live host-drawn scene).
  * A canvas put into passthrough mode paints no backdrop -- the host's GL scene,
  * rendered into the canvas rect before bd_gui_render(), shows through -- and

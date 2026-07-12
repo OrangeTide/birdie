@@ -113,6 +113,7 @@ be_resolve_asset(const char *rel, char *buf, size_t bufsz)
 const bd_backend bd_backend_gles = {
 	.width             = be_width,
 	.height            = be_height,
+	.time              = win_time,   /* monotonic clock for time-based effects */
 	.viewport          = bd_gles_viewport,
 	.clear             = bd_gles_clear,
 	.make_shader       = bd_gles_make_shader,

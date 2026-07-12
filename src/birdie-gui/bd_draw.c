@@ -576,6 +576,30 @@ bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h)
 }
 
 void
+bd_draw_shader_quad_tex(bd_shader shader, bd_texture tex, int x, int y,
+    int w, int h)
+{
+	if (w <= 0 || h <= 0)
+		return;
+	float fx = (float)x, fy = (float)y, fw = (float)w, fh = (float)h;
+	bd_vertex q[6] = {
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy,      1, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy,      0, 0, 1, 1, 1, 1 },
+		{ fx + fw, fy + fh, 1, 1, 1, 1, 1, 1 },
+		{ fx,      fy + fh, 0, 1, 1, 1, 1, 1 },
+	};
+	flush();   /* land batched chrome beneath the effect */
+	/* bind AFTER the flush: the chrome flush leaves the font atlas on unit 0,
+	 * so bind the caller's texture here, just before the draw samples it. */
+	be->bind_texture(tex, 0);
+	be->use_shader(shader);
+	be->set_uniform_vec2(shader, "u_res", (float)win_w, (float)win_h);
+	be->draw_verts(q, 6);
+}
+
+void
 bd_draw_rect(float x, float y, float w, float h, uint32_t rgba)
 {
 	if (w <= 0 || h <= 0)   /* degenerate rect: nothing to fill */

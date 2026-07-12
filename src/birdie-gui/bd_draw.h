@@ -88,6 +88,13 @@ extern const char *const BD_SHADER_QUAD_VERT;
  * calling. Use with BD_SHADER_QUAD_VERT. */
 void bd_draw_shader_quad(bd_shader shader, int x, int y, int w, int h);
 
+/* As bd_draw_shader_quad, but also binds `tex` to texture unit 0 for the draw
+ * (after the chrome flush, which would otherwise leave the font atlas bound).
+ * The fragment samples it through a `uniform sampler2D` set to unit 0. Use for
+ * a textured full-quad effect, e.g. a wallpaper run through an effect shader. */
+void bd_draw_shader_quad_tex(bd_shader shader, bd_texture tex,
+                             int x, int y, int w, int h);
+
 /* Solid fill / one-pixel outline. */
 void bd_draw_rect(float x, float y, float w, float h, uint32_t rgba);
 void bd_draw_rect_lines(float x, float y, float w, float h, uint32_t rgba);

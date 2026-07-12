@@ -148,6 +148,9 @@ struct mcanvas {
 	int   icon_min;         /* opt-in: minimized frames show as desktop icons */
 	int   passthrough;      /* opt-in: live GL backdrop, forward input to on_* */
 	bd_canvas_cb cb;        /* app callbacks while in passthrough mode */
+	int   has_backdrop;     /* opt-in: draw a textured wallpaper via backdrop_fx */
+	bd_texture backdrop_tex;/* wallpaper sampled by backdrop_fx (unit 0) */
+	bd_shader  backdrop_fx; /* effect shader for the wallpaper */
 };
 
 /* Desktop-icon geometry for the minimize-to-icon canvas mode. */
@@ -1196,6 +1199,18 @@ bd_managed_canvas_set_passthrough(bd_id canvas, const bd_canvas_cb *cb)
 	}
 }
 
+void
+bd_managed_canvas_set_backdrop(bd_id canvas, bd_texture wallpaper,
+    bd_shader effect)
+{
+	struct mcanvas *c = mcanvas_of(canvas);
+	if (!c)
+		return;
+	c->backdrop_tex = wallpaper;
+	c->backdrop_fx = effect;
+	c->has_backdrop = (effect.id != 0);   /* effect.id == 0 reverts to solid */
+}
+
 int
 bd_managed_canvas_rect(bd_id canvas, int *x, int *y, int *w, int *h)
 {
@@ -1933,6 +1948,23 @@ render_widget(bd_id id)
 			else
 				fill_rect(tx + tw_ / 2 + i * 3, ty + 3,
 				    1, th_ - 6, theme.border);
+		}
+		break;
+	}
+
+	case BD_MANAGED_CANVAS: {
+		struct mcanvas *c = mcanvas_of(id);
+		/* a textured wallpaper run through an effect shader, in place of the
+		 * solid backdrop; the app sets sampler + animation uniforms on the
+		 * shader (we top up u_time from the backend clock when it has one). */
+		if (c && c->has_backdrop) {
+			if (be->time)
+				be->set_uniform_float(c->backdrop_fx, "u_time",
+				    (float)be->time());
+			bd_draw_shader_quad_tex(c->backdrop_fx, c->backdrop_tex,
+			    w->x, w->y, w->w, w->h);
+		} else if (w->bg & 0xFF) {
+			fill_rect(w->x, w->y, w->w, w->h, w->bg);
 		}
 		break;
 	}

@@ -29,7 +29,11 @@ below (`make widget-test`) exercises the full widget set on the GLES backend,
 grouped into folder tabs: a libvt terminal and a data table, an inventory grid,
 rotary knobs and dials, switches and wheels, X-Y pads and sliders, instrument
 meters (VU, magic eye, pie, liquid vials, level bars) and indicator LEDs, a
-pressure/tilt sketch pad, and an embedded window manager (MDI) desktop.
+pressure/tilt sketch pad, and an embedded window manager (MDI) desktop. The
+Desktop tab floats terminal, editor, and dialog windows over a managed canvas:
+minimize any to a dock tile or desktop icon (click restores), and the Settings
+dialog toggles the background between a solid color and a GLES wallpaper (a
+texture run through an effect shader).
 
 ![The birdie-gui widget gallery on the GLES backend, showing the full widget set](doc/images/birdie-gui-gallery.png)
 

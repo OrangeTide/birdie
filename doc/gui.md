@@ -609,9 +609,22 @@ real dimensions), stored host-local per frame (`icon_x`/`icon_y`), and hit-teste
 separately from floating frames (`wm_icon_at`) so a minimized frame never leaks
 into the title-bar/drag logic. Off by default; a dock and desktop icons can both
 be enabled (each is an independent restore path). The GLES gallery's
-"Desktop" tab demonstrates the canvas + dock on the native multi-window backend;
+"Desktop" tab demonstrates the canvas + dock on the native multi-window backend:
+it floats terminal, editor, and Settings-dialog windows over the canvas, each
+minimizable to the dock or a desktop icon.
+
+**Textured wallpaper backdrop.** `bd_managed_canvas_set_backdrop(cv, wallpaper,
+effect)` swaps the solid `BD_BG_C` backdrop for a texture drawn through a custom
+effect shader (a cheap, flexible desktop background). The `effect` fragment
+pairs with `BD_SHADER_QUAD_VERT` (reads `v_uv`), samples the `wallpaper` on unit
+0, and animates from a toolkit-set `u_time` (from `bd_backend.time`; the app
+sets it where the backend has no clock). It is drawn by `bd_draw_shader_quad_tex`,
+which binds the texture after the chrome flush so the sampler sees the wallpaper,
+not the font atlas. Pass an `effect` of `{0}` to revert. The gallery's Settings
+dialog toggles it; passthrough (below) is the alternative for a live 3D scene.
+
 `test/test_gui.c` covers adoption, host-scoped listing, canvas-local placement
-and drag, body-click routing, and dock scoping. Deferred: Tab focus traversal
+and drag, body-click routing, dock scoping, and the wallpaper backdrop draw. Deferred: Tab focus traversal
 into canvas frames and canvases nested inside floating frames. Compositing the
 canvas widgets over a live host-drawn GL scene (with event passthrough to the app
 underneath) is the v0.8.1 **GLES-background canvas**, below.

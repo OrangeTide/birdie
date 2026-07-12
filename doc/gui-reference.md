@@ -204,6 +204,7 @@ void  bd_window_minimize(bd_id frame);   void bd_window_restore(bd_id frame);   
 /* embedded WM: a BD_MANAGED_CANVAS hosts floating frames inside a widget rect */
 bd_id bd_managed_canvas_create(bd_id parent, ...);   bd_id bd_managed_canvas_of(bd_id descendant);
 void  bd_managed_canvas_set_icon_minimize(bd_id canvas, int on); /* minimized frame -> desktop icon */
+void  bd_managed_canvas_set_backdrop(bd_id canvas, bd_texture wallpaper, bd_shader effect); /* textured wallpaper backdrop; effect=={0} reverts to solid */
 ```
 
 Behavior: drag the title bar to move; release near an edge/corner to snap and
@@ -213,6 +214,10 @@ with `BD_PREF_W_I`/`BD_PREF_H_I` and the floating position with `BD_X_I`/`BD_Y_I
 A minimized frame vanishes to a `BD_DOCK` tile; with
 `bd_managed_canvas_set_icon_minimize` a canvas instead (or also) shows it as a
 free-floating desktop icon (double-click restores, drag repositions).
+`bd_managed_canvas_set_backdrop` gives the canvas a textured wallpaper drawn by
+a custom effect shader (paired with `BD_SHADER_QUAD_VERT`, sampling the texture
+on unit 0, animated via `u_time`) in place of the solid `BD_BG_C`; pass an
+`effect` of `{0}` to revert. The gallery's Desktop tab toggles it from a dialog.
 
 ## Extension widgets
 

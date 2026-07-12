@@ -2707,6 +2707,36 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- managed-canvas textured wallpaper backdrop ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id desk = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	bd_id cv = bd_managed_canvas_create(desk, BD_GROW_I, 1, BD_END);
+	bd_shader fx = stub.make_shader("v", "f");
+	bd_texture tex = stub.make_texture(4, 4, NULL);
+
+	bd_gui_layout(400, 300);
+	int base = n_drawverts;
+	bd_gui_render();
+	int solid = n_drawverts - base;   /* a solid canvas draws no shader quad */
+
+	/* enable the wallpaper: the canvas shader-quad forces an extra flush+draw */
+	bd_managed_canvas_set_backdrop(cv, tex, fx);
+	base = n_drawverts;
+	bd_gui_render();
+	int lit = n_drawverts - base;
+	check("wallpaper backdrop adds canvas draws", lit > solid);
+
+	/* revert to the solid backdrop: draw count returns to the baseline */
+	bd_managed_canvas_set_backdrop(cv, tex, (bd_shader){ 0 });
+	base = n_drawverts;
+	bd_gui_render();
+	check("clearing the backdrop restores the solid draw count",
+	    n_drawverts - base == solid);
+	}
+	bd_gui_cleanup();
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }
