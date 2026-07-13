@@ -16,6 +16,8 @@
 #include "bd_csv.h"
 #include "bd_telopt.h"
 #include "bd_trigger.h"
+#include "bd_verb.h"
+#include "bd_mxp.h"
 #include "bd_profile.h"
 
 #include <stdio.h>
@@ -219,6 +221,12 @@ static void trig_send(const char *cmd, void *ctx)
 { (void)ctx; if (t_sent_n < 16) snprintf(t_sent[t_sent_n++], 256, "%s", cmd); }
 static void reset_sent(void) { t_sent_n = 0; }
 
+static char t_ev_name[64], t_ev_arg[64];
+static int  t_ev_calls;
+static void trig_event(const char *name, const char *arg, void *ctx)
+{ (void)ctx; t_ev_calls++; snprintf(t_ev_name, 64, "%s", name ? name : "");
+  snprintf(t_ev_arg, 64, "%s", arg ? arg : ""); }
+
 static void
 test_trigger(void)
 {
@@ -279,6 +287,81 @@ test_trigger(void)
 	bd_triggers_rewrite(t, "an ordinary line", &e);
 	check("a non-gagged line is not dropped", e.gag == 0);
 
+	/* #substitute rewrites matched text in place */
+	bd_trigger_add(t, BD_TRIG_SUBST, "gold", "GOLD", NULL, -1, 0);
+	bd_triggers_rewrite(t, "you find 10 gold", &e);
+	check("#substitute replaces the match and flags the line changed",
+	    e.gag == 0 && e.changed == 1 && strstr(e.text, "GOLD") != NULL &&
+	    strstr(e.text, "gold") == NULL);
+
+	/* #highlight wraps the match in ANSI color (an ESC appears) */
+	bd_trigger_add(t, BD_TRIG_HILITE, "orc", "red", NULL, -1, 0);
+	bd_triggers_rewrite(t, "an orc appears", &e);
+	check("#highlight recolors the match with an SGR escape",
+	    e.changed == 1 && strstr(e.text, "orc") != NULL &&
+	    strchr(e.text, '\x1b') != NULL);
+
+	/* priority: higher fires first, and #stop halts the rest for that line */
+	bd_trigger_add(t, BD_TRIG_ACTION, "duel begins", "first", NULL, 9, 1);
+	bd_trigger_add(t, BD_TRIG_ACTION, "duel begins", "second", NULL, 1, 0);
+	reset_sent();
+	bd_triggers_line(t, "duel begins");
+	check("higher-priority trigger fires first and #stop blocks the rest",
+	    t_sent_n == 1 && strcmp(t_sent[0], "first") == 0);
+
+	/* prompt triggers match prompt text */
+	bd_trigger_add(t, BD_TRIG_PROMPT, "HP", "at prompt", NULL, -1, 0);
+	reset_sent();
+	check("prompt trigger fires on prompt text",
+	    bd_triggers_prompt(t, "HP: 100/100 >") == 1 &&
+	    t_sent_n == 1 && strcmp(t_sent[0], "at prompt") == 0);
+
+	/* gmcp triggers match a package name */
+	bd_trigger_add(t, BD_TRIG_GMCP, "Char.Vitals", "got vitals", NULL, -1, 0);
+	reset_sent();
+	check("gmcp trigger fires on its package",
+	    bd_triggers_gmcp(t, "Char.Vitals", "{\"hp\":100}") == 1 &&
+	    t_sent_n == 1 && strcmp(t_sent[0], "got vitals") == 0);
+
+	/* interval timers: the first run only schedules; a later run past the
+	 * deadline fires exactly once */
+	bd_trigger_add_tick(t, "heal", "cast heal", 5.0, NULL);   /* 5s = 5000ms */
+	reset_sent();
+	check("first run_timers schedules without firing",
+	    bd_triggers_run_timers(t, 1000.0) == 0 && t_sent_n == 0);
+	check("timer does not fire before its deadline",
+	    bd_triggers_run_timers(t, 2000.0) == 0 && t_sent_n == 0);
+	check("timer fires once past its deadline",
+	    bd_triggers_run_timers(t, 7000.0) == 1 &&
+	    t_sent_n == 1 && strcmp(t_sent[0], "cast heal") == 0);
+	bd_trigger_remove_tick(t, "heal");
+
+	/* multi-state chains: only the armed state fires, and firing advances it */
+	bd_trigger_add_chained(t, BD_TRIG_ACTION, "step one", "did one",
+	    "quest", "q", 1, -1, 0);
+	bd_trigger_add_chained(t, BD_TRIG_ACTION, "step two", "did two",
+	    "quest", "q", 2, -1, 0);
+	reset_sent();
+	bd_triggers_line(t, "step two");   /* state 2 not armed yet (chain at 1) */
+	check("a chained trigger does not fire out of state", t_sent_n == 0);
+	reset_sent();
+	bd_triggers_line(t, "step one");   /* armed at 1: fires and advances to 2 */
+	check("the armed chain step fires and advances",
+	    t_sent_n == 1 && strcmp(t_sent[0], "did one") == 0);
+	reset_sent();
+	bd_triggers_line(t, "step two");   /* now armed at 2 */
+	check("the next chain step fires once armed",
+	    t_sent_n == 1 && strcmp(t_sent[0], "did two") == 0);
+	bd_trigger_reset(t, "q");
+
+	/* user events invoke the event callback */
+	bd_triggers_set_event_cb(t, trig_event, NULL);
+	t_ev_calls = 0;
+	bd_triggers_event(t, "onDeath", "by an orc");
+	check("raising an event invokes the event callback with name + arg",
+	    t_ev_calls == 1 && strcmp(t_ev_name, "onDeath") == 0 &&
+	    strcmp(t_ev_arg, "by an orc") == 0);
+
 	/* removal */
 	int before = bd_trigger_count(t);
 	int removed = bd_trigger_remove_pattern(t, BD_TRIG_ALIAS, "kk", NULL);
@@ -338,6 +421,127 @@ test_profile(void)
 	bd_profiles_free(ps2);
 }
 
+/* ================================================================== */
+/* bd_verb -- the TinTin++-style #verb command parser                 */
+/* ================================================================== */
+static void
+test_verb(void)
+{
+	printf("bd_verb:\n");
+	bd_triggers *t = bd_triggers_new(NULL, trig_send, NULL);
+	char fb[128];
+	const char *lit;
+
+	/* #action compiles to a trigger that then fires on a matching line */
+	int handled = bd_verb_exec(t, "#action {You are hungry} {eat bread}",
+	    &lit, fb, sizeof fb);
+	check("#action is handled and reports success",
+	    handled == 1 && strcmp(fb, "action added") == 0 &&
+	    bd_trigger_count(t) == 1);
+	reset_sent();
+	bd_triggers_line(t, "You are hungry now");
+	check("the verb-created action fires",
+	    t_sent_n == 1 && strcmp(t_sent[0], "eat bread") == 0);
+
+	/* #alias */
+	bd_verb_exec(t, "#alias {gg} {get all}", &lit, fb, sizeof fb);
+	check("#alias is handled", strcmp(fb, "alias added") == 0);
+	reset_sent();
+	check("the verb-created alias fires on input",
+	    bd_triggers_input(t, "gg") == 1 &&
+	    t_sent_n == 1 && strcmp(t_sent[0], "get all") == 0);
+
+	/* #class <name> on|off toggles a class */
+	bd_verb_exec(t, "#class combat off", &lit, fb, sizeof fb);
+	check("#class off disables the class",
+	    strcmp(fb, "class disabled") == 0 && bd_class_enabled(t, "combat") == 0);
+	bd_verb_exec(t, "#class combat on", &lit, fb, sizeof fb);
+	check("#class on re-enables the class",
+	    strcmp(fb, "class enabled") == 0 && bd_class_enabled(t, "combat") == 1);
+
+	/* #unaction removes by pattern */
+	int before = bd_trigger_count(t);
+	bd_verb_exec(t, "#unaction {You are hungry}", &lit, fb, sizeof fb);
+	check("#unaction removes the trigger",
+	    strcmp(fb, "removed 1") == 0 && bd_trigger_count(t) == before - 1);
+
+	/* a non-verb line is not handled; "##x" escapes a literal leading '#' */
+	check("ordinary input is not a verb",
+	    bd_verb_exec(t, "look north", &lit, fb, sizeof fb) == 0);
+	lit = NULL;
+	check("\"##text\" is an escaped literal, not a verb",
+	    bd_verb_exec(t, "##friend", &lit, fb, sizeof fb) == 0 &&
+	    lit != NULL && strcmp(lit, "#friend") == 0);
+
+	bd_triggers_free(t);
+}
+
+/* ================================================================== */
+/* bd_mxp -- MXP tag parser (socket-free, incremental)                */
+/* ================================================================== */
+static char m_text[256];
+static size_t m_text_n;
+static char m_tag[8][96];
+static int  m_tag_n;
+static void mxp_text(const char *b, size_t n, void *a)
+{ (void)a; if (m_text_n + n < sizeof m_text) { memcpy(m_text + m_text_n, b, n); m_text_n += n; m_text[m_text_n] = '\0'; } }
+static void mxp_tag(const char *name, const char *attrs, int closing, void *a)
+{ (void)a; if (m_tag_n < 8) snprintf(m_tag[m_tag_n++], 96, "%s%s|%s",
+      closing ? "/" : "", name, attrs ? attrs : ""); }
+static void mxp_reset_rec(void) { m_text_n = 0; m_text[0] = '\0'; m_tag_n = 0; }
+
+static void
+test_mxp(void)
+{
+	printf("bd_mxp:\n");
+	bd_mxp_cb cb = { .text = mxp_text, .tag = mxp_tag };
+	bd_mxp *m = bd_mxp_new(&cb);
+	check("mxp parser created", m != NULL);
+
+	/* an open/close tag pair around text: markup removed, text kept */
+	mxp_reset_rec();
+	{ const char *s = "<b>bold</b> plain";
+	  bd_mxp_feed(m, (const unsigned char *)s, strlen(s)); }
+	check("tags are stripped and their text kept",
+	    strcmp(m_text, "bold plain") == 0);
+	check("open and close tags are reported in order",
+	    m_tag_n == 2 && strcmp(m_tag[0], "b|") == 0 &&
+	    strcmp(m_tag[1], "/b|") == 0);
+
+	/* a tag with attributes surfaces the attribute string */
+	mxp_reset_rec();
+	{ const char *s = "<send href=\"north\">go</send>";
+	  bd_mxp_feed(m, (const unsigned char *)s, strlen(s)); }
+	check("tag attributes are passed through",
+	    m_tag_n == 2 && strncmp(m_tag[0], "send|", 5) == 0 &&
+	    strstr(m_tag[0], "href=\"north\"") != NULL);
+
+	/* entity decoding */
+	mxp_reset_rec();
+	{ const char *s = "a &lt; b &amp; c &gt; d &#65;";
+	  bd_mxp_feed(m, (const unsigned char *)s, strlen(s)); }
+	check("named and numeric entities decode",
+	    strcmp(m_text, "a < b & c > d A") == 0);
+
+	/* an unknown entity is emitted verbatim */
+	mxp_reset_rec();
+	{ const char *s = "x &bogus; y";
+	  bd_mxp_feed(m, (const unsigned char *)s, strlen(s)); }
+	check("an unknown entity is left verbatim",
+	    strcmp(m_text, "x &bogus; y") == 0);
+
+	/* a tag split across two feeds is buffered until complete */
+	mxp_reset_rec();
+	bd_mxp_feed(m, (const unsigned char *)"<bo", 3);
+	check("a partial tag emits nothing yet", m_tag_n == 0 && m_text_n == 0);
+	bd_mxp_feed(m, (const unsigned char *)"ld>hi", 5);
+	check("the tag completes across the feed boundary",
+	    m_tag_n == 1 && strcmp(m_tag[0], "bold|") == 0 &&
+	    strcmp(m_text, "hi") == 0);
+
+	bd_mxp_free(m);
+}
+
 int
 main(void)
 {
@@ -345,6 +549,8 @@ main(void)
 	test_csv();
 	test_telopt();
 	test_trigger();
+	test_verb();
+	test_mxp();
 	test_profile();
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
