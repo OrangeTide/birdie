@@ -121,11 +121,12 @@ all :: $(BD_FONT_OUT)
 # module.mk files above, so the documented entry points keep working:
 #
 #   make test         build + run the headless tests (test/module.mk):
-#                      test_gui (toolkit) and test_client (MUD-client core).
+#                      test_gui (toolkit), test_client (MUD-client units),
+#                      and test_session (bd_session integration).
 #   make widget-test   build the opt-in widget gallery (src/guitest/module.mk).
 # ----------------------------------------------------------------------
 .PHONY : test
-test : run-test-test_gui run-test-test_client
+test : run-test-test_gui run-test-test_client run-test-test_session
 
 .PHONY : widget-test
 widget-test : $(BD_FONT_OUT)

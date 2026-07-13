@@ -47,3 +47,27 @@ test_client_LDLIBS = -lm
 define test_client_TESTCMD
 $(test_client_EXEC)
 endef
+
+# test_session is an integration test for bd_session, the seam that wires the
+# transport to line assembly, triggers, and the front-end event stream. It links
+# a FAKE bd_net (defined in the test) in place of the real socket/thread/TLS
+# stack, so it drives the full bd_session.c pipeline deterministically with no
+# network. bd_session_new creates its VM on the Lua backend; the test defines a
+# no-op bd_vm_lua so the link needs no Lua/LPeg (command-body triggers, which the
+# test exercises, work without a live interpreter).
+EXECUTABLES  += test_session
+TEST_TARGETS += test_session
+
+test_session_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+test_session_SRCS  = test_session.c \
+	../src/birdie/bd_session.c ../src/birdie/bd_log.c ../src/birdie/bd_replay.c \
+	../src/birdie/bd_mxp.c ../src/birdie/bd_trigger.c ../src/birdie/bd_vm.c \
+	../src/birdie/bd_profile.c ../src/birdie/bd_csv.c \
+	../src/birdie-gui/bd_utf8.c
+test_session_CFLAGS = -I$(test_session_DIR)../src/birdie \
+	-I$(test_session_DIR)../src/birdie-gui
+test_session_LDLIBS = -lm
+
+define test_session_TESTCMD
+$(test_session_EXEC)
+endef
