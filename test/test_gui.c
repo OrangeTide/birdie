@@ -310,6 +310,9 @@ exp_set_name(void *ctx, uint64_t key, const char *name)
 /* ---- click callback ---- */
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
+static int modal_accept_n, modal_cancel_n;
+static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
+static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
 
 /* ---- slider / knob callbacks ---- */
 static int slider_calls;
@@ -1994,6 +1997,40 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+4, .y=by+4 });
 	check("closing the modal re-enables the UI behind", clicked == before + 1);
+
+	/* ---- modal ergonomics (bd_modal_open_ex): focus + Enter/Escape ---- */
+	bd_id efld = bd_create(dlg, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_END);
+	bd_id area = bd_create(dlg, BD_TEXT_AREA, BD_PREF_H_I, 40, BD_END);
+	bd_gui_layout(800, 600);
+
+	/* explicit initial focus */
+	modal_accept_n = modal_cancel_n = 0;
+	bd_modal_open_ex(dlg, &(bd_modal_opts){ .focus = efld,
+	    .on_accept = on_dlg_accept, .on_cancel = on_dlg_cancel });
+	check("bd_modal_open_ex focuses the requested widget", bd_focused() == efld);
+
+	/* Enter fires on_accept and does not auto-close (handler validates/closes) */
+	int en = bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter fires on_accept, consumed, dialog stays open",
+	    en == 1 && modal_accept_n == 1 && bd_modal_active() == dlg);
+
+	/* Enter is suppressed while a multiline text area is focused */
+	bd_focus(area);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter does not confirm while a text area is focused",
+	    modal_accept_n == 1);
+
+	/* Escape fires on_cancel then closes */
+	int ec = bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape fires on_cancel and closes",
+	    ec == 1 && modal_cancel_n == 1 && bd_modal_active() == BD_NONE);
+
+	/* default focus: first focusable in the dialog when none is named */
+	bd_focus(BD_NONE);
+	bd_modal_open_ex(dlg, NULL);
+	check("a modal with no named focus lands on the first focusable",
+	    bd_focused() == dbtn);
+	bd_modal_close(dlg);
 
 	bd_gui_cleanup();
 	}

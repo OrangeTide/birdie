@@ -231,7 +231,10 @@ static bd_id        active_notice = BD_NONE;
 static bd_notice_cb notice_cb;
 static void        *notice_arg;
 /* Generic modal dialog overlay (one at a time), a detached widget subtree. */
-static bd_id        active_modal = BD_NONE;
+static bd_id          active_modal = BD_NONE;
+static bd_callback_fn modal_on_accept;   /* Enter confirms (bd_modal_open_ex) */
+static bd_callback_fn modal_on_cancel;   /* Escape cancels */
+static void          *modal_arg;
 /* IME: in-progress preedit shown at the focused field's caret, and the last
  * reported enabled state */
 static char  preedit_buf[256];
@@ -2941,6 +2944,9 @@ bd_gui_cleanup(void)
 	active_notice = BD_NONE;
 	notice_cb = NULL;
 	notice_arg = NULL;
+	active_modal = BD_NONE;
+	modal_on_accept = modal_on_cancel = NULL;
+	modal_arg = NULL;
 	memset(touches, 0, sizeof touches);
 }
 
@@ -3948,10 +3954,33 @@ bd_notice_open(const char *message, const char *buttons,
 }
 
 void
+bd_modal_open_ex(bd_id dialog, const bd_modal_opts *opts)
+{
+	if (dialog == BD_NONE || !pool[dialog].alive)
+		return;
+	active_modal = dialog;
+	modal_on_accept = opts ? opts->on_accept : NULL;
+	modal_on_cancel = opts ? opts->on_cancel : NULL;
+	modal_arg       = opts ? opts->arg : NULL;
+
+	/* initial focus: the requested widget, else the first focusable in the
+	 * dialog, so the user can type / tab without clicking first */
+	bd_id f = opts ? opts->focus : BD_NONE;
+	if (f == BD_NONE) {
+		static bd_id list[MAX_WIDGETS];
+		int n = 0;
+		collect_focusable(dialog, list, &n, MAX_WIDGETS);
+		if (n > 0)
+			f = list[0];
+	}
+	if (f != BD_NONE)
+		bd_focus(f);
+}
+
+void
 bd_modal_open(bd_id dialog)
 {
-	if (dialog != BD_NONE && pool[dialog].alive)
-		active_modal = dialog;
+	bd_modal_open_ex(dialog, NULL);
 }
 
 void
@@ -3960,6 +3989,8 @@ bd_modal_close(bd_id dialog)
 	if (active_modal != dialog)
 		return;
 	active_modal = BD_NONE;
+	modal_on_accept = modal_on_cancel = NULL;
+	modal_arg = NULL;
 	/* drop keyboard focus: it may be inside the now-hidden dialog, and its
 	 * widgets must stop receiving key events once the main UI is live again */
 	focus_id = BD_NONE;
@@ -4389,7 +4420,22 @@ bd_gui_event(const bd_event *ev)
 	 * and anything outside is swallowed so the dimmed UI behind is inert. */
 	if (active_modal != BD_NONE && pool[active_modal].alive) {
 		if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ESCAPE) {
-			bd_modal_close(active_modal);
+			bd_id d = active_modal;
+			bd_callback_fn oc = modal_on_cancel;
+			void *oa = modal_arg;
+			if (oc)
+				oc(d, oa);      /* still open: the handler can read fields */
+			bd_modal_close(d);
+			return 1;
+		}
+		/* Enter confirms the dialog, unless a multiline field is focused (it
+		 * needs Enter for a newline). on_accept does not auto-close, so the
+		 * handler validates then closes. */
+		if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ENTER &&
+		    modal_on_accept &&
+		    !(focus_id != BD_NONE && pool[focus_id].alive &&
+		      pool[focus_id].type == BD_TEXT_AREA)) {
+			modal_on_accept(active_modal, modal_arg);
 			return 1;
 		}
 	}

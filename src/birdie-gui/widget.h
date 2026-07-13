@@ -287,6 +287,29 @@ void  bd_modal_open(bd_id dialog);
 void  bd_modal_close(bd_id dialog);
 bd_id bd_modal_active(void);   /* the open dialog, or BD_NONE */
 
+/*
+ * Open a modal with dialog ergonomics. Zero-init a bd_modal_opts and set what
+ * you need:
+ *   focus     initial keyboard focus; BD_NONE = the first focusable widget in
+ *             the dialog, so the user can type or tab immediately.
+ *   on_accept fired when Enter confirms the dialog (called with the dialog id +
+ *             arg). It does NOT auto-close, so the handler can validate the form
+ *             and then bd_modal_close() itself, or leave it open on error.
+ *             Skipped while a multiline BD_TEXT_AREA is focused (Enter inserts a
+ *             newline there).
+ *   on_cancel fired when Escape cancels, just before the dialog auto-closes.
+ * bd_modal_open(d) is bd_modal_open_ex(d, NULL): first-focusable focus, no
+ * accept/cancel handlers (Escape still closes).
+ */
+typedef struct bd_modal_opts {
+	bd_id          focus;
+	bd_callback_fn on_accept;
+	bd_callback_fn on_cancel;
+	void          *arg;
+} bd_modal_opts;
+
+void  bd_modal_open_ex(bd_id dialog, const bd_modal_opts *opts);
+
 /* Multiple windows: each top-level BD_FRAME (parent BD_NONE) is a window. On a
  * backend with multi-window support the toolkit gives each a native window and
  * tags events with its id (bd_event.window). bd_frame_for_window() maps a
