@@ -23,3 +23,23 @@ test_gui_LDLIBS = -lm
 define test_gui_TESTCMD
 $(test_gui_EXEC)
 endef
+
+# test_client exercises the MUD-client core (bd_ring/csv/telopt/trigger/profile).
+# Those units are socket-free, callback-driven state machines, so the test
+# compiles them directly (no ludica, no sockets, no threads) and needs no
+# external libraries. bd_trigger references bd_vm_eval for '@' Lua bodies, so
+# bd_vm.c (its null backend) is linked to satisfy the symbol; the tests use only
+# command bodies, so no scripting runtime is required.
+EXECUTABLES  += test_client
+TEST_TARGETS += test_client
+
+test_client_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+test_client_SRCS  = test_client.c \
+	../src/birdie/bd_ring.c ../src/birdie/bd_csv.c ../src/birdie/bd_telopt.c \
+	../src/birdie/bd_trigger.c ../src/birdie/bd_profile.c ../src/birdie/bd_vm.c
+test_client_CFLAGS = -I$(test_client_DIR)../src/birdie
+test_client_LDLIBS = -lm
+
+define test_client_TESTCMD
+$(test_client_EXEC)
+endef
