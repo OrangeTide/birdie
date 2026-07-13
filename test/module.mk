@@ -71,3 +71,23 @@ test_session_LDLIBS = -lm
 define test_session_TESTCMD
 $(test_session_EXEC)
 endef
+
+# test_netloop is a loopback integration test for the REAL bd_net: its net
+# thread, the libiox poll loop, the rx/tx rings, and the telnet layer, driven
+# against a local TCP socket the test plays the server side of. Unlike the other
+# suites it links the vendored iox/mbedtls/miniz libraries bd_net needs and uses
+# threads + sockets; every wait is timeout-bounded so a stuck socket fails a
+# check rather than hanging. Plaintext only (no TLS handshake).
+EXECUTABLES  += test_netloop
+TEST_TARGETS += test_netloop
+
+test_netloop_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+test_netloop_SRCS  = test_netloop.c \
+	../src/birdie/bd_net.c ../src/birdie/bd_ring.c ../src/birdie/bd_telopt.c
+test_netloop_CFLAGS = -pthread -I$(test_netloop_DIR)../src/birdie
+test_netloop_LIBS   = iox mbedtls miniz
+test_netloop_LDLIBS = -pthread -lm
+
+define test_netloop_TESTCMD
+$(test_netloop_EXEC)
+endef
