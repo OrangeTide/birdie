@@ -12,6 +12,30 @@
  * bd_widget_class, registers it to obtain a type id, then builds its own
  * typed create/accessor functions on top of the core create calls.
  *
+ * Ownership conventions (uniform across the extension widgets; a widget's own
+ * header notes any exception):
+ *
+ *   - Descriptor / model structs (bd_*_desc, bd_*_model, bd_*_cb) are read and
+ *     copied field-by-field at the create call. The struct itself is never
+ *     retained, so it may be a stack temporary or compound literal:
+ *         bd_knob_create(p, &(bd_knob_desc){ .value = 0.5f, .cb = f });
+ *
+ *   - Strings in a descriptor (labels, captions) are BORROWED by default: the
+ *     widget stores the pointer, so the string must outlive the widget. This
+ *     matches the core BD_LABEL_S attribute. Exceptions that COPY into owned
+ *     storage (safe to pass a temporary) are noted in their headers: BD_ICON,
+ *     bd_actionbar, and bd_chart series labels.
+ *
+ *   - Model-driven widgets (tree, explorer, inventory, dock, table) re-walk the
+ *     model on every layout and never cache per-item strings, so an item label
+ *     returned from model.get()/cell() is borrowed only for that call and may be
+ *     a shared scratch buffer the caller overwrites next call.
+ *
+ *   - Two distinct context pointers: a model/callback `ctx` is one widget-wide
+ *     pointer passed to every model and callback invocation; a per-item `user`
+ *     field is item-specific data echoed back on activate/select. Both are
+ *     borrowed (the widget stores, never frees them).
+ *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 

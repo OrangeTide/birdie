@@ -28,7 +28,7 @@
  * action bar adds a hotkey; the inventory adds a tooltip + user pointer). */
 typedef struct bd_icon_desc {
 	uint64_t    key;      /* app identity, echoed back in callbacks */
-	const char *label;    /* caption; NULL/"" = none */
+	const char *label;    /* caption; NULL/"" = none (copied) */
 	bd_texture  icon;     /* tile image; id 0 = empty cell */
 	int         count;    /* stack badge; > 1 draws "xN"; 0/1 = none */
 	int         enabled;  /* 0 = dimmed */
