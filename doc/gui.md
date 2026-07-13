@@ -1075,7 +1075,7 @@ The raw GLES backend implements it on the X11 CLIPBOARD selection (owns the
 selection and serves `SelectionRequest`; reads via `XConvertSelection`),
 verified interoperating with `xclip` both directions. The ludica backend
 leaves the hooks NULL for now, so birdie itself has no clipboard until ludica
-exposes one (see `todo.txt`); the hooks being NULL is a safe no-op. Per-window
+exposes one (see `TODO.md`); the hooks being NULL is a safe no-op. Per-window
 copy/cut still needs a selection, so it is single-line-field-only until
 `BD_TEXT_AREA`/editor selection lands.
 
