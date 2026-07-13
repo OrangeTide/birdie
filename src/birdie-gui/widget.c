@@ -4423,7 +4423,11 @@ bd_gui_event(const bd_event *ev)
 					memcpy(preedit_buf, ev->text, (size_t)n);
 				preedit_buf[n] = '\0';
 				preedit_len = n;
-				preedit_caret = ev->caret;
+				/* the caret is a byte offset the backend supplies; clamp
+				 * it to the stored preedit so a bogus value cannot drive an
+				 * out-of-bounds read in input_text_px(preedit_buf, ...) */
+				preedit_caret = ev->caret < 0 ? 0 :
+				    ev->caret > n ? n : ev->caret;
 				preedit_owner = n > 0 ? focus_id : BD_NONE;
 			} else {
 				preedit_len = 0;
