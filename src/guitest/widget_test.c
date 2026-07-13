@@ -860,7 +860,7 @@ build_ui(void)
 	bd_id dk = bd_dock_create(cv, NULL, BD_END);
 	bd_dock_set_gravity(dk, BD_GRAVITY_TOP_LEFT);
 	bd_dock_set_tile_size(dk, 40);
-	bd_managed_canvas_set_minimize_dock(cv, dk);
+	bd_managed_canvas_set_minimize(cv, BD_MINIMIZE_DOCK, dk);
 
 	/* Servers: the icon-browser explorer, floating (drag to arrange, F2 rename) */
 	bd_id srvwin = bd_create(cv, BD_FRAME, BD_LABEL_S, "Servers",

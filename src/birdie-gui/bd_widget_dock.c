@@ -256,8 +256,9 @@ bd_dock_create(bd_id parent, const bd_dock_model *model, ...)
 	 * drawing its own desktop icons (no doubled minimize icon) */
 	if (id != BD_NONE) {
 		bd_id cv = bd_managed_canvas_of(id);
-		if (cv != BD_NONE && bd_managed_canvas_minimize_dock(cv) == BD_NONE)
-			bd_managed_canvas_set_minimize_dock(cv, id);
+		if (cv != BD_NONE &&
+		    bd_managed_canvas_minimize_mode(cv) == BD_MINIMIZE_ICONS)
+			bd_managed_canvas_set_minimize(cv, BD_MINIMIZE_DOCK, id);
 	}
 	return id;
 }

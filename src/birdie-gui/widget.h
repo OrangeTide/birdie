@@ -361,26 +361,36 @@ bd_id bd_managed_canvas_create(bd_id parent, ...);
  * to its canvas. */
 bd_id bd_managed_canvas_of(bd_id descendant);
 
-/* A managed canvas has one minimize target that collects its minimized frames.
- * By default the WM owns it: a minimized frame becomes a free-floating desktop
- * icon on the canvas (double-click restores it, drag repositions it). Call
- * set_icon_minimize(canvas, 0) to suppress the WM icons entirely (a minimized
- * frame then only vanishes, unless a dock is attached below). Icons are on by
- * default. */
-void bd_managed_canvas_set_icon_minimize(bd_id canvas, int on);
+/*
+ * A managed canvas has one minimize target that collects its minimized frames.
+ * The mode chooses where they go:
+ *
+ *   BD_MINIMIZE_ICONS  the WM draws a free-floating desktop icon per minimized
+ *                      frame (double-click restores, drag repositions). Default.
+ *   BD_MINIMIZE_DOCK   a BD_DOCK created inside the canvas is the exclusive
+ *                      receiver: minimized frames become dock tiles and the WM
+ *                      draws no icons (one tile, never a doubled icon). Pass the
+ *                      dock as `dock`; if it dies the target falls back to icons.
+ *   BD_MINIMIZE_NONE   no minimize UI: a minimized frame just vanishes.
+ *
+ * `dock` is used only for BD_MINIMIZE_DOCK (pass BD_NONE otherwise). A dock
+ * created inside a canvas still in the default BD_MINIMIZE_ICONS mode claims the
+ * target automatically, so dropping a BD_DOCK into an MDI just works; this call
+ * overrides that.
+ */
+typedef enum bd_minimize_mode {
+    BD_MINIMIZE_NONE  = 0,
+    BD_MINIMIZE_ICONS = 1,
+    BD_MINIMIZE_DOCK  = 2,
+} bd_minimize_mode;
 
-/* Hand the canvas's minimize target to a BD_DOCK (created inside the canvas):
- * while attached and alive, that dock is the exclusive receiver for the canvas's
- * minimized frames and the WM draws no desktop icons, so a minimize yields one
- * tile, not a doubled icon. Pass BD_NONE to give the target back to the WM. The
- * dock already scopes its tiles to its canvas via bd_managed_canvas_of. A dock
- * created inside a canvas claims this target automatically if it is still free,
- * so dropping a BD_DOCK into an MDI just works; the explicit setter overrides or
- * detaches (BD_NONE). */
-void bd_managed_canvas_set_minimize_dock(bd_id canvas, bd_id dock);
+void bd_managed_canvas_set_minimize(bd_id canvas, bd_minimize_mode mode, bd_id dock);
 
-/* The dock currently claiming the canvas's minimize target, or BD_NONE (the WM
- * owns it and draws desktop icons). */
+/* Current minimize mode of the canvas. */
+bd_minimize_mode bd_managed_canvas_minimize_mode(bd_id canvas);
+
+/* The dock receiving the canvas's minimized frames (BD_MINIMIZE_DOCK mode with a
+ * live dock), or BD_NONE. */
 bd_id bd_managed_canvas_minimize_dock(bd_id canvas);
 
 /*

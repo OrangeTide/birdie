@@ -1185,27 +1185,49 @@ bd_managed_canvas_of(bd_id descendant)
 	return BD_NONE;
 }
 
+/* The two internal fields encode the mode: icon_min is the WM's own icon layer
+ * (also the fallback if a dock dies), min_dock is the claiming dock. */
 void
-bd_managed_canvas_set_icon_minimize(bd_id canvas, int on)
+bd_managed_canvas_set_minimize(bd_id canvas, bd_minimize_mode mode, bd_id dock)
 {
 	struct mcanvas *c = mcanvas_of(canvas);
-	if (c)
-		c->icon_min = on ? 1 : 0;
+	if (!c)
+		return;
+	switch (mode) {
+	case BD_MINIMIZE_DOCK:
+		c->icon_min = 1;        /* fall back to icons if the dock dies */
+		c->min_dock = dock;
+		break;
+	case BD_MINIMIZE_NONE:
+		c->icon_min = 0;
+		c->min_dock = BD_NONE;
+		break;
+	case BD_MINIMIZE_ICONS:
+	default:
+		c->icon_min = 1;
+		c->min_dock = BD_NONE;
+		break;
+	}
 }
 
-void
-bd_managed_canvas_set_minimize_dock(bd_id canvas, bd_id dock)
+bd_minimize_mode
+bd_managed_canvas_minimize_mode(bd_id canvas)
 {
 	struct mcanvas *c = mcanvas_of(canvas);
-	if (c)
-		c->min_dock = dock;
+	if (!c)
+		return BD_MINIMIZE_NONE;
+	if (c->min_dock != BD_NONE && pool[c->min_dock].alive)
+		return BD_MINIMIZE_DOCK;
+	return c->icon_min ? BD_MINIMIZE_ICONS : BD_MINIMIZE_NONE;
 }
 
 bd_id
 bd_managed_canvas_minimize_dock(bd_id canvas)
 {
 	struct mcanvas *c = mcanvas_of(canvas);
-	return c ? c->min_dock : BD_NONE;
+	if (!c || c->min_dock == BD_NONE || !pool[c->min_dock].alive)
+		return BD_NONE;
+	return c->min_dock;
 }
 
 void

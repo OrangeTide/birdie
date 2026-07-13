@@ -384,19 +384,19 @@ draws two icons per minimized window. That is a bug, not a feature.
 
 So a canvas has exactly **one minimize target**:
 
-- **Default: the WM owns it and draws desktop icons.** Icons are on by default,
-  so a minimized frame is always reachable in an MDI. `bd_managed_canvas_set_
-  icon_minimize(canvas, 0)` suppresses the WM icon layer entirely (a minimized
-  frame then only vanishes, unless a dock is attached).
-- **A dock claims it and becomes the exclusive receiver.** While a live dock
+- **`BD_MINIMIZE_ICONS` (default): the WM owns it and draws desktop icons,** so a
+  minimized frame is always reachable in an MDI.
+- **`BD_MINIMIZE_DOCK`: a dock is the exclusive receiver.** While a live dock
   owns the target the WM draws no desktop icons, so a minimize yields one dock
-  tile. A `BD_DOCK` created inside a canvas **auto-claims** the target if it is
-  still free (dropping a dock into an MDI just works); the WM reclaims it if the
-  owning dock dies.
+  tile. A `BD_DOCK` created inside a canvas still in the default icons mode
+  **auto-claims** the target (dropping a dock into an MDI just works); the WM
+  reclaims it if the owning dock dies.
+- **`BD_MINIMIZE_NONE`: no minimize UI** (a minimized frame just vanishes).
 
 ```c
-void  bd_managed_canvas_set_minimize_dock(bd_id canvas, bd_id dock); /* claim / detach (BD_NONE) */
-bd_id bd_managed_canvas_minimize_dock(bd_id canvas);                 /* current owner, or BD_NONE */
+void             bd_managed_canvas_set_minimize(bd_id canvas, bd_minimize_mode mode, bd_id dock);
+bd_minimize_mode bd_managed_canvas_minimize_mode(bd_id canvas);   /* current mode */
+bd_id            bd_managed_canvas_minimize_dock(bd_id canvas);   /* the receiving dock, or BD_NONE */
 ```
 
 Mutual exclusion lives in one predicate (`mcanvas_shows_icons` in `widget.c`)
