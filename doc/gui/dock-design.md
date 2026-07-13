@@ -372,3 +372,44 @@ Option B (a unified in-app dock via `window_hide/show`) and Option C (a
 strut-reserving panel) are recorded above as the alternatives we considered and
 declined; revisit only if a future host genuinely needs an in-app tray on a
 native backend.
+
+## 15. The managed-canvas minimize target (dock vs WM desktop icons)
+
+A `BD_MANAGED_CANVAS` is its own in-surface WM host (embedded MDI), so it needs
+somewhere for *its* minimized frames to go. Two receivers can each project the
+canvas's minimized set: the WM's own free-floating **desktop icons**
+(double-click to restore, drag to reposition) and a `BD_DOCK` scoped to the
+canvas. Because both derive from the same `minimized` flag (§5), enabling both
+draws two icons per minimized window. That is a bug, not a feature.
+
+So a canvas has exactly **one minimize target**:
+
+- **Default: the WM owns it and draws desktop icons.** Icons are on by default,
+  so a minimized frame is always reachable in an MDI. `bd_managed_canvas_set_
+  icon_minimize(canvas, 0)` suppresses the WM icon layer entirely (a minimized
+  frame then only vanishes, unless a dock is attached).
+- **A dock claims it and becomes the exclusive receiver.** While a live dock
+  owns the target the WM draws no desktop icons, so a minimize yields one dock
+  tile. A `BD_DOCK` created inside a canvas **auto-claims** the target if it is
+  still free (dropping a dock into an MDI just works); the WM reclaims it if the
+  owning dock dies.
+
+```c
+void  bd_managed_canvas_set_minimize_dock(bd_id canvas, bd_id dock); /* claim / detach (BD_NONE) */
+bd_id bd_managed_canvas_minimize_dock(bd_id canvas);                 /* current owner, or BD_NONE */
+```
+
+Mutual exclusion lives in one predicate (`mcanvas_shows_icons` in `widget.c`)
+that gates both the icon render and the icon hit-test: the WM shows icons only
+when icon-minimize is on *and* no live dock has claimed the target. This keeps
+the dock unchanged — it is still the pure projection of the minimized set (§5);
+only the *WM's own* icon layer steps aside.
+
+Note this is orthogonal to the native-backend decision (§14): the target
+concerns which in-surface receiver a **canvas** uses on a single-surface host,
+whereas §14 is about surface-level frames on a native multi-window backend.
+
+**Status: DONE.** Covered by tests in `test/test_gui.c` (auto-claim, a fresh
+canvas leaves the target with the WM, a minimized frame lands in the attached
+dock, detach returns the target to the WM). The gallery's Desktop tab attaches
+its top-left dock as the canvas's minimize target.
