@@ -229,17 +229,17 @@ Built on `widget_ext.h`; each has its own header and a `*_create()`.
 enum { BD_HORIZONTAL, BD_VERTICAL };
 typedef void (*bd_value_cb)(bd_id, void *arg, float t);   /* t in [0,1] unless noted */
 
-bd_id bd_slider_create(bd_id parent, int orient, float value, bd_value_cb, void *arg, ...);
+bd_id bd_slider_create(bd_id parent, const bd_slider_desc *desc, ...);  /* orient/value + cb */
 void  bd_slider_set(bd_id, float);   float bd_slider_get(bd_id);
 
 bd_id bd_knob_create(bd_id parent, const bd_knob_desc *desc, ...);  /* min/max/step/dial + cb */
 void  bd_knob_set(bd_id, float);     float bd_knob_get(bd_id);      /* value in [min,max] */
 
 typedef void (*bd_toggle_cb)(bd_id, void *arg, int on);
-bd_id bd_toggle_create(bd_id parent, int on, bd_toggle_cb, void *arg, ...);
+bd_id bd_toggle_create(bd_id parent, const bd_toggle_desc *desc, ...);  /* on + cb */
 void  bd_toggle_set(bd_id, int on);  int bd_toggle_get(bd_id);
 
-bd_id bd_wheel_create(bd_id parent, int orient, bd_value_cb, void *arg, ...);   /* endless jog */
+bd_id bd_wheel_create(bd_id parent, const bd_wheel_desc *desc, ...);   /* orient + cb; endless jog */
 
 enum { BD_XY_SQUARE, BD_XY_CIRCLE };
 bd_id bd_xypad_create(bd_id parent, const bd_xypad_desc *desc, ...);

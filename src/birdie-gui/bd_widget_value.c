@@ -127,23 +127,22 @@ static const bd_widget_class slider_class = {
 /* ------------------------------------------------------------------ */
 
 bd_id
-bd_slider_create(bd_id parent, int orient, float value,
-    bd_value_cb cb, void *arg, ...)
+bd_slider_create(bd_id parent, const bd_slider_desc *desc, ...)
 {
 	if (slider_type == 0)
 		slider_type = bd_register_widget_class(&slider_class);
 
 	va_list ap;
-	va_start(ap, arg);
+	va_start(ap, desc);
 	bd_id id = bd_create_va(parent, slider_type, ap);
 	va_end(ap);
 
 	struct slider *s = bd_widget_state(id);
-	if (s) {
-		s->orient = orient;
-		s->t = clamp01(value);
-		s->cb = cb;
-		s->arg = arg;
+	if (s && desc) {
+		s->orient = desc->orient;
+		s->t = clamp01(desc->value);
+		s->cb = desc->cb;
+		s->arg = desc->arg;
 	}
 	return id;
 }
@@ -726,22 +725,22 @@ static const bd_widget_class toggle_class = {
 };
 
 bd_id
-bd_toggle_create(bd_id parent, int on, bd_toggle_cb cb, void *arg, ...)
+bd_toggle_create(bd_id parent, const bd_toggle_desc *desc, ...)
 {
 	if (toggle_type == 0)
 		toggle_type = bd_register_widget_class(&toggle_class);
 
 	va_list ap;
-	va_start(ap, arg);
+	va_start(ap, desc);
 	bd_id id = bd_create_va(parent, toggle_type, ap);
 	va_end(ap);
 
 	struct toggle *t = bd_widget_state(id);
-	if (t) {
-		t->on = on ? 1 : 0;
+	if (t && desc) {
+		t->on = desc->on ? 1 : 0;
 		t->pos = (float)t->on;
-		t->cb = cb;
-		t->arg = arg;
+		t->cb = desc->cb;
+		t->arg = desc->arg;
 	}
 	return id;
 }
@@ -890,21 +889,21 @@ static const bd_widget_class wheel_class = {
 };
 
 bd_id
-bd_wheel_create(bd_id parent, int orient, bd_value_cb cb, void *arg, ...)
+bd_wheel_create(bd_id parent, const bd_wheel_desc *desc, ...)
 {
 	if (wheel_type == 0)
 		wheel_type = bd_register_widget_class(&wheel_class);
 
 	va_list ap;
-	va_start(ap, arg);
+	va_start(ap, desc);
 	bd_id id = bd_create_va(parent, wheel_type, ap);
 	va_end(ap);
 
 	struct wheel *wl = bd_widget_state(id);
-	if (wl) {
-		wl->vert = (orient == BD_VERTICAL);
-		wl->cb = cb;
-		wl->arg = arg;
+	if (wl && desc) {
+		wl->vert = (desc->orient == BD_VERTICAL);
+		wl->cb = desc->cb;
+		wl->arg = desc->arg;
 	}
 	return id;
 }

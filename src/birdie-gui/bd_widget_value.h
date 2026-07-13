@@ -19,11 +19,19 @@ enum { BD_HORIZONTAL = 0, BD_VERTICAL = 1 };
 /* Change callback: t is the widget's normalized value in [0,1]. */
 typedef void (*bd_value_cb)(bd_id id, void *arg, float t);
 
-/* Create a slider. orient is BD_HORIZONTAL or BD_VERTICAL; value is the
- * initial [0,1] position. Trailing args are BD_* attributes ending in BD_END
- * (e.g. BD_GROW_I, BD_PREF_W_I). */
-bd_id bd_slider_create(bd_id parent, int orient, float value,
-                       bd_value_cb cb, void *arg, ...);
+/*
+ * Create a slider. Trailing args are BD_* attributes ending in BD_END (e.g.
+ * BD_GROW_I, BD_PREF_W_I). A NULL desc uses all defaults (horizontal, 0, no
+ * callback).
+ */
+typedef struct bd_slider_desc {
+    int         orient;   /* BD_HORIZONTAL (default) or BD_VERTICAL */
+    float       value;    /* initial [0,1] position */
+    bd_value_cb cb;       /* change callback */
+    void       *arg;
+} bd_slider_desc;
+
+bd_id bd_slider_create(bd_id parent, const bd_slider_desc *desc, ...);
 
 void  bd_slider_set(bd_id id, float value);   /* clamped to [0,1] */
 float bd_slider_get(bd_id id);
@@ -73,7 +81,13 @@ float bd_knob_get(bd_id id);                /* value in [min,max] */
  */
 typedef void (*bd_toggle_cb)(bd_id id, void *arg, int on);
 
-bd_id bd_toggle_create(bd_id parent, int on, bd_toggle_cb cb, void *arg, ...);
+typedef struct bd_toggle_desc {
+    int          on;      /* initial state (default off) */
+    bd_toggle_cb cb;      /* change callback */
+    void        *arg;
+} bd_toggle_desc;
+
+bd_id bd_toggle_create(bd_id parent, const bd_toggle_desc *desc, ...);
 void  bd_toggle_set(bd_id id, int on);
 int   bd_toggle_get(bd_id id);
 
@@ -82,7 +96,13 @@ int   bd_toggle_get(bd_id id);
  * callback receives the spin delta (not an absolute value); a BD_VERTICAL wheel
  * spins up/down, a BD_HORIZONTAL one left/right.
  */
-bd_id bd_wheel_create(bd_id parent, int orient, bd_value_cb cb, void *arg, ...);
+typedef struct bd_wheel_desc {
+    int         orient;   /* BD_HORIZONTAL (default) or BD_VERTICAL */
+    bd_value_cb cb;       /* receives the spin delta */
+    void       *arg;
+} bd_wheel_desc;
+
+bd_id bd_wheel_create(bd_id parent, const bd_wheel_desc *desc, ...);
 
 /*
  * An X-Y pad: a recessed surface with a draggable chrome puck giving two

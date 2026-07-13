@@ -765,7 +765,7 @@ init(void)
 	bd_id trow = bd_create(edit_dialog, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
 	bd_create(trow, BD_LABEL, BD_LABEL_S, "TLS", BD_PREF_W_I, 40, BD_END);
-	edit_tls = bd_toggle_create(trow, 0, NULL, NULL, BD_END);
+	edit_tls = bd_toggle_create(trow, &(bd_toggle_desc){0}, BD_END);
 	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "", BD_GROW_I, 1, BD_END);
 	bd_id ebtn = bd_create(edit_dialog, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);

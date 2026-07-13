@@ -451,18 +451,19 @@ main(void)
 	rec_type = bd_register_widget_class(&rec_class);
 	bd_id rec = bd_create(frame, rec_type, BD_PREF_H_I, 40, BD_END);
 
-	bd_id sld = bd_slider_create(frame, BD_HORIZONTAL, 0.5f,
-	    on_slider_test, NULL, BD_PREF_H_I, 20, BD_END);
+	bd_id sld = bd_slider_create(frame, &(bd_slider_desc){
+	    .orient = BD_HORIZONTAL, .value = 0.5f, .cb = on_slider_test },
+	    BD_PREF_H_I, 20, BD_END);
 	bd_id knb = bd_knob_create(frame, &(bd_knob_desc){
 	    .min = 0, .max = 1, .value = 0.5f, .cb = on_knob_test },
 	    BD_PREF_H_I, 56, BD_END);
 	bd_id ksw = bd_knob_create(frame, &(bd_knob_desc){
 	    .min = 0, .max = 6, .step = 1, .value = 2, .dial = BD_DIAL_DOTS },
 	    BD_PREF_H_I, 56, BD_END);
-	bd_id tg = bd_toggle_create(frame, 0, on_toggle_test, NULL,
-	    BD_PREF_H_I, 26, BD_END);
-	bd_id wh = bd_wheel_create(frame, BD_VERTICAL, on_wheel_test, NULL,
-	    BD_PREF_H_I, 60, BD_END);
+	bd_id tg = bd_toggle_create(frame, &(bd_toggle_desc){
+	    .on = 0, .cb = on_toggle_test }, BD_PREF_H_I, 26, BD_END);
+	bd_id wh = bd_wheel_create(frame, &(bd_wheel_desc){
+	    .orient = BD_VERTICAL, .cb = on_wheel_test }, BD_PREF_H_I, 60, BD_END);
 	bd_id xy = bd_xypad_create(frame, &(bd_xypad_desc){
 	    .shape = BD_XY_CIRCLE, .x = 0.5f, .y = 0.5f, .cb = on_xy_test },
 	    BD_PREF_H_I, 76, BD_END);

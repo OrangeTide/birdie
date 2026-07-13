@@ -630,9 +630,11 @@ build_ui(void)
 
 	/* switches and relative wheels */
 	bd_id srow = section(right, "Switches & wheels", BD_LAYOUT_ROW, 96);
-	bd_toggle_create(srow, 1, on_toggle, NULL, BD_PREF_W_I, 56, BD_END);
-	bd_wheel_create(srow, BD_VERTICAL, on_jog, NULL, BD_PREF_W_I, 30, BD_END);
-	bd_wheel_create(srow, BD_HORIZONTAL, on_jog, NULL,
+	bd_toggle_create(srow, &(bd_toggle_desc){ .on = 1, .cb = on_toggle },
+		BD_PREF_W_I, 56, BD_END);
+	bd_wheel_create(srow, &(bd_wheel_desc){ .orient = BD_VERTICAL, .cb = on_jog },
+		BD_PREF_W_I, 30, BD_END);
+	bd_wheel_create(srow, &(bd_wheel_desc){ .orient = BD_HORIZONTAL, .cb = on_jog },
 		BD_PREF_W_I, 80, BD_PREF_H_I, 30, BD_END);
 	bd_knob_create(srow, &(bd_knob_desc){
 		.relative = 1, .dimples = 3, .cb = on_jog }, /* endless jog dial */
@@ -683,11 +685,13 @@ build_ui(void)
 	 * slider sits in a column wrapper so it keeps a short, fixed height
 	 * instead of stretching its thumb to fill the tall row. */
 	bd_id vrow = section(pads, "Sliders", BD_LAYOUT_ROW, 150);
-	bd_slider_create(vrow, BD_VERTICAL, 0.6f, on_slider, (void *)"Fader",
+	bd_slider_create(vrow, &(bd_slider_desc){ .orient = BD_VERTICAL,
+		.value = 0.6f, .cb = on_slider, .arg = (void *)"Fader" },
 		BD_PREF_W_I, 28, BD_END);
 	bd_id hwrap = bd_create(vrow, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_END);
-	bd_slider_create(hwrap, BD_HORIZONTAL, 0.4f, on_slider, (void *)"Wet",
+	bd_slider_create(hwrap, &(bd_slider_desc){ .orient = BD_HORIZONTAL,
+		.value = 0.4f, .cb = on_slider, .arg = (void *)"Wet" },
 		BD_PREF_H_I, 24, BD_END);
 
 	/* -- Meters: the 0..1 instrument styles + a progress bar (animated in the
@@ -912,7 +916,8 @@ build_ui(void)
 		BD_PREF_H_I, 16, BD_FG_C, 0xDCE3EAFFu, BD_BG_C, 0u, BD_END);
 	bd_id setrow = bd_create(setwin, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
 		BD_PREF_H_I, 28, BD_GAP_I, 8, BD_END);
-	bd_toggle_create(setrow, 0, on_wallpaper, NULL, BD_PREF_W_I, 52, BD_END);
+	bd_toggle_create(setrow, &(bd_toggle_desc){ .on = 0, .cb = on_wallpaper },
+		BD_PREF_W_I, 52, BD_END);
 	bd_create(setrow, BD_LABEL, BD_LABEL_S, "GLES wallpaper", BD_GROW_I, 1,
 		BD_FG_C, 0xB8C0C8FFu, BD_BG_C, 0u, BD_END);
 
@@ -924,7 +929,8 @@ build_ui(void)
 		BD_ON_CLICK_F, on_new_window, BD_END);
 	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Quit", BD_PREF_W_I, 90,
 		BD_ON_CLICK_F, on_quit, BD_END);
-	bd_slider_create(bar, BD_HORIZONTAL, 0.5f, on_slider, (void *)"Volume",
+	bd_slider_create(bar, &(bd_slider_desc){ .orient = BD_HORIZONTAL,
+		.value = 0.5f, .cb = on_slider, .arg = (void *)"Volume" },
 		BD_GROW_I, 1, BD_END);
 
 	/* ---- status bar (the event readout) ---- */
