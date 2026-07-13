@@ -167,7 +167,7 @@ void bd_list_set_items(bd_id, const char *newline_separated);
 int  bd_list_count(bd_id);  int bd_list_selected(bd_id);  void bd_list_select(bd_id, int row);
 /* tab bar */
 void bd_tabbar_set_tabs(bd_id, const char *newline_separated);
-int  bd_tabbar_count(bd_id);  int bd_tabbar_active(bd_id);  void bd_tabbar_set_active(bd_id, int);
+int  bd_tabbar_count(bd_id);  int bd_tabbar_selected(bd_id);  void bd_tabbar_select(bd_id, int);
 /* scrollbar */
 void  bd_scrollbar_set(bd_id, float pos, float frac);   float bd_scrollbar_value(bd_id);
 ```
@@ -317,7 +317,7 @@ children the first time a node opens.
 /* item: label, icon, has_children, enabled, user   cb: select / activate / expand */
 bd_id    bd_tree_create(bd_id parent, const bd_tree_model *, const bd_tree_cb *, ...);
 void     bd_tree_refresh(bd_id);
-uint64_t bd_tree_selected(bd_id);        void bd_tree_set_selected(bd_id, uint64_t node);
+uint64_t bd_tree_selected(bd_id);        void bd_tree_select(bd_id, uint64_t node);
 void     bd_tree_set_expanded(bd_id, uint64_t node, int open);   int bd_tree_is_expanded(bd_id, uint64_t);
 void     bd_tree_set_indent(bd_id, int px);
 ```

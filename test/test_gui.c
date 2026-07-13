@@ -1609,7 +1609,7 @@ main(void)
 	    BD_ON_CLICK_F, on_click, BD_END);
 	bd_gui_layout(800, 600);
 	check("tabbar_count counts tabs", bd_tabbar_count(tb) == 3);
-	check("first tab active by default", bd_tabbar_active(tb) == 0);
+	check("first tab active by default", bd_tabbar_selected(tb) == 0);
 
 	int tbx, tby, tbw, tbh;
 	bd_widget_rect(tb, &tbx, &tby, &tbw, &tbh);
@@ -1619,15 +1619,15 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tcx, .y=tcy });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tcx, .y=tcy });
 	check("clicking a tab activates it + fires",
-	    bd_tabbar_active(tb) == 1 && clicked == tc + 1);
+	    bd_tabbar_selected(tb) == 1 && clicked == tc + 1);
 
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
-	check("Right moves to the next tab", bd_tabbar_active(tb) == 2);
+	check("Right moves to the next tab", bd_tabbar_selected(tb) == 2);
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_LEFT });
-	check("Left moves to the previous tab", bd_tabbar_active(tb) == 1);
+	check("Left moves to the previous tab", bd_tabbar_selected(tb) == 1);
 
-	bd_tabbar_set_active(tb, 0);
-	check("bd_tabbar_set_active sets the tab", bd_tabbar_active(tb) == 0);
+	bd_tabbar_select(tb, 0);
+	check("bd_tabbar_select sets the tab", bd_tabbar_selected(tb) == 0);
 	bd_gui_render();   /* exercises the folder-tab render path */
 	bd_gui_cleanup();
 
@@ -2179,7 +2179,7 @@ main(void)
 	bd_gui_layout(800, 500);
 
 	check("tab view reports three panes", bd_tabview_count(tv) == 3);
-	check("first pane is active", bd_tabview_active(tv) == 0);
+	check("first pane is active", bd_tabview_selected(tv) == 0);
 	check("only the active pane is visible",
 	    bd_get_i(p0, BD_VISIBLE_B) == 1 && bd_get_i(p1, BD_VISIBLE_B) == 0 &&
 	    bd_get_i(p2, BD_VISIBLE_B) == 0);
@@ -2197,7 +2197,7 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+13 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+13 });
 	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_RIGHT });
-	check("switching tabs activates the next pane", bd_tabview_active(tv) == 1);
+	check("switching tabs activates the next pane", bd_tabview_selected(tv) == 1);
 	check("the change callback fired", tv_change_n == 1);
 	check("visibility follows the active tab",
 	    bd_get_i(p0, BD_VISIBLE_B) == 0 && bd_get_i(p1, BD_VISIBLE_B) == 1);
@@ -2210,8 +2210,8 @@ main(void)
 	    tv_btn1 == 1 && tv_btn0 == 1);
 
 	/* programmatic switch does not fire the change callback */
-	bd_tabview_set_active(tv, 2);
-	check("bd_tabview_set_active switches panes", bd_tabview_active(tv) == 2 &&
+	bd_tabview_select(tv, 2);
+	check("bd_tabview_select switches panes", bd_tabview_selected(tv) == 2 &&
 	    bd_get_i(p2, BD_VISIBLE_B) == 1);
 	check("a programmatic switch is silent", tv_change_n == 1);
 
@@ -2504,7 +2504,7 @@ main(void)
 	bd_gui_render();
 	check("tree renders expanded without crashing", 1);
 
-	bd_tree_set_selected(tr, 4);
+	bd_tree_select(tr, 4);
 	check("tree set_selected reflected", bd_tree_selected(tr) == 4);
 
 	int rx, ry, rw, rh;

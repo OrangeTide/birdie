@@ -826,7 +826,7 @@ hit-testing. The class sets `BD_WC_CONTAINS_CHILDREN`, so the core lays out,
 renders, and routes input through the strip and panes for free; the only custom
 logic is building the subtree and syncing pane visibility from the strip's active
 index (done in the layout hook and the strip's change callback, so a tab click,
-Left/Right, or `bd_tabview_set_active` all converge).
+Left/Right, or `bd_tabview_select` all converge).
 
 Covered by `test/test_gui.c` (three panes, only the active one visible and
 hittable, tab switch flips visibility and input routing, programmatic switch is

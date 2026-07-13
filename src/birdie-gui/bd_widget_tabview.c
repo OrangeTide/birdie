@@ -8,7 +8,7 @@
  * and hides the rest, so the core skips them in render and hit-testing while
  * each keeps its own laid-out contents. The tab strip's change callback and the
  * layout hook both re-sync visibility from the strip's active index, so a tab
- * click, a Left/Right key, or bd_tabview_set_active all converge.
+ * click, a Left/Right key, or bd_tabview_select all converge.
  *
  * The widget declares BD_WC_CONTAINS_CHILDREN, so the core lays out, renders,
  * and routes input through its children (the strip and the panes) for free; the
@@ -62,7 +62,7 @@ tv_tab_changed(bd_id tabbar, void *data)
 	struct tabview *tv = bd_widget_state(id);
 	if (!tv)
 		return;
-	tv->active = bd_tabbar_active(tabbar);
+	tv->active = bd_tabbar_selected(tabbar);
 	tv_sync(id, tv);
 	if (tv->on_change)
 		tv->on_change(id, tv->on_change_data);
@@ -80,7 +80,7 @@ tv_layout(bd_id id, void *state, int w, int h)
 	/* the strip is authoritative for the active index (a click/key may have
 	 * moved it); mirror it onto the panes every layout */
 	if (tv->tabbar != BD_NONE)
-		tv->active = bd_tabbar_active(tv->tabbar);
+		tv->active = bd_tabbar_selected(tv->tabbar);
 	tv_sync(id, tv);
 }
 
@@ -162,7 +162,7 @@ bd_tabview_count(bd_id tabview)
 }
 
 int
-bd_tabview_active(bd_id tabview)
+bd_tabview_selected(bd_id tabview)
 {
 	if (bd_widget_type(tabview) != tv_type)
 		return -1;
@@ -182,7 +182,7 @@ bd_tabview_pane(bd_id tabview, int index)
 }
 
 void
-bd_tabview_set_active(bd_id tabview, int index)
+bd_tabview_select(bd_id tabview, int index)
 {
 	if (bd_widget_type(tabview) != tv_type)
 		return;
@@ -192,7 +192,7 @@ bd_tabview_set_active(bd_id tabview, int index)
 	if (index < 0) index = 0;
 	if (index >= tv->npanes) index = tv->npanes - 1;
 	tv->active = index;
-	bd_tabbar_set_active(tv->tabbar, index);
+	bd_tabbar_select(tv->tabbar, index);
 	tv_sync(tabview, tv);
 }
 

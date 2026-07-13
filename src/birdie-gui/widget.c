@@ -3828,7 +3828,7 @@ bd_tabbar_count(bd_id id)
 }
 
 int
-bd_tabbar_active(bd_id id)
+bd_tabbar_selected(bd_id id)
 {
 	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
 		return -1;
@@ -3836,7 +3836,7 @@ bd_tabbar_active(bd_id id)
 }
 
 void
-bd_tabbar_set_active(bd_id id, int index)
+bd_tabbar_select(bd_id id, int index)
 {
 	if (id == BD_NONE || !pool[id].alive || pool[id].type != BD_TAB_BAR)
 		return;

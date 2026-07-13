@@ -659,7 +659,7 @@ bd_tree_selected(bd_id id)
 }
 
 void
-bd_tree_set_selected(bd_id id, uint64_t node)
+bd_tree_select(bd_id id, uint64_t node)
 {
 	struct tree *t = tree_of(id);
 	if (!t)

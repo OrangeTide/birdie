@@ -255,8 +255,8 @@ void bd_list_select(bd_id id, int row);
  * fires BD_ON_CLICK_F; the host reads/sets the active index. */
 void bd_tabbar_set_tabs(bd_id id, const char *newline_separated);
 int  bd_tabbar_count(bd_id id);
-int  bd_tabbar_active(bd_id id);
-void bd_tabbar_set_active(bd_id id, int index);
+int  bd_tabbar_selected(bd_id id);
+void bd_tabbar_select(bd_id id, int index);
 
 /* BD_SCROLLBAR: a standalone scrollbar. Orientation follows the shape (a bar
  * taller than wide is vertical). pos is the thumb position in [0,1]; frac is

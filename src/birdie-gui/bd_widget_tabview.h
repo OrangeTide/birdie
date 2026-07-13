@@ -45,15 +45,15 @@ bd_id bd_tabview_add_pane(bd_id tabview, const char *label);
 int  bd_tabview_count(bd_id tabview);
 
 /* The active pane index (-1 if none) and its content container. */
-int  bd_tabview_active(bd_id tabview);
+int  bd_tabview_selected(bd_id tabview);
 bd_id bd_tabview_pane(bd_id tabview, int index);
 
 /* Switch to pane `index` (clamped). Does not fire the change callback (a
- * programmatic set), matching bd_tabbar_set_active. */
-void bd_tabview_set_active(bd_id tabview, int index);
+ * programmatic set), matching bd_tabbar_select. */
+void bd_tabview_select(bd_id tabview, int index);
 
 /* Optional: called after the active pane changes by a tab click / key, with the
- * tab-view id. Poll bd_tabview_active() for the new index. */
+ * tab-view id. Poll bd_tabview_selected() for the new index. */
 void bd_tabview_on_change(bd_id tabview, bd_callback_fn fn, void *data);
 
 #endif

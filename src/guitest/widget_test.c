@@ -952,9 +952,9 @@ main(void)
 	bd_gui_init(&bd_backend_gles, NULL);
 	build_ui();
 	if (getenv("GALLERY_AUTOTAB"))    /* select a tab by index for a shot */
-		bd_tabview_set_active(tab_view, atoi(getenv("GALLERY_AUTOTAB")));
+		bd_tabview_select(tab_view, atoi(getenv("GALLERY_AUTOTAB")));
 	if (getenv("GALLERY_AUTODESK")) { /* open the Desktop (MDI) tab for a shot */
-		bd_tabview_set_active(tab_view, desktop_tab);
+		bd_tabview_select(tab_view, desktop_tab);
 		if (getenv("GALLERY_AUTOMIN"))   /* minimize a frame to show the dock */
 			bd_window_minimize(desk_logwin);
 		if (getenv("GALLERY_AUTOWALL"))  /* turn the GLES wallpaper on for a shot */

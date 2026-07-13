@@ -63,7 +63,7 @@ void bd_tree_refresh(bd_id id);
 uint64_t bd_tree_selected(bd_id id);
 
 /* Select a node (0 clears). Scrolls it into view if it is currently visible. */
-void bd_tree_set_selected(bd_id id, uint64_t node);
+void bd_tree_select(bd_id id, uint64_t node);
 
 /* Open/close a node programmatically (does not fire the expand callback). */
 void bd_tree_set_expanded(bd_id id, uint64_t node, int open);
