@@ -211,7 +211,7 @@ What is built:
   reads it and `bd_focus(id)` sets it (e.g. focus an input line the app just
   opened, so the user types without clicking it first).
 - **Clipboard** — Ctrl-C/X/V in text fields via backend `clipboard_set`/`get`
-  (X11 CLIPBOARD on the GLES backend; ludica backend NULL for now).
+  (X11 CLIPBOARD on both the GLES backend and the ludica backend).
 - **IME / compose** — `BD_EV_TEXT_COMMIT`/`BD_EV_TEXT_PREEDIT` + backend
   `ime_set_enabled`/`ime_set_cursor_rect`; X11 XIM on the GLES backend (native
   candidate window). Key-up + an auto-repeat flag on `bd_event`.
@@ -1074,8 +1074,10 @@ selection) and Ctrl-V (paste, replacing the selection; newlines kept in
 The raw GLES backend implements it on the X11 CLIPBOARD selection (owns the
 selection and serves `SelectionRequest`; reads via `XConvertSelection`),
 verified interoperating with `xclip` both directions. The ludica backend
-leaves the hooks NULL for now, so birdie itself has no clipboard until ludica
-exposes one (see `TODO.md`); the hooks being NULL is a safe no-op. Per-window
+implements the same two hooks via ludica's `lud_clipboard_set_text` /
+`lud_clipboard_get_text` (ludica v26.07.0), also on the X11 CLIPBOARD
+selection, so birdie has working copy/paste on its own host, verified
+round-tripping against `xclip` both directions. Per-window
 copy/cut still needs a selection, so it is single-line-field-only until
 `BD_TEXT_AREA`/editor selection lands.
 

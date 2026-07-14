@@ -207,6 +207,29 @@ be_resolve_asset(const char *rel, char *buf, size_t bufsz)
 }
 #endif /* __linux__ */
 
+/* ------------------------------------------------------------------ */
+/* clipboard (ludica)                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Last string handed out by be_clipboard_get. ludica returns a fresh malloc'd
+ * copy each call; the backend contract wants a pointer it owns until the next
+ * clipboard call, so we hold this one and free it on the following get. */
+static char *clip_owned;
+
+static void
+be_clipboard_set(const char *utf8)
+{
+	lud_clipboard_set_text(utf8 ? utf8 : "");
+}
+
+static const char *
+be_clipboard_get(void)
+{
+	free(clip_owned);                       /* release the previous handout */
+	clip_owned = lud_clipboard_get_text();  /* malloc'd, or NULL on empty */
+	return (clip_owned && clip_owned[0]) ? clip_owned : NULL;
+}
+
 const bd_backend bd_backend_ludica = {
 	.width            = be_width,
 	.height           = be_height,
@@ -231,6 +254,8 @@ const bd_backend bd_backend_ludica = {
 	.destroy_texture  = be_destroy_texture,
 	.scissor          = be_scissor,
 	.scissor_off      = be_scissor_off,
+	.clipboard_set    = be_clipboard_set,
+	.clipboard_get    = be_clipboard_get,
 #if defined(__linux__)
 	.resolve_asset    = be_resolve_asset,
 #endif
