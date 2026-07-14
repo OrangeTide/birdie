@@ -17,6 +17,7 @@
 #include "widget_ext.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
+#include "bd_widget_form.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -165,6 +166,13 @@ on_toggle(bd_id id, void *arg, int on)
 {
 	(void)id; (void)arg;
 	report(on ? "Toggle: ON" : "Toggle: OFF");
+}
+
+static void
+on_check(bd_id id, void *arg, int checked)
+{
+	(void)id;
+	report(checked ? (const char *)arg : "unchecked");
 }
 
 static void
@@ -639,6 +647,15 @@ build_ui(void)
 	bd_knob_create(srow, &(bd_knob_desc){
 		.relative = 1, .dimples = 3, .cb = on_jog }, /* endless jog dial */
 		BD_PREF_W_I, 76, BD_END);
+	/* checkboxes: a column of labeled booleans (click or Space to toggle) */
+	bd_id chkcol = bd_create(srow, BD_PANEL, BD_LAYOUT_COL, BD_PREF_W_I, 120,
+		BD_PAD_I, 4, BD_GAP_I, 2, BD_END);
+	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Enable TLS",
+		.checked = 1, .cb = on_check, .arg = (void *)"TLS on" }, BD_END);
+	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Auto-login",
+		.cb = on_check, .arg = (void *)"auto-login" }, BD_END);
+	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Log to file",
+		.cb = on_check, .arg = (void *)"logging" }, BD_END);
 
 	/* indicator lamps: LEDs (clear/frosted/jewel lens), a bi-color, and a
 	 * clickable lamp button that cycles off/red/green/amber */

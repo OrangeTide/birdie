@@ -12,6 +12,7 @@
 #include "widget_ext.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
+#include "bd_widget_form.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -310,6 +311,8 @@ exp_set_name(void *ctx, uint64_t key, const char *name)
 /* ---- click callback ---- */
 static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
+static int chk_n, chk_last;
+static void on_chk(bd_id id, void *a, int checked){ (void)id; (void)a; chk_n++; chk_last = checked; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2032,6 +2035,38 @@ main(void)
 	    bd_focused() == dbtn);
 	bd_modal_close(dlg);
 
+	bd_gui_cleanup();
+	}
+
+	/* ---- BD_CHECKBOX form control ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	chk_n = 0; chk_last = -1;
+	bd_id cb = bd_checkbox_create(fr, &(bd_checkbox_desc){
+	    .label = "Enable TLS", .checked = 0, .cb = on_chk }, BD_PREF_H_I, 22, BD_END);
+	bd_gui_layout(400, 300);
+	check("checkbox starts unchecked", bd_checkbox_get(cb) == 0);
+
+	int cx, cy, cw, ch;
+	bd_widget_rect(cb, &cx, &cy, &cw, &ch);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=cx+6, .y=cy+ch/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=cx+6, .y=cy+ch/2 });
+	check("a click checks the box and fires the callback",
+	    bd_checkbox_get(cb) == 1 && chk_n == 1 && chk_last == 1);
+	check("clicking focuses the checkbox", bd_focused() == cb);
+
+	/* Space toggles it back (delivered as a CHAR event to the focused widget) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint=' ' });
+	check("Space unchecks and fires again",
+	    bd_checkbox_get(cb) == 0 && chk_n == 2 && chk_last == 0);
+
+	bd_checkbox_set(cb, 1);
+	check("bd_checkbox_set updates without firing the callback",
+	    bd_checkbox_get(cb) == 1 && chk_n == 2);
+
+	bd_gui_render();
+	check("checkbox renders (checked) without crashing", 1);
 	bd_gui_cleanup();
 	}
 
