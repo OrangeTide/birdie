@@ -4,6 +4,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
 #include "bd_widget_combo.h"
+#include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
@@ -50,6 +51,10 @@ static bd_dialog *import_dlg;
 static bd_id imp_msg, imp_policy;
 static bd_profiles *pending_import;     /* parsed rows awaiting a resolution */
 static char imp_msg_buf[160];
+
+/* colour picker dialog: pick a colour, read its hex + #highlight SGR string */
+static bd_dialog *color_dlg;
+static bd_id color_pick, color_hex, color_sgr;
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
@@ -992,6 +997,37 @@ on_settings_save(bd_id panel, void *arg)
 	bd_modal_close(panel);
 }
 
+/* ---- colour picker (compose a #highlight colour) ---- */
+
+/* Refresh the hex and SGR readouts from a packed colour. */
+static void
+color_fields_update(uint32_t rgba)
+{
+	static char hex[16], sgr[32];
+	unsigned r = (rgba >> 24) & 0xFF, g = (rgba >> 16) & 0xFF, b = (rgba >> 8) & 0xFF;
+	snprintf(hex, sizeof hex, "#%02X%02X%02X", r, g, b);
+	snprintf(sgr, sizeof sgr, "38;2;%u;%u;%u", r, g, b);   /* a #highlight body */
+	bd_set(color_hex, BD_LABEL_S, hex, BD_END);
+	bd_set(color_sgr, BD_LABEL_S, sgr, BD_END);
+}
+
+static void
+on_color_change(bd_id id, void *arg, uint32_t rgba)
+{
+	(void)id;
+	(void)arg;
+	color_fields_update(rgba);
+}
+
+static void
+on_open_color(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	color_fields_update(bd_colorpick_get(color_pick));
+	bd_dialog_open(color_dlg);
+}
+
 /* ---- trigger editor (live: edits the current session's trigger table) ----
  * Triggers are persisted in each profile's triggers.lua (a user-editable Lua
  * script loaded when the session is created); there is no API to write them
@@ -1177,6 +1213,8 @@ init(void)
 	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Paste", BD_END);
 	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Settings...",
 		BD_ON_CLICK_F, on_open_settings, BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Colour picker...",
+		BD_ON_CLICK_F, on_open_color, BD_END);
 
 	bd_id m_sess = bd_create(menu, BD_MENU, BD_LABEL_S, "Session", BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Connect...",
@@ -1368,6 +1406,18 @@ init(void)
 	bd_dialog_button(import_dlg, "Import", BD_DIALOG_DEFAULT, on_import_apply,
 		NULL);
 
+	/* the colour picker: a BD_COLORPICK plus hex + #highlight-SGR readouts to
+	 * copy into a highlight trigger body */
+	color_dlg = bd_dialog_create("Colour picker", 260, 320);
+	color_pick = bd_colorpick_create(bd_dialog_content(color_dlg),
+		&(bd_colorpick_desc){ .color = 0x33FF66FFu, .cb = on_color_change },
+		BD_PREF_H_I, 180, BD_END);
+	color_hex = bd_create(bd_dialog_field(color_dlg, "Hex"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	color_sgr = bd_create(bd_dialog_field(color_dlg, "Highlight"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	bd_dialog_button(color_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
+
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
 		connect_profile(active);
@@ -1399,8 +1449,9 @@ cleanup(void)
 	bd_dialog_free(triggers_dlg);
 	bd_dialog_free(export_dlg);
 	bd_dialog_free(import_dlg);
+	bd_dialog_free(color_dlg);
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
-	export_dlg = import_dlg = NULL;
+	export_dlg = import_dlg = color_dlg = NULL;
 	bd_gui_cleanup();
 }
 

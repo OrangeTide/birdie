@@ -46,8 +46,9 @@ hand, and the form controls real dialogs need do not exist yet.
 
 **Status:** Phases 0, 1, 2 and 4 are done (connect + edit-profile reworks, the
 Settings dialog, per-profile autoreconnect/term-type, the live trigger editor,
-and the export column-filter + import-collision dialogs). Phase 3 (file / color
-choosers) is the remaining work.
+and the export column-filter + import-collision dialogs). Phase 3's colour chooser is done (a
+reusable `BD_COLORPICK` widget + an app dialog); the file chooser is the
+remaining work.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -110,9 +111,15 @@ first-field focus) and demoed by the gallery's "Dialog..." button.
 Built from the above, no new backend capability:
 
 - **File chooser** — a `BD_TREE` or list of entries + a path field + Open/Cancel.
-  For import CSV and the `on_connect` script path.
-- **Color chooser** — a palette grid plus an X-Y pad + value slider and a live
-  swatch. For `#highlight` color and theme editing.
+  For import CSV and the `on_connect` script path. (Not built yet.)
+- [x] **Color chooser** — shipped as a reusable `BD_COLORPICK` widget
+  (`bd_widget_colorpick.*`): a saturation/value square, a hue bar, a live swatch,
+  and a preset row, drawn as flat-cell gradients (no shader, backend-neutral),
+  with a packed 0xRRGGBBAA get/set + on-change callback. Demoed in the gallery
+  and wired into the app as an Edit > Colour picker... dialog that shows the
+  picked colour's hex and its `38;2;R;G;B` `#highlight` SGR string to copy into a
+  highlight trigger. (The toolkit allows one modal at a time, so it is a
+  standalone dialog rather than stacked over the trigger editor.)
 
 ### Phase 4 — wire the app dialogs (`src/birdie/`) — IN PROGRESS
 
