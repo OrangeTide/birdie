@@ -173,6 +173,18 @@ main(void)
 		  check("an escaped IAC IAC decodes to one 0xFF byte",
 		      rx_has(want, sizeof want)); }
 
+		/* legacy encoding: with a Latin-1 fallback selected, a high byte
+		 * (0xE9 = 'é') is transcoded to 2-byte UTF-8 before the callback */
+		bd_net_set_encoding(n, "ISO-8859-1");
+		rx_n = 0;
+		{ unsigned char m[] = { 'c', 'a', 'f', 0xE9 };
+		  send(srvfd, m, sizeof m, MSG_NOSIGNAL); }
+		{ unsigned char want[] = { 'c', 'a', 'f', 0xC3, 0xA9 };
+		  PUMP_UNTIL(n, rx_has(want, sizeof want), 3000);
+		  check("a Latin-1 byte is transcoded to UTF-8 for the display",
+		      rx_has(want, sizeof want)); }
+		bd_net_set_encoding(n, "UTF-8");         /* restore passthrough */
+
 		/* telnet GA marks a prompt boundary */
 		{ unsigned char m[] = { 255, 249 };      /* IAC GA */
 		  send(srvfd, m, sizeof m, MSG_NOSIGNAL); }

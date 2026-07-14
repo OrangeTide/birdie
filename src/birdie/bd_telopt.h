@@ -63,6 +63,11 @@ typedef struct bd_telopt_cb {
 	 * the caller should run the application bytes through an MXP parser
 	 * (bd_mxp) before display. May be NULL (MXP then stays refused). */
 	void (*mxp)(int active, void *arg);
+	/* The server negotiated a character set via CHARSET and we accepted it
+	 * (currently only "UTF-8"). `name` is the accepted charset, NUL-terminated
+	 * and valid only for the call. The caller should treat inbound bytes as
+	 * that encoding, overriding any profile fallback. May be NULL. */
+	void (*charset)(const char *name, void *arg);
 	void *arg;
 } bd_telopt_cb;
 

@@ -1165,6 +1165,7 @@ bd_session_connect(bd_session *s)
 	ttype = bd_profile_get(s->profile, "termtype");
 	bd_net_set_termtype(s->net, ttype ? ttype : "birdie/0.0");
 	bd_net_set_winsize(s->net, s->cols, s->rows);
+	bd_net_set_encoding(s->net, bd_profile_get(s->profile, "encoding"));
 
 	s->mxp_active = 0;                       /* renegotiated each connection */
 	bd_mxp_reset(s->mxp);

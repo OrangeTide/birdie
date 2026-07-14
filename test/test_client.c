@@ -19,6 +19,7 @@
 #include "bd_verb.h"
 #include "bd_mxp.h"
 #include "bd_profile.h"
+#include "bd_encoding.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -676,6 +677,69 @@ test_mxp(void)
 	bd_mxp_free(m);
 }
 
+/* ================================================================== */
+/* bd_encoding -- legacy 8-bit to UTF-8 transcode                     */
+/* ================================================================== */
+static void
+test_encoding(void)
+{
+	unsigned char out[64];
+	size_t n;
+
+	printf("bd_encoding:\n");
+
+	check("name aliases parse to Latin-1",
+	    bd_encoding_parse("latin1") == BD_ENC_LATIN1 &&
+	    bd_encoding_parse("ISO-8859-1") == BD_ENC_LATIN1);
+	check("name aliases parse to CP1252",
+	    bd_encoding_parse("cp1252") == BD_ENC_CP1252 &&
+	    bd_encoding_parse("Windows-1252") == BD_ENC_CP1252);
+	check("NULL / unknown fall back to UTF-8",
+	    bd_encoding_parse(NULL) == BD_ENC_UTF8 &&
+	    bd_encoding_parse("koi8-r") == BD_ENC_UTF8);
+	check("canonical names round-trip",
+	    strcmp(bd_encoding_name(BD_ENC_LATIN1), "ISO-8859-1") == 0 &&
+	    strcmp(bd_encoding_name(BD_ENC_CP1252), "Windows-1252") == 0);
+
+	/* UTF-8 is a verbatim passthrough */
+	n = bd_encoding_decode(BD_ENC_UTF8, (const unsigned char *)"caf\xc3\xa9",
+	    5, out, sizeof out);
+	check("UTF-8 passes bytes through unchanged",
+	    n == 5 && memcmp(out, "caf\xc3\xa9", 5) == 0);
+
+	/* Latin-1: ASCII stays 1 byte, high bytes become 2-byte UTF-8.
+	 * 0xE9 is 'é' (U+00E9) -> 0xC3 0xA9. */
+	n = bd_encoding_decode(BD_ENC_LATIN1, (const unsigned char *)"caf\xe9",
+	    4, out, sizeof out);
+	out[n] = '\0';
+	check("Latin-1 high byte expands to 2-byte UTF-8",
+	    n == 5 && strcmp((char *)out, "caf\xc3\xa9") == 0);
+
+	/* Latin-1 leaves ASCII / control bytes (escape sequences) untouched */
+	n = bd_encoding_decode(BD_ENC_LATIN1,
+	    (const unsigned char *)"\033[31mhi\033[0m", 10, out, sizeof out);
+	check("Latin-1 preserves ASCII escape sequences byte-for-byte",
+	    n == 10 && memcmp(out, "\033[31mhi\033[0m", 10) == 0);
+
+	/* CP1252: 0x80 is the euro sign U+20AC -> 3-byte UTF-8 E2 82 AC;
+	 * 0x93/0x94 are curly quotes; 0xE9 matches Latin-1. */
+	n = bd_encoding_decode(BD_ENC_CP1252, (const unsigned char *)"\x80\x93x\x94",
+	    4, out, sizeof out);
+	check("CP1252 euro sign becomes 3-byte UTF-8",
+	    n >= 3 && (unsigned char)out[0] == 0xE2 &&
+	    (unsigned char)out[1] == 0x82 && (unsigned char)out[2] == 0xAC);
+	check("CP1252 0xA0-0xFF match Latin-1 (é)",
+	    bd_encoding_decode(BD_ENC_CP1252, (const unsigned char *)"\xe9", 1,
+	        out, sizeof out) == 2 &&
+	    (unsigned char)out[0] == 0xC3 && (unsigned char)out[1] == 0xA9);
+
+	/* output is bounded by dstcap, never overruns */
+	n = bd_encoding_decode(BD_ENC_LATIN1, (const unsigned char *)"\xe9\xe9\xe9",
+	    3, out, 3);
+	check("decode truncates to the destination capacity",
+	    n <= 3);
+}
+
 int
 main(void)
 {
@@ -687,6 +751,7 @@ main(void)
 	test_mxp();
 	test_profile();
 	test_profile_merge();
+	test_encoding();
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

@@ -89,6 +89,13 @@ void bd_net_close(bd_net *n);
  * and a user-initiated close or connect cancels it. */
 void bd_net_set_autoreconnect(bd_net *n, int enable);
 
+/* Set the fallback character encoding for inbound bytes (a bd_encoding name
+ * such as "UTF-8", "ISO-8859-1", or "Windows-1252"; NULL/unknown -> UTF-8).
+ * Non-UTF-8 bytes are transcoded to UTF-8 before reaching the display. A
+ * server that negotiates CHARSET UTF-8 overrides this for that connection.
+ * Set before connecting; safe to change at any time. */
+void bd_net_set_encoding(bd_net *n, const char *name);
+
 /* Optional callbacks for telnet-driven events, delivered on the UI thread
  * during bd_net_poll() like the others. Set before connecting. */
 void bd_net_set_echo_cb(bd_net *n, bd_net_echo_cb cb);

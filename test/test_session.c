@@ -78,6 +78,7 @@ void bd_net_set_prompt_cb(bd_net *n, bd_net_prompt_cb cb) { n->prompt = cb; }
 void bd_net_set_package_cb(bd_net *n, bd_net_package_cb cb) { n->package = cb; }
 void bd_net_set_mxp_cb(bd_net *n, bd_net_mxp_cb cb) { n->mxp = cb; }
 void bd_net_set_autoreconnect(bd_net *n, int e) { (void)n; (void)e; }
+void bd_net_set_encoding(bd_net *n, const char *s) { (void)n; (void)s; }
 void bd_net_set_termtype(bd_net *n, const char *t) { (void)n; (void)t; }
 void bd_net_set_winsize(bd_net *n, int c, int r) { (void)n; (void)c; (void)r; }
 void bd_net_poll(bd_net *n) { (void)n; }              /* the test injects directly */

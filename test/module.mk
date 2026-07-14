@@ -37,7 +37,7 @@ test_client_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 test_client_SRCS  = test_client.c \
 	../src/birdie/bd_ring.c ../src/birdie/bd_csv.c ../src/birdie/bd_telopt.c \
 	../src/birdie/bd_trigger.c ../src/birdie/bd_verb.c ../src/birdie/bd_mxp.c \
-	../src/birdie/bd_profile.c ../src/birdie/bd_vm.c \
+	../src/birdie/bd_profile.c ../src/birdie/bd_vm.c ../src/birdie/bd_encoding.c \
 	../src/birdie-gui/bd_utf8.c
 # bd_mxp decodes numeric entities through bd_utf8 (in the toolkit dir).
 test_client_CFLAGS = -I$(test_client_DIR)../src/birdie \
@@ -83,8 +83,10 @@ TEST_TARGETS += test_netloop
 
 test_netloop_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 test_netloop_SRCS  = test_netloop.c \
-	../src/birdie/bd_net.c ../src/birdie/bd_ring.c ../src/birdie/bd_telopt.c
-test_netloop_CFLAGS = -pthread -I$(test_netloop_DIR)../src/birdie
+	../src/birdie/bd_net.c ../src/birdie/bd_ring.c ../src/birdie/bd_telopt.c \
+	../src/birdie/bd_encoding.c ../src/birdie-gui/bd_utf8.c
+test_netloop_CFLAGS = -pthread -I$(test_netloop_DIR)../src/birdie \
+	-I$(test_netloop_DIR)../src/birdie-gui
 test_netloop_LIBS   = iox mbedtls miniz
 test_netloop_LDLIBS = -pthread -lm
 

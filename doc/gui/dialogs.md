@@ -55,7 +55,8 @@ file chooser on top of it and drops the picked path into the import field, and
 the trigger editor's Colour... opens the colour picker on top of it and fills the
 body with the highlight SGR. The trigger editor now persists GUI-added triggers
 to a per-profile `triggers.csv`, kept separate from the hand-written
-`triggers.lua`. Remaining follow-up: profile `encoding` wiring.
+`triggers.lua`, and the edit-profile dialog carries an encoding selector wired to
+an inbound-byte transcode. All follow-ups are done.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -149,10 +150,15 @@ Built from the above, no new backend capability:
   `bd_terminal_set_palette`), persisted to a new `<data_dir>/settings.csv`
   (flat key,value) loaded at startup. Birdie has little app-wide config (most is
   per-profile), so this is deliberately small; every control has a live effect.
-- [x] Per-profile fields on the **edit-profile** dialog: an autoreconnect checkbox
-  and a term-type field (both read by `bd_session` at connect). `encoding` was
-  left out: it is a safe profile column but is not wired to any behavior yet
-  (needs CHARSET/NEW_ENVIRON telopt work), and a dead control is worse than none.
+- [x] Per-profile fields on the **edit-profile** dialog: an autoreconnect checkbox,
+  a term-type field, and an **encoding** combo (UTF-8 / ISO-8859-1 /
+  Windows-1252), all read by `bd_session` at connect. The encoding selects a
+  fallback decoder in `bd_net` (`bd_net_set_encoding`): inbound non-UTF-8 bytes
+  are transcoded to UTF-8 (`bd_encoding.*`) before the display, so legacy MUDs
+  render correctly. A server that negotiates CHARSET UTF-8 overrides the fallback
+  for that connection (a `charset` callback added to `bd_telopt`). UTF-8 is a
+  passthrough, so the default path is unchanged. Covered by unit tests
+  (`test_client`) and an end-to-end loopback test (`test_netloop`).
 - [x] **Trigger editor** (Session > Triggers...): a `BD_TABLE` of the session's
   triggers plus a compact add form (type combo, pattern/body/class inputs, a
   priority spinner, a stop checkbox) and Remove-selected. It edits the **live**

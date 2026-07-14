@@ -27,6 +27,7 @@
 #include "bd_net.h"
 #include "bd_ring.h"
 #include "bd_telopt.h"
+#include "bd_encoding.h"
 #include "iox_loop.h"
 #include "iox_fd.h"
 #include "iox_timer.h"
@@ -93,6 +94,7 @@ struct bd_net {
 	_Atomic int state;
 	_Atomic int shutdown;
 	_Atomic int autoreconnect;      /* 1 = auto-reconnect on unexpected drop */
+	_Atomic int encoding;           /* bd_encoding for inbound-byte transcode */
 
 	bd_ring *rx;            /* net -> UI */
 	bd_ring *tx;            /* UI -> net */
@@ -118,6 +120,11 @@ struct net_ctx {
 
 	unsigned char *pend;    /* framed rx records not yet in the ring */
 	size_t pend_len, pend_cap, pend_sent;
+
+	/* inbound-byte transcode to UTF-8 (bd_encoding) */
+	unsigned char *dec;     /* reusable decode scratch */
+	size_t dec_cap;
+	int charset_utf8;       /* server negotiated CHARSET UTF-8: force passthrough */
 
 	/* MCCP2 inbound decompression */
 	int want_inflate;       /* telopt signalled the compressed stream begins */
@@ -294,7 +301,38 @@ static void
 telopt_data(const unsigned char *p, size_t len, void *arg)
 {
 	struct net_ctx *c = arg;
-	pend_put(c, MSG_DATA, p, (uint32_t)len);
+	bd_encoding enc;
+	size_t need, produced;
+
+	/* A server that negotiated CHARSET UTF-8 has told us its bytes are UTF-8,
+	 * which overrides any (possibly stale) profile fallback. */
+	enc = c->charset_utf8 ? BD_ENC_UTF8
+	                      : (bd_encoding)atomic_load(&c->n->encoding);
+	if (enc == BD_ENC_UTF8 || len == 0) {
+		pend_put(c, MSG_DATA, p, (uint32_t)len);
+		return;
+	}
+
+	need = BD_ENCODING_MAX_OUT(len);
+	if (c->dec_cap < need) {
+		unsigned char *q = realloc(c->dec, need);
+		if (!q) {                       /* fall back to raw bytes */
+			pend_put(c, MSG_DATA, p, (uint32_t)len);
+			return;
+		}
+		c->dec = q;
+		c->dec_cap = need;
+	}
+	produced = bd_encoding_decode(enc, p, len, c->dec, c->dec_cap);
+	pend_put(c, MSG_DATA, c->dec, (uint32_t)produced);
+}
+
+static void
+telopt_charset(const char *name, void *arg)
+{
+	struct net_ctx *c = arg;
+	(void)name;                             /* only UTF-8 is ever accepted */
+	c->charset_utf8 = 1;
 }
 
 static void
@@ -571,6 +609,7 @@ connect_now(struct net_ctx *c)
 
 	close_socket(c);
 	bd_telopt_reset(c->telopt);
+	c->charset_utf8 = 0;            /* CHARSET is renegotiated each connection */
 	c->pend_len = c->pend_sent = 0;
 
 	push_state(c, BD_NET_CONNECTING, NULL);
@@ -1086,6 +1125,7 @@ net_thread_main_inner(bd_net *n, struct net_ctx *c)
 	tcb.package = telopt_package;
 	tcb.compress = telopt_compress;
 	tcb.mxp = telopt_mxp;
+	tcb.charset = telopt_charset;
 	tcb.arg = c;
 
 	c->loop = iox_loop_new();
@@ -1118,6 +1158,7 @@ net_thread_main(void *arg)
 	tls_global_free(&c);
 	free(c.out);
 	free(c.pend);
+	free(c.dec);
 	bd_telopt_free(c.telopt);
 	iox_loop_free(c.loop);
 	return NULL;
@@ -1153,6 +1194,7 @@ bd_net_new(bd_net_data_cb on_data, bd_net_state_cb on_state, void *arg)
 	atomic_init(&n->state, BD_NET_IDLE);
 	atomic_init(&n->shutdown, 0);
 	atomic_init(&n->autoreconnect, 1);
+	atomic_init(&n->encoding, BD_ENC_UTF8);
 
 	n->rx = bd_ring_new(RX_CAP);
 	n->tx = bd_ring_new(TX_CAP);
@@ -1226,6 +1268,13 @@ bd_net_set_autoreconnect(bd_net *n, int enable)
 {
 	if (n)
 		atomic_store(&n->autoreconnect, enable ? 1 : 0);
+}
+
+void
+bd_net_set_encoding(bd_net *n, const char *name)
+{
+	if (n)
+		atomic_store(&n->encoding, (int)bd_encoding_parse(name));
 }
 
 int

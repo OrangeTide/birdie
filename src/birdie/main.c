@@ -10,6 +10,7 @@
 #include "bd_session.h"
 #include "bd_profile.h"
 #include "bd_telopt.h"
+#include "bd_encoding.h"
 #include "bd_verb.h"
 #include "bd_trigger.h"
 #include "ludica.h"
@@ -30,7 +31,7 @@ static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
 static bd_dialog *connect_dlg;          /* the modal MUD picker */
 static bd_dialog *edit_dlg;             /* add/edit a profile */
 static bd_id edit_name, edit_host, edit_port, edit_tls;
-static bd_id edit_reconnect, edit_termtype;
+static bd_id edit_reconnect, edit_termtype, edit_encoding;
 static bd_dialog *settings_dlg;         /* app-wide preferences */
 static bd_id set_cols, set_rows, set_scheme;
 static bd_dialog *triggers_dlg;         /* live trigger editor */
@@ -82,6 +83,12 @@ static const char *const scheme_ids[]    = { "default", "green", "amber" };
 static const char *const scheme_labels[] = { "Default", "Green phosphor",
                                              "Amber" };
 #define N_SCHEMES ((int)(sizeof scheme_ids / sizeof scheme_ids[0]))
+
+/* Encoding combo labels, ordered to match the bd_encoding enum so the combo's
+ * selected index is the bd_encoding value; the labels are canonical names. */
+static const char *const encoding_labels[] = { "UTF-8", "ISO-8859-1",
+                                               "Windows-1252" };
+#define N_ENCODINGS ((int)(sizeof encoding_labels / sizeof encoding_labels[0]))
 
 static struct {
 	int cols, rows;   /* terminal grid advertised over NAWS */
@@ -496,6 +503,7 @@ open_edit(const bd_profile *p)
 	const char *tls = p ? bd_profile_get(p, "tls") : NULL;
 	const char *rc = p ? bd_profile_get(p, "autoreconnect") : NULL;
 	const char *tt = p ? bd_profile_get(p, "termtype") : NULL;
+	const char *enc = p ? bd_profile_get(p, "encoding") : NULL;
 
 	snprintf(editing_name, sizeof editing_name, "%s", name ? name : "");
 	bd_set(edit_name, BD_LABEL_S, name ? name : "", BD_END);
@@ -508,6 +516,7 @@ open_edit(const bd_profile *p)
 	bd_checkbox_set(edit_reconnect, !(rc && (!strcmp(rc, "no") ||
 	    !strcmp(rc, "false") || !strcmp(rc, "0") || !strcmp(rc, "off"))));
 	bd_set(edit_termtype, BD_LABEL_S, tt ? tt : "", BD_END);
+	bd_combo_set(edit_encoding, (int)bd_encoding_parse(enc));
 	bd_dialog_open(edit_dlg);
 }
 
@@ -559,6 +568,12 @@ on_edit_save(bd_id id, void *arg)
 	{
 		const char *tt = bd_get_s(edit_termtype, BD_LABEL_S);
 		bd_profile_set(p, "termtype", (tt && tt[0]) ? tt : NULL);
+	}
+	/* UTF-8 is the default, so store the key only for a legacy encoding */
+	{
+		int ei = bd_combo_get(edit_encoding);
+		bd_profile_set(p, "encoding",
+		    (ei > 0 && ei < N_ENCODINGS) ? encoding_labels[ei] : NULL);
 	}
 	save_profiles();
 	bd_table_refresh(mudlist);
@@ -1524,7 +1539,7 @@ init(void)
 		on_dialog_connect, NULL);
 
 	/* the add/edit profile form, composed with the bd_dialog helper */
-	edit_dlg = bd_dialog_create("Profile", 380, 300);
+	edit_dlg = bd_dialog_create("Profile", 380, 340);
 	edit_name = bd_create(bd_dialog_field(edit_dlg, "Name"), BD_INPUT_LINE,
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	edit_host = bd_create(bd_dialog_field(edit_dlg, "Host"), BD_INPUT_LINE,
@@ -1537,6 +1552,9 @@ init(void)
 		&(bd_checkbox_desc){ .label = "Automatically" }, BD_END);
 	edit_termtype = bd_create(bd_dialog_field(edit_dlg, "Term type"),
 		BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	edit_encoding = bd_combo_create(bd_dialog_field(edit_dlg, "Encoding"),
+		&(bd_combo_desc){ .items = encoding_labels, .count = N_ENCODINGS,
+		.selected = BD_ENC_UTF8 }, BD_GROW_I, 1, BD_END);
 	bd_dialog_button(edit_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(edit_dlg, "Save", BD_DIALOG_DEFAULT, on_edit_save, NULL);
 

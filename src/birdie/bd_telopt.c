@@ -509,6 +509,8 @@ handle_subneg(struct bd_telopt *t)
 				p[0] = CS_ACCEPTED;
 				memcpy(p + 1, name, l);
 				send_sb(t, OPT_CHARSET, p, 1 + l);
+				if (t->cb.charset)
+					t->cb.charset(name, t->cb.arg);
 			} else {
 				unsigned char r = CS_REJECTED;
 				send_sb(t, OPT_CHARSET, &r, 1);
