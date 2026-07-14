@@ -230,11 +230,27 @@ static double list_last_time;
 static bd_id        active_notice = BD_NONE;
 static bd_notice_cb notice_cb;
 static void        *notice_arg;
-/* Generic modal dialog overlay (one at a time), a detached widget subtree. */
-static bd_id          active_modal = BD_NONE;
-static bd_callback_fn modal_on_accept;   /* Enter confirms (bd_modal_open_ex) */
-static bd_callback_fn modal_on_cancel;   /* Escape cancels */
-static void          *modal_arg;
+/* Modal dialog stack: dialogs layer on top of each other (a chooser opened from
+ * inside a dialog), each dimming what is below; the topmost is the dispatch root
+ * and takes Enter/Escape. Each entry carries its own accept/cancel handlers and
+ * the focus to restore when it pops. */
+#define BD_MODAL_STACK 8
+struct modal_entry {
+	bd_id          dialog;
+	bd_callback_fn on_accept;   /* Enter confirms (bd_modal_open_ex) */
+	bd_callback_fn on_cancel;   /* Escape cancels */
+	void          *arg;
+	bd_id          prev_focus;  /* focus to restore when this entry pops */
+};
+static struct modal_entry modal_stack[BD_MODAL_STACK];
+static int modal_depth;
+
+/* The topmost modal dialog, or BD_NONE. */
+static bd_id
+modal_top(void)
+{
+	return modal_depth > 0 ? modal_stack[modal_depth - 1].dialog : BD_NONE;
+}
 /* Extension overlay (one at a time): a top-most floating rect an extension
  * widget opens (a combo's drop-down list), drawn above everything and given
  * first crack at input while open. See bd_overlay_* / widget_ext.h. */
@@ -1435,6 +1451,13 @@ bd_destroy(bd_id id)
 	}
 	if (overlay.owner == id)
 		overlay.owner = BD_NONE;   /* the widget owning the pop-up is gone */
+	for (int mi = 0; mi < modal_depth; mi++)   /* drop it from the modal stack */
+		if (modal_stack[mi].dialog == id) {
+			for (int j = mi; j < modal_depth - 1; j++)
+				modal_stack[j] = modal_stack[j + 1];
+			modal_depth--;
+			break;
+		}
 	if (hover_ext == id)
 		hover_ext = BD_NONE;
 	if (wm_active_frame == id)
@@ -2974,9 +2997,7 @@ bd_gui_cleanup(void)
 	active_notice = BD_NONE;
 	notice_cb = NULL;
 	notice_arg = NULL;
-	active_modal = BD_NONE;
-	modal_on_accept = modal_on_cancel = NULL;
-	modal_arg = NULL;
+	modal_depth = 0;
 	overlay.owner = BD_NONE;
 	memset(touches, 0, sizeof touches);
 }
@@ -3270,10 +3291,13 @@ bd_gui_layout(int win_w, int win_h)
 		}
 	}
 
-	/* an open modal dialog is laid out centered at its preferred size, so
+	/* each open modal dialog is laid out centered at its preferred size, so
 	 * the shared pass below also lays out any extension widgets it hosts */
-	if (active_modal != BD_NONE && pool[active_modal].alive) {
-		struct widget *d = &pool[active_modal];
+	for (int mi = 0; mi < modal_depth; mi++) {
+		bd_id md = modal_stack[mi].dialog;
+		if (md == BD_NONE || !pool[md].alive)
+			continue;
+		struct widget *d = &pool[md];
 		int dw = d->pref_w > 0 ? d->pref_w : win_w / 2;
 		int dh = d->pref_h > 0 ? d->pref_h : win_h / 2;
 		if (dw > win_w) dw = win_w;
@@ -3282,7 +3306,7 @@ bd_gui_layout(int win_w, int win_h)
 		d->y = (win_h - dh) / 2;
 		d->w = dw;
 		d->h = dh;
-		layout_children(active_modal);
+		layout_children(md);
 	}
 
 	/* shared pass: popups and extension-widget layout over the whole pool */
@@ -3391,16 +3415,20 @@ render_notice(int w, int h)
 	bd_draw_end();
 }
 
-/* Render the open modal dialog centered over a dimmed backdrop. */
+/* Render the modal stack, bottom to top: each dialog dims everything under it
+ * (so a stacked dialog darkens the one below) then draws its subtree. */
 static void
 render_modal(int w, int h)
 {
-	if (active_modal == BD_NONE || !pool[active_modal].alive)
-		return;
-	bd_draw_begin(w, h);
-	bd_draw_rect(0, 0, w, h, 0x00000099u);         /* dim backdrop */
-	render_widget(active_modal);                   /* the dialog subtree */
-	bd_draw_end();
+	for (int mi = 0; mi < modal_depth; mi++) {
+		bd_id md = modal_stack[mi].dialog;
+		if (md == BD_NONE || !pool[md].alive)
+			continue;
+		bd_draw_begin(w, h);
+		bd_draw_rect(0, 0, w, h, 0x00000099u);     /* dim backdrop */
+		render_widget(md);                         /* the dialog subtree */
+		bd_draw_end();
+	}
 }
 
 /* On-screen caret rectangle of a focused text field (for IME positioning). */
@@ -4004,10 +4032,19 @@ bd_modal_open_ex(bd_id dialog, const bd_modal_opts *opts)
 {
 	if (dialog == BD_NONE || !pool[dialog].alive)
 		return;
-	active_modal = dialog;
-	modal_on_accept = opts ? opts->on_accept : NULL;
-	modal_on_cancel = opts ? opts->on_cancel : NULL;
-	modal_arg       = opts ? opts->arg : NULL;
+	/* already open (anywhere on the stack): no double-push */
+	for (int mi = 0; mi < modal_depth; mi++)
+		if (modal_stack[mi].dialog == dialog)
+			return;
+	if (modal_depth >= BD_MODAL_STACK)
+		return;                          /* stack full: refuse rather than lose one */
+
+	struct modal_entry *e = &modal_stack[modal_depth++];
+	e->dialog = dialog;
+	e->on_accept = opts ? opts->on_accept : NULL;
+	e->on_cancel = opts ? opts->on_cancel : NULL;
+	e->arg       = opts ? opts->arg : NULL;
+	e->prev_focus = focus_id;            /* restore this when the entry pops */
 
 	/* initial focus: the requested widget, else the first focusable in the
 	 * dialog, so the user can type / tab without clicking first */
@@ -4032,20 +4069,34 @@ bd_modal_open(bd_id dialog)
 void
 bd_modal_close(bd_id dialog)
 {
-	if (active_modal != dialog)
-		return;
-	active_modal = BD_NONE;
-	modal_on_accept = modal_on_cancel = NULL;
-	modal_arg = NULL;
-	/* drop keyboard focus: it may be inside the now-hidden dialog, and its
-	 * widgets must stop receiving key events once the main UI is live again */
-	focus_id = BD_NONE;
+	int mi;
+	for (mi = 0; mi < modal_depth; mi++)
+		if (modal_stack[mi].dialog == dialog)
+			break;
+	if (mi == modal_depth)
+		return;                          /* not open */
+
+	int was_top = (mi == modal_depth - 1);
+	bd_id restore = modal_stack[mi].prev_focus;
+	for (int j = mi; j < modal_depth - 1; j++)   /* remove, shift the rest down */
+		modal_stack[j] = modal_stack[j + 1];
+	modal_depth--;
+
+	/* closing the top hands focus back to whatever it grabbed from (the dialog
+	 * below, or the main UI); its widgets must stop receiving key events */
+	if (was_top) {
+		if (restore != BD_NONE && pool[restore].alive)
+			bd_focus(restore);
+		else
+			focus_id = BD_NONE;
+	}
 }
 
 bd_id
 bd_modal_active(void)
 {
-	return active_modal;
+	bd_id t = modal_top();
+	return (t != BD_NONE && pool[t].alive) ? t : BD_NONE;
 }
 
 /* Route a touch to a per-finger captured widget, synthesizing mouse events so
@@ -4497,33 +4548,34 @@ bd_gui_event(const bd_event *ev)
 		}
 	}
 
-	/* An open modal dialog is the dispatch root: all input routes to its
+	/* The topmost modal dialog is the dispatch root: all input routes to its
 	 * subtree (so its widgets behave as in a frame), Escape dismisses it,
 	 * and anything outside is swallowed so the dimmed UI behind is inert. */
-	if (active_modal != BD_NONE && pool[active_modal].alive) {
+	bd_id amod = modal_top();
+	if (amod != BD_NONE && pool[amod].alive) {
+		struct modal_entry *top = &modal_stack[modal_depth - 1];
 		if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ESCAPE) {
-			bd_id d = active_modal;
-			bd_callback_fn oc = modal_on_cancel;
-			void *oa = modal_arg;
+			bd_callback_fn oc = top->on_cancel;
+			void *oa = top->arg;
 			if (oc)
-				oc(d, oa);      /* still open: the handler can read fields */
-			bd_modal_close(d);
+				oc(amod, oa);   /* still open: the handler can read fields */
+			bd_modal_close(amod);
 			return 1;
 		}
 		/* Enter confirms the dialog, unless a multiline field is focused (it
 		 * needs Enter for a newline). on_accept does not auto-close, so the
 		 * handler validates then closes. */
 		if (ev->type == BD_EV_KEY_DOWN && ev->key == BD_KEY_ENTER &&
-		    modal_on_accept &&
+		    top->on_accept &&
 		    !(focus_id != BD_NONE && pool[focus_id].alive &&
 		      pool[focus_id].type == BD_TEXT_AREA)) {
-			modal_on_accept(active_modal, modal_arg);
+			top->on_accept(amod, top->arg);
 			return 1;
 		}
 	}
 
 	/* the top-level frame this event is destined for (its own window) */
-	int modal_active = (active_modal != BD_NONE && pool[active_modal].alive);
+	int modal_active = (amod != BD_NONE && pool[amod].alive);
 	bd_id frame = BD_NONE;
 	int have_frame = 0;
 
@@ -4550,7 +4602,7 @@ bd_gui_event(const bd_event *ev)
 				return 1;
 			frame = route;
 		} else {
-			frame = modal_active ? active_modal : frame_for_window(ev->window);
+			frame = modal_active ? amod : frame_for_window(ev->window);
 		}
 	}
 	if (frame == BD_NONE || !pool[frame].alive)

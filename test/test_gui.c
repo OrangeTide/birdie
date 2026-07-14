@@ -328,6 +328,9 @@ static void on_dbtn_ok(bd_id id, void *a){ (void)id; (void)a; dbtn_ok++; }
 static void on_dbtn_cancel(bd_id id, void *a){ (void)id; (void)a; dbtn_cancel++; }
 static int cp_n; static uint32_t cp_last;
 static void on_cp(bd_id id, void *a, uint32_t rgba){ (void)id; (void)a; cp_n++; cp_last = rgba; }
+static int mstk_a, mstk_b;
+static void on_mstk_a(bd_id id, void *a){ (void)id; (void)a; mstk_a++; }
+static void on_mstk_b(bd_id id, void *a){ (void)id; (void)a; mstk_b++; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2364,6 +2367,51 @@ main(void)
 
 	bd_gui_render();
 	check("colorpick renders without crashing", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- modal stacking: a dialog opened over another dialog ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id da = bd_create(BD_NONE, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PREF_W_I, 220, BD_PREF_H_I, 140, BD_END);
+	bd_id fa = bd_create(da, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_END);
+	bd_id db = bd_create(BD_NONE, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PREF_W_I, 180, BD_PREF_H_I, 110, BD_END);
+	bd_id fb = bd_create(db, BD_INPUT_LINE, BD_PREF_H_I, 24, BD_END);
+
+	mstk_a = mstk_b = 0;
+	bd_modal_open_ex(da, &(bd_modal_opts){ .on_cancel = on_mstk_a });
+	bd_gui_layout(400, 300);
+	check("first modal is active and focuses its field",
+	    bd_modal_active() == da && bd_focused() == fa);
+
+	bd_modal_open_ex(db, &(bd_modal_opts){ .on_cancel = on_mstk_b });
+	bd_gui_layout(400, 300);
+	check("a stacked modal becomes the active one",
+	    bd_modal_active() == db && bd_focused() == fb);
+
+	/* Escape closes the top (B), fires only B's cancel, restores focus to A */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape closes the top modal, fires its cancel, reveals the one below",
+	    bd_modal_active() == da && mstk_b == 1 && mstk_a == 0 &&
+	    bd_focused() == fa);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape closes the last modal",
+	    bd_modal_active() == BD_NONE && mstk_a == 1);
+
+	/* destroying a stacked dialog pops it off the stack */
+	bd_modal_open(da);
+	bd_modal_open(db);
+	check("both reopened, top is B", bd_modal_active() == db);
+	bd_destroy(db);
+	check("destroying the top modal reveals the one below", bd_modal_active() == da);
+	bd_destroy(da);
+	check("destroying the last modal clears the stack", bd_modal_active() == BD_NONE);
+
+	bd_gui_render();
+	check("modal stack renders without crashing", 1);
 	bd_gui_cleanup();
 	}
 

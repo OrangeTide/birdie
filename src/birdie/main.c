@@ -1149,6 +1149,23 @@ on_import_browse(bd_id id, void *arg)
 	open_file_chooser(do_import);
 }
 
+/* Put a chosen path into the connect dialog's import field. */
+static void
+fill_import_path(const char *path)
+{
+	bd_set(import_path, BD_LABEL_S, path, BD_END);
+}
+
+/* Browse button in the connect dialog: the chooser stacks over it (modal on
+ * modal), and the picked path drops into the field when it closes. */
+static void
+on_browse_import(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	open_file_chooser(fill_import_path);
+}
+
 /* ---- colour picker (compose a #highlight colour) ---- */
 
 /* Refresh the hex and SGR readouts from a packed colour. */
@@ -1443,9 +1460,11 @@ init(void)
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
 	import_path = bd_create(ibtn, BD_INPUT_LINE, BD_GROW_I, 1,
 		BD_PAD_I, 3, BD_END);
-	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import CSV", BD_PREF_W_I, 90,
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Browse...", BD_PREF_W_I, 78,
+		BD_ON_CLICK_F, on_browse_import, BD_END);
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import", BD_PREF_W_I, 70,
 		BD_ON_CLICK_F, on_import, BD_END);
-	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Export...", BD_PREF_W_I, 80,
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Export...", BD_PREF_W_I, 78,
 		BD_ON_CLICK_F, on_open_export, BD_END);
 	bd_dialog_button(connect_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(connect_dlg, "Connect", BD_DIALOG_DEFAULT,

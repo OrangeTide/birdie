@@ -49,9 +49,10 @@ controls + the overlay primitive), Phase 2 (the `bd_dialog` helper), Phase 3 (th
 `BD_COLORPICK` colour chooser and the file chooser), and Phase 4 (the app
 dialogs: connect + edit-profile reworks, Settings, per-profile
 autoreconnect/term-type, the live trigger editor, export column-filter,
-import-collision, and the colour + file choosers wired in). Follow-ups noted
-below: trigger persistence, profile `encoding` wiring, and optional modal
-stacking so choosers can layer over another dialog.
+import-collision, and the colour + file choosers wired in). Modals now **stack**,
+so a chooser opens over another dialog: the connect dialog's Browse... opens the
+file chooser on top of it and drops the picked path into the import field.
+Remaining follow-ups: trigger persistence and profile `encoding` wiring.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 

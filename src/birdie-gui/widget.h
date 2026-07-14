@@ -280,12 +280,17 @@ void  bd_notice_close(bd_id notice);
  * inputs); bd_modal_open() then shows it centered over a dimmed backdrop and
  * routes all input to it through the normal dispatch, so its widgets behave
  * exactly as in a frame. Escape or bd_modal_close() dismisses it (the dialog
- * subtree is not destroyed, so it can be reopened). One modal at a time; it
- * layers above the main UI and below a bd_notice alert. The dialog is detached
- * from the main frame, so the app keeps and reuses the bd_id. */
+ * subtree is not destroyed, so it can be reopened). The dialog is detached from
+ * the main frame, so the app keeps and reuses the bd_id.
+ *
+ * Modals STACK: opening one while another is up layers it on top (e.g. a chooser
+ * opened from inside a dialog). Each dims what is below, the topmost is the
+ * dispatch root and takes Enter/Escape, and closing it reveals the one beneath
+ * (restoring its focus). Modals sit above the main UI and below a bd_notice
+ * alert. bd_modal_active() returns the topmost. Up to 8 deep. */
 void  bd_modal_open(bd_id dialog);
 void  bd_modal_close(bd_id dialog);
-bd_id bd_modal_active(void);   /* the open dialog, or BD_NONE */
+bd_id bd_modal_active(void);   /* the topmost open dialog, or BD_NONE */
 
 /*
  * Open a modal with dialog ergonomics. Zero-init a bd_modal_opts and set what
