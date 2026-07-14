@@ -18,6 +18,7 @@
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
+#include "bd_widget_combo.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -181,6 +182,15 @@ on_radio(bd_id id, void *arg, int idx)
 	(void)id; (void)arg;
 	static const char *names[] = { "Radio: Slow", "Radio: Normal", "Radio: Fast" };
 	report(idx >= 0 && idx < 3 ? names[idx] : "Radio: none");
+}
+
+static void
+on_combo(bd_id id, void *arg, int idx)
+{
+	(void)id; (void)arg;
+	static const char *names[] = { "Combo: UTF-8", "Combo: Latin-1",
+		"Combo: ASCII", "Combo: CP437" };
+	report(idx >= 0 && idx < 4 ? names[idx] : "Combo: none");
 }
 
 static void
@@ -668,6 +678,11 @@ build_ui(void)
 	static const char *const rate_opts[] = { "Slow", "Normal", "Fast" };
 	bd_radio_create(srow, &(bd_radio_desc){ .labels = rate_opts, .count = 3,
 		.selected = 1, .orient = BD_VERTICAL, .cb = on_radio }, BD_END);
+	/* combo drop-down (opens a floating list via the shared overlay) */
+	static const char *const enc_opts[] = { "UTF-8", "Latin-1", "ASCII", "CP437" };
+	bd_combo_create(srow, &(bd_combo_desc){ .items = enc_opts, .count = 4,
+		.selected = 0, .placeholder = "Encoding", .cb = on_combo },
+		BD_PREF_W_I, 100, BD_END);
 
 	/* indicator lamps: LEDs (clear/frosted/jewel lens), a bi-color, and a
 	 * clickable lamp button that cycles off/red/green/amber */

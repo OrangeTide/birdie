@@ -141,4 +141,27 @@ void bd_dnd_begin(const bd_dnd_payload *p);
  * its own in-widget ghost while the toolkit draws the shared one. */
 const bd_dnd_payload *bd_dnd_get(void);
 
+/*
+ * Top-most overlay -- the shared pop-up primitive (drop-down lists, and in time
+ * the editor's autocomplete). One overlay is open at a time, owned by an
+ * extension widget. While open the toolkit:
+ *   - draws it last, above every frame / modal / notice (below only the drag
+ *     ghost), by calling its render() hook;
+ *   - routes input to it first: pointer events inside its rect and all key/char
+ *     events go to its event() hook; a press outside dismisses it; Escape the
+ *     event() hook does not consume dismisses it.
+ * The rect is in the primary window's coordinate space (the same space a
+ * widget's bd_widget_rect reports). Opening a second overlay replaces the first.
+ */
+typedef struct bd_overlay {
+	bd_id owner;                                /* widget that owns it */
+	int   x, y, w, h;                           /* screen rect */
+	void (*render)(bd_id owner);                /* paint contents (top-most) */
+	int  (*event) (bd_id owner, const bd_event *ev); /* 1 = consumed */
+} bd_overlay;
+
+void  bd_overlay_open(const bd_overlay *ov); /* open/replace (owner must be set) */
+void  bd_overlay_close(bd_id owner);         /* no-op unless owner matches */
+bd_id bd_overlay_owner(void);                /* BD_NONE when none is open */
+
 #endif

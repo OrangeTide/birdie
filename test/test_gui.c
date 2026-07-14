@@ -10,9 +10,11 @@
  */
 #include "widget.h"
 #include "widget_ext.h"
+#include "bd_draw.h"
 #include "bd_widget_vt.h"
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
+#include "bd_widget_combo.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -315,6 +317,8 @@ static int chk_n, chk_last;
 static void on_chk(bd_id id, void *a, int checked){ (void)id; (void)a; chk_n++; chk_last = checked; }
 static int rad_n, rad_last;
 static void on_rad(bd_id id, void *a, int idx){ (void)id; (void)a; rad_n++; rad_last = idx; }
+static int cmb_n, cmb_last;
+static void on_cmb(bd_id id, void *a, int idx){ (void)id; (void)a; cmb_n++; cmb_last = idx; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2116,6 +2120,70 @@ main(void)
 
 	bd_gui_render();
 	check("radio group renders without crashing", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- BD_COMBO drop-down (exercises the shared overlay primitive) ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	cmb_n = 0; cmb_last = -1;
+	static const char *const items[] = { "UTF-8", "Latin-1", "ASCII", "CP437" };
+	bd_id co = bd_combo_create(fr, &(bd_combo_desc){
+	    .items = items, .count = 4, .selected = 1, .placeholder = "(pick)",
+	    .cb = on_cmb }, BD_PREF_H_I, 24, BD_END);
+	bd_gui_layout(400, 300);
+	check("combo starts on the initial selection", bd_combo_get(co) == 1);
+	check("no overlay open initially", bd_overlay_owner() == BD_NONE);
+
+	int qx, qy, qw, qh;
+	bd_widget_rect(co, &qx, &qy, &qw, &qh);
+
+	/* click the box: the drop-down opens as the top-most overlay */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
+	check("clicking the box opens the overlay", bd_overlay_owner() == co);
+
+	/* keyboard: highlight starts on the selection; Down then Enter picks it */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Down+Enter selects the next item and closes",
+	    bd_combo_get(co) == 2 && cmb_n == 1 && cmb_last == 2
+	    && bd_overlay_owner() == BD_NONE);
+
+	/* reopen and dismiss with Escape: no change, no callback */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
+	check("reopened", bd_overlay_owner() == co);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape dismisses the overlay without selecting",
+	    bd_overlay_owner() == BD_NONE && bd_combo_get(co) == 2 && cmb_n == 1);
+
+	/* reopen and click a list row: the overlay drops below the box */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
+	int rh = (int)bd_draw_line_height() + 4;   /* combo_rowh() */
+	int oy = qy + qh;                          /* list drops below the box */
+	int row0_cy = oy + 1 + rh / 2;             /* center of row 0 ("UTF-8") */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=qx+qw/2, .y=row0_cy });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=row0_cy });
+	check("clicking a row selects it, fires, and closes",
+	    bd_combo_get(co) == 0 && cmb_n == 2 && cmb_last == 0
+	    && bd_overlay_owner() == BD_NONE);
+
+	/* clicking outside an open list dismisses it */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
+	check("reopened for outside-click test", bd_overlay_owner() == co);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=380, .y=290 });
+	check("a press outside the list dismisses it",
+	    bd_overlay_owner() == BD_NONE && bd_combo_get(co) == 0 && cmb_n == 2);
+
+	bd_combo_set(co, 3);
+	check("bd_combo_set updates without firing the callback",
+	    bd_combo_get(co) == 3 && cmb_n == 2);
+	bd_combo_set(co, 99);
+	check("bd_combo_set clamps above range", bd_combo_get(co) == 3);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
+	bd_gui_render();   /* render with the list open */
+	check("combo renders (open) without crashing", bd_overlay_owner() == co);
 	bd_gui_cleanup();
 	}
 

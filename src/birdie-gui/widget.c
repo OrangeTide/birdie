@@ -235,6 +235,10 @@ static bd_id          active_modal = BD_NONE;
 static bd_callback_fn modal_on_accept;   /* Enter confirms (bd_modal_open_ex) */
 static bd_callback_fn modal_on_cancel;   /* Escape cancels */
 static void          *modal_arg;
+/* Extension overlay (one at a time): a top-most floating rect an extension
+ * widget opens (a combo's drop-down list), drawn above everything and given
+ * first crack at input while open. See bd_overlay_* / widget_ext.h. */
+static bd_overlay     overlay;           /* owner == BD_NONE when none open */
 /* IME: in-progress preedit shown at the focused field's caret, and the last
  * reported enabled state */
 static char  preedit_buf[256];
@@ -367,6 +371,30 @@ const bd_dnd_payload *
 bd_dnd_get(void)
 {
 	return dnd_active ? &dnd_payload : NULL;
+}
+
+void
+bd_overlay_open(const bd_overlay *ov)
+{
+	if (!ov || ov->owner == BD_NONE)
+		return;
+	overlay = *ov;
+}
+
+void
+bd_overlay_close(bd_id owner)
+{
+	if (overlay.owner == owner)
+		overlay.owner = BD_NONE;
+}
+
+bd_id
+bd_overlay_owner(void)
+{
+	/* an owner destroyed out from under an open overlay drops it */
+	if (overlay.owner != BD_NONE && !pool[overlay.owner].alive)
+		overlay.owner = BD_NONE;
+	return overlay.owner;
 }
 
 const bd_theme *
@@ -1405,6 +1433,8 @@ bd_destroy(bd_id id)
 		pointer_capture = BD_NONE;
 		dnd_active = 0;   /* source gone: drop the drag it was carrying */
 	}
+	if (overlay.owner == id)
+		overlay.owner = BD_NONE;   /* the widget owning the pop-up is gone */
 	if (hover_ext == id)
 		hover_ext = BD_NONE;
 	if (wm_active_frame == id)
@@ -2947,6 +2977,7 @@ bd_gui_cleanup(void)
 	active_modal = BD_NONE;
 	modal_on_accept = modal_on_cancel = NULL;
 	modal_arg = NULL;
+	overlay.owner = BD_NONE;
 	memset(touches, 0, sizeof touches);
 }
 
@@ -3594,6 +3625,18 @@ render_canvas_frames(bd_id winframe)
 	}
 }
 
+/* The extension overlay (a combo's drop-down): drawn top-most, above modal and
+ * notice, so a pop-up opened from inside a dialog still floats over it. */
+static void
+render_overlay(int W, int H)
+{
+	if (bd_overlay_owner() == BD_NONE || !overlay.render)
+		return;
+	bd_draw_begin(W, H);
+	overlay.render(overlay.owner);
+	bd_draw_end();
+}
+
 /* The drag ghost trailing the pointer during a cross-widget drag: a translucent
  * icon (or a plain marker when the payload has none) with its caption beneath,
  * drawn unclipped and above everything so it is visible over any target. */
@@ -3641,6 +3684,8 @@ bd_gui_render(void)
 				    be->window_height(id));
 				render_notice(be->window_width(id),
 				    be->window_height(id));
+				render_overlay(be->window_width(id),
+				    be->window_height(id));
 				render_dnd_ghost(be->window_width(id),
 				    be->window_height(id));
 			}
@@ -3661,6 +3706,7 @@ bd_gui_render(void)
 		}
 		render_modal(be->width(), be->height());
 		render_notice(be->width(), be->height());
+		render_overlay(be->width(), be->height());
 		render_dnd_ghost(be->width(), be->height());
 	}
 
@@ -4371,6 +4417,42 @@ bd_gui_event(const bd_event *ev)
 		if (f != BD_NONE && pool[f].alive)
 			pool[f].focused = (ev->type == BD_EV_FOCUS_IN);
 		return 1;
+	}
+
+	/* An open extension overlay (a combo drop-down) is top-most: it sees input
+	 * first. Pointer events inside its rect and all key/char events go to its
+	 * hook; a press outside dismisses it; an Escape its hook does not consume
+	 * dismisses it. Everything is swallowed while it is open (menu-like). */
+	if (bd_overlay_owner() != BD_NONE) {
+		switch (ev->type) {
+		case BD_EV_MOUSE_DOWN:
+			if (in_rect(ev->x, ev->y, overlay.x, overlay.y,
+			    overlay.w, overlay.h)) {
+				if (overlay.event)
+					overlay.event(overlay.owner, ev);
+			} else {
+				bd_overlay_close(overlay.owner);
+			}
+			return 1;
+		case BD_EV_MOUSE_UP:
+		case BD_EV_MOUSE_MOVE:
+			if (overlay.event && in_rect(ev->x, ev->y, overlay.x,
+			    overlay.y, overlay.w, overlay.h))
+				overlay.event(overlay.owner, ev);
+			return 1;
+		case BD_EV_KEY_DOWN:
+			if (overlay.event && overlay.event(overlay.owner, ev))
+				return 1;
+			if (ev->key == BD_KEY_ESCAPE)
+				bd_overlay_close(overlay.owner);
+			return 1;
+		case BD_EV_CHAR:
+			if (overlay.event)
+				overlay.event(overlay.owner, ev);
+			return 1;
+		default:
+			break;
+		}
 	}
 
 	/* a modal notice swallows all input except its own buttons */
