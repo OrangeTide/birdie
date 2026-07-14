@@ -87,7 +87,7 @@ static const char *const scheme_labels[] = { "Default", "Green phosphor",
 /* Encoding combo labels, ordered to match the bd_encoding enum so the combo's
  * selected index is the bd_encoding value; the labels are canonical names. */
 static const char *const encoding_labels[] = { "UTF-8", "ISO-8859-1",
-                                               "Windows-1252" };
+                                               "Windows-1252", "CP437" };
 #define N_ENCODINGS ((int)(sizeof encoding_labels / sizeof encoding_labels[0]))
 
 static struct {

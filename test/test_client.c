@@ -733,6 +733,46 @@ test_encoding(void)
 	        out, sizeof out) == 2 &&
 	    (unsigned char)out[0] == 0xC3 && (unsigned char)out[1] == 0xA9);
 
+	/* CP437: high bytes are the DOS art glyphs. 0xDB is the full block
+	 * U+2588 (E2 96 88); 0xC9 is the double top-left corner U+2554
+	 * (E2 95 94). Low bytes stay ASCII so control codes survive. */
+	check("cp437 aliases parse",
+	    bd_encoding_parse("cp437") == BD_ENC_CP437 &&
+	    bd_encoding_parse("437") == BD_ENC_CP437 &&
+	    bd_encoding_parse("ibm437") == BD_ENC_CP437);
+	n = bd_encoding_decode(BD_ENC_CP437, (const unsigned char *)"\xdb\xc9",
+	    2, out, sizeof out);
+	check("CP437 block/box bytes become 3-byte UTF-8 glyphs",
+	    n == 6 &&
+	    (unsigned char)out[0] == 0xE2 && (unsigned char)out[1] == 0x96 &&
+	    (unsigned char)out[2] == 0x88 &&              /* U+2588 full block */
+	    (unsigned char)out[3] == 0xE2 && (unsigned char)out[4] == 0x95 &&
+	    (unsigned char)out[5] == 0x94);               /* U+2554 box corner */
+	n = bd_encoding_decode(BD_ENC_CP437,
+	    (const unsigned char *)"\033[0mhi\r\n", 7, out, sizeof out);
+	check("CP437 keeps ESC/CR/LF as control bytes (ANSI + newlines work)",
+	    n == 7 && memcmp(out, "\033[0mhi\r\n", 7) == 0);
+
+	/* CP437 also draws the low C0 art glyphs: 0x01 = ☺ (U+263A, E2 98 BA),
+	 * 0x02 = ☻ (U+263B, E2 98 BB), the classic DOS smileys. */
+	n = bd_encoding_decode(BD_ENC_CP437, (const unsigned char *)"\x01\x02",
+	    2, out, sizeof out);
+	check("CP437 renders low smileys 0x01/0x02 as glyphs",
+	    n == 6 &&
+	    (unsigned char)out[0] == 0xE2 && (unsigned char)out[1] == 0x98 &&
+	    (unsigned char)out[2] == 0xBA &&              /* U+263A ☺ */
+	    (unsigned char)out[3] == 0xE2 && (unsigned char)out[4] == 0x98 &&
+	    (unsigned char)out[5] == 0xBB);               /* U+263B ☻ */
+	/* card suit 0x06 = ♠ (U+2660); 0x7F = ⌂ house (U+2302) */
+	n = bd_encoding_decode(BD_ENC_CP437, (const unsigned char *)"\x06\x7f",
+	    2, out, sizeof out);
+	check("CP437 renders suit 0x06 and house 0x7F as glyphs", n == 6);
+	/* but BEL (0x07) keeps its control meaning, not the CP437 bullet glyph */
+	n = bd_encoding_decode(BD_ENC_CP437, (const unsigned char *)"\x07", 1,
+	    out, sizeof out);
+	check("CP437 keeps BEL (0x07) as a control byte",
+	    n == 1 && out[0] == 0x07);
+
 	/* output is bounded by dstcap, never overruns */
 	n = bd_encoding_decode(BD_ENC_LATIN1, (const unsigned char *)"\xe9\xe9\xe9",
 	    3, out, 3);

@@ -18,12 +18,22 @@
 typedef enum bd_encoding {
     BD_ENC_UTF8 = 0,    /* passthrough (default) */
     BD_ENC_LATIN1,      /* ISO-8859-1 */
-    BD_ENC_CP1252       /* Windows-1252 */
+    BD_ENC_CP1252,      /* Windows-1252 */
+    BD_ENC_CP437        /* IBM PC code page 437 (DOS/BBS art) */
 } bd_encoding;
+
+/*
+ * CP437 note: like a period DOS terminal, this renders most C0 bytes
+ * (0x00-0x1F) as their PC glyphs (0x01 smiley, 0x03-0x06 card suits, arrows,
+ * etc.), so Legend-of-the-Red-Dragon-era art comes through. The eight bytes
+ * with a real terminal-control function are kept as controls (NUL, BEL, BS,
+ * HT, LF, FF, CR, ESC) so newlines and ANSI escapes still work.
+ */
 
 /* Map a charset name to an encoding (case-insensitive, common aliases:
  * "utf-8"/"utf8"; "iso-8859-1"/"latin1"/"latin-1"/"8859-1";
- * "windows-1252"/"cp1252"/"1252"). NULL/empty/unknown -> BD_ENC_UTF8. */
+ * "windows-1252"/"cp1252"/"1252"; "cp437"/"437"/"ibm437"/"oem-us"/"dos").
+ * NULL/empty/unknown -> BD_ENC_UTF8. */
 bd_encoding bd_encoding_parse(const char *name);
 
 /* Canonical display name for an encoding (e.g. "UTF-8", "ISO-8859-1"). */

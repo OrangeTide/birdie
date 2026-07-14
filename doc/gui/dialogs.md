@@ -152,13 +152,18 @@ Built from the above, no new backend capability:
   per-profile), so this is deliberately small; every control has a live effect.
 - [x] Per-profile fields on the **edit-profile** dialog: an autoreconnect checkbox,
   a term-type field, and an **encoding** combo (UTF-8 / ISO-8859-1 /
-  Windows-1252), all read by `bd_session` at connect. The encoding selects a
-  fallback decoder in `bd_net` (`bd_net_set_encoding`): inbound non-UTF-8 bytes
-  are transcoded to UTF-8 (`bd_encoding.*`) before the display, so legacy MUDs
-  render correctly. A server that negotiates CHARSET UTF-8 overrides the fallback
-  for that connection (a `charset` callback added to `bd_telopt`). UTF-8 is a
-  passthrough, so the default path is unchanged. Covered by unit tests
-  (`test_client`) and an end-to-end loopback test (`test_netloop`).
+  Windows-1252 / CP437), all read by `bd_session` at connect. The encoding
+  selects a fallback decoder in `bd_net` (`bd_net_set_encoding`): inbound
+  non-UTF-8 bytes are transcoded to UTF-8 (`bd_encoding.*`) before the display,
+  so legacy MUDs render correctly. CP437 is the DOS/BBS art set (Legend of the
+  Red Dragon and kin): it draws the high-half box/block glyphs and, like a
+  period DOS terminal, the low C0 art glyphs (smileys, card suits, arrows),
+  keeping only the eight real control bytes (NUL/BEL/BS/HT/LF/FF/CR/ESC) so
+  newlines and ANSI escapes still work. A server that negotiates CHARSET UTF-8
+  overrides the fallback for that connection (a `charset` callback added to
+  `bd_telopt`). UTF-8 is a passthrough, so the default path is unchanged.
+  Covered by unit tests (`test_client`) and an end-to-end loopback test
+  (`test_netloop`).
 - [x] **Trigger editor** (Session > Triggers...): a `BD_TABLE` of the session's
   triggers plus a compact add form (type combo, pattern/body/class inputs, a
   priority spinner, a stop checkbox) and Remove-selected. It edits the **live**
