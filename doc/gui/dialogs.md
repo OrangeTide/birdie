@@ -44,7 +44,9 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-**Status:** Phases 0, 1 and 2 are done. Phases 3-4 remain.
+**Status:** Phases 0, 1 and 2 are done. Phase 4's dialog reworks (connect,
+edit-profile) are done; its net-new dialogs (settings, trigger editor, export,
+import-collision) and Phase 3 (choosers) remain.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -111,12 +113,18 @@ Built from the above, no new backend capability:
 - **Color chooser** — a palette grid plus an X-Y pad + value slider and a live
   swatch. For `#highlight` color and theme editing.
 
-### Phase 4 — wire the app dialogs (`src/birdie/`)
+### Phase 4 — wire the app dialogs (`src/birdie/`) — IN PROGRESS
 
-- Rework the existing **connect** and **edit-profile** dialogs onto the shell.
-- **Settings** — checkboxes + combos.
-- **Trigger editor** — a combo for the trigger type, pattern/body fields, class.
-- **Export** — per-column checkboxes (`doc/profiles.md`).
+- [x] Rework the existing **connect** and **edit-profile** dialogs onto the
+  shell (`main.c`). The connect picker now composes its table + manage/import
+  rows into `bd_dialog_content` with a Connect (default) / Cancel button row;
+  the edit form uses `bd_dialog_field` rows (Name/Host/Port inputs, a TLS
+  `BD_CHECKBOX` replacing the toggle) with Save (default) / Cancel. Both gain
+  Enter-confirms / Escape-cancels and first-field focus for free, and the
+  hand-rolled panel/label/button boilerplate is gone (-30 lines net).
+- [ ] **Settings** — checkboxes + combos (dialog does not exist yet).
+- [ ] **Trigger editor** — a combo for the trigger type, pattern/body fields, class.
+- [ ] **Export** — per-column checkboxes (`doc/profiles.md`).
 - **Import-collision** — a radio group (skip / rename / overwrite).
 
 ## 4. Testing

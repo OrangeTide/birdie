@@ -2,6 +2,8 @@
 #include "bd_widget_vt.h"
 #include "bd_widget_table.h"
 #include "bd_widget_value.h"
+#include "bd_widget_form.h"
+#include "bd_dialog.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -21,8 +23,8 @@ static bd_id mp_label;
 static bd_id terminal;
 static bd_id input_line;
 static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
-static bd_id connect_dialog;            /* the modal MUD picker */
-static bd_id edit_dialog;               /* add/edit a profile */
+static bd_dialog *connect_dlg;          /* the modal MUD picker */
+static bd_dialog *edit_dlg;             /* add/edit a profile */
 static bd_id edit_name, edit_host, edit_port, edit_tls;
 static bd_id import_path;               /* CSV import file-path field */
 static char editing_name[128];          /* profile being edited ("" = add new) */
@@ -303,7 +305,7 @@ on_open_connect(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	bd_modal_open(connect_dialog);
+	bd_dialog_open(connect_dlg);
 }
 
 /* Connect button inside the dialog: connect the selected MUD, then close. */
@@ -313,16 +315,8 @@ on_dialog_connect(bd_id id, void *arg)
 	(void)id;
 	(void)arg;
 	const bd_profile *p = selected_profile();
-	bd_modal_close(connect_dialog);
+	bd_dialog_close(connect_dlg);
 	connect_profile(p);
-}
-
-static void
-on_dialog_cancel(bd_id id, void *arg)
-{
-	(void)id;
-	(void)arg;
-	bd_modal_close(connect_dialog);
 }
 
 /* ---- add / edit / delete / import a profile ---- */
@@ -341,9 +335,9 @@ open_edit(const bd_profile *p)
 	bd_set(edit_name, BD_LABEL_S, name ? name : "", BD_END);
 	bd_set(edit_host, BD_LABEL_S, host ? host : "", BD_END);
 	bd_set(edit_port, BD_LABEL_S, port ? port : "23", BD_END);
-	bd_toggle_set(edit_tls, tls && strcmp(tls, "no") != 0 &&
+	bd_checkbox_set(edit_tls, tls && strcmp(tls, "no") != 0 &&
 	    strcmp(tls, "") != 0);
-	bd_modal_open(edit_dialog);
+	bd_dialog_open(edit_dlg);
 }
 
 static void
@@ -387,18 +381,10 @@ on_edit_save(bd_id id, void *arg)
 	}
 	bd_profile_set(p, "host", bd_get_s(edit_host, BD_LABEL_S));
 	bd_profile_set(p, "port", bd_get_s(edit_port, BD_LABEL_S));
-	bd_profile_set(p, "tls", bd_toggle_get(edit_tls) ? "yes" : "no");
+	bd_profile_set(p, "tls", bd_checkbox_get(edit_tls) ? "yes" : "no");
 	save_profiles();
 	bd_table_refresh(mudlist);
-	bd_modal_close(edit_dialog);
-}
-
-static void
-on_edit_cancel(bd_id id, void *arg)
-{
-	(void)id;
-	(void)arg;
-	bd_modal_close(edit_dialog);
+	bd_dialog_close(edit_dlg);
 }
 
 static void
@@ -478,7 +464,7 @@ mudlist_activate(bd_id w, int row, void *ctx)
 	const bd_profile *p = bd_profiles_at(profiles, row);
 	(void)w;
 	(void)ctx;
-	bd_modal_close(connect_dialog);
+	bd_dialog_close(connect_dlg);
 	connect_profile(p);
 }
 
@@ -708,24 +694,22 @@ init(void)
 	input_line = bd_create(right, BD_INPUT_LINE,
 		BD_PREF_H_I, 24, BD_PAD_I, 4, BD_ON_CLICK_F, on_submit, BD_END);
 
-	/* the modal connect dialog: a detached panel hosting the MUD-list table */
-	connect_dialog = bd_create(BD_NONE, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 460, BD_PREF_H_I, 340,
-		BD_BG_C, 0x313335FFu, BD_PAD_I, 10, BD_GAP_I, 8, BD_END);
-	bd_create(connect_dialog, BD_LABEL,
-		BD_LABEL_S, "Connect to a MUD (double-click a row):",
-		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
+	/* the modal connect dialog: the MUD-list table plus manage / import rows,
+	 * composed with the bd_dialog helper (Enter connects, Escape cancels) */
+	connect_dlg = bd_dialog_create("Connect to a MUD (double-click a row)",
+		460, 340);
+	bd_id cbody = bd_dialog_content(connect_dlg);
 	static const bd_table_column mcols[] = {
 		{ "MUD",  0,   BD_TABLE_LEFT,  0 },
 		{ "Host", 170, BD_TABLE_LEFT,  0 },
 		{ "Port", 50,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
 	};
-	mudlist = bd_table_create(connect_dialog, mcols, 3,
+	mudlist = bd_table_create(cbody, mcols, 3,
 		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
 		&(bd_table_cb){ .activate = mudlist_activate },
 		BD_GROW_I, 1, BD_END);
-	/* manage row: add / edit / delete profiles, and a local CSV import */
-	bd_id mbtn = bd_create(connect_dialog, BD_PANEL,
+	/* manage row: add / edit / delete profiles */
+	bd_id mbtn = bd_create(cbody, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
 	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Add", BD_GROW_I, 1,
 		BD_ON_CLICK_F, on_add, BD_END);
@@ -733,46 +717,29 @@ init(void)
 		BD_ON_CLICK_F, on_edit, BD_END);
 	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Delete", BD_GROW_I, 1,
 		BD_ON_CLICK_F, on_delete, BD_END);
-	bd_id ibtn = bd_create(connect_dialog, BD_PANEL,
+	/* import row: a local CSV file path + import */
+	bd_id ibtn = bd_create(cbody, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
 	import_path = bd_create(ibtn, BD_INPUT_LINE, BD_GROW_I, 1,
 		BD_PAD_I, 3, BD_END);
 	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import CSV", BD_PREF_W_I, 100,
 		BD_ON_CLICK_F, on_import, BD_END);
+	bd_dialog_button(connect_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(connect_dlg, "Connect", BD_DIALOG_DEFAULT,
+		on_dialog_connect, NULL);
 
-	bd_id dbtn = bd_create(connect_dialog, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);
-	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Connect", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_dialog_connect, BD_END);
-	bd_create(dbtn, BD_BUTTON, BD_LABEL_S, "Cancel", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_dialog_cancel, BD_END);
-
-	/* the add/edit profile form (modal) */
-	edit_dialog = bd_create(BD_NONE, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 360, BD_PREF_H_I, 230,
-		BD_BG_C, 0x313335FFu, BD_PAD_I, 10, BD_GAP_I, 8, BD_END);
-	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Profile",
-		BD_PREF_H_I, 18, BD_FG_C, 0xFFFFFFFFu, BD_END);
-	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Name", BD_PREF_H_I, 14, BD_END);
-	edit_name = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
-		BD_PAD_I, 3, BD_END);
-	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Host", BD_PREF_H_I, 14, BD_END);
-	edit_host = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
-		BD_PAD_I, 3, BD_END);
-	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "Port", BD_PREF_H_I, 14, BD_END);
-	edit_port = bd_create(edit_dialog, BD_INPUT_LINE, BD_PREF_H_I, 24,
-		BD_PAD_I, 3, BD_END);
-	bd_id trow = bd_create(edit_dialog, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
-	bd_create(trow, BD_LABEL, BD_LABEL_S, "TLS", BD_PREF_W_I, 40, BD_END);
-	edit_tls = bd_toggle_create(trow, &(bd_toggle_desc){0}, BD_END);
-	bd_create(edit_dialog, BD_LABEL, BD_LABEL_S, "", BD_GROW_I, 1, BD_END);
-	bd_id ebtn = bd_create(edit_dialog, BD_PANEL,
-		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30, BD_GAP_I, 6, BD_END);
-	bd_create(ebtn, BD_BUTTON, BD_LABEL_S, "Save", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_edit_save, BD_END);
-	bd_create(ebtn, BD_BUTTON, BD_LABEL_S, "Cancel", BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_edit_cancel, BD_END);
+	/* the add/edit profile form, composed with the bd_dialog helper */
+	edit_dlg = bd_dialog_create("Profile", 360, 210);
+	edit_name = bd_create(bd_dialog_field(edit_dlg, "Name"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	edit_host = bd_create(bd_dialog_field(edit_dlg, "Host"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	edit_port = bd_create(bd_dialog_field(edit_dlg, "Port"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	edit_tls = bd_checkbox_create(bd_dialog_field(edit_dlg, "Security"),
+		&(bd_checkbox_desc){ .label = "TLS" }, BD_END);
+	bd_dialog_button(edit_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(edit_dlg, "Save", BD_DIALOG_DEFAULT, on_edit_save, NULL);
 
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
@@ -795,6 +762,9 @@ cleanup(void)
 	session = NULL;
 	bd_profiles_free(profiles);
 	profiles = NULL;
+	bd_dialog_free(connect_dlg);    /* before bd_gui_cleanup frees the pool */
+	bd_dialog_free(edit_dlg);
+	connect_dlg = edit_dlg = NULL;
 	bd_gui_cleanup();
 }
 
