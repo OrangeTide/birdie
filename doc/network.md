@@ -206,14 +206,25 @@ time.
 
 ## Encoding
 
-Each profile declares an encoding (`doc/profiles.md`). Default UTF-8.
-Legacy MUDs commonly want `cp437`, `latin1`, or `gbk`. Incoming bytes
-are transcoded to UTF-8 before they hit libvt; outgoing commands are
-transcoded from UTF-8 to the profile encoding before being sent.
+Each profile declares an encoding (`doc/profiles.md`); the default is
+UTF-8. Legacy MUDs and DOS/BBS door games send `latin1` (ISO-8859-1),
+`windows-1252`, or `cp437` instead. `bd_session` hands the profile's
+choice to `bd_net_set_encoding` at connect, and inbound bytes are
+transcoded to UTF-8 (`bd_encoding.*`) before they reach libvt. UTF-8 is
+a straight passthrough, so the default path is untouched.
 
-Transcoding uses a small built-in table for cp437 / latin1 / the other
-ANSI codepages. For `gbk` and similarly large tables we vendor a
-minimal converter rather than pulling in `iconv` as a system dep.
+When the server negotiates CHARSET and we accept UTF-8, that overrides
+the profile fallback for the connection (a `charset` callback on
+`bd_telopt` sets the override, reset each connect). A modern UTF-8 MUD
+needs no configuration; the encoding field only matters for servers that
+never negotiate.
+
+Transcoding uses small built-in tables. `cp437` also renders the C0 art
+glyphs (smileys, card suits, arrows) the way a DOS terminal did, keeping
+only the eight bytes with a real control function (NUL, BEL, BS, HT, LF,
+FF, CR, ESC). Larger multibyte sets like `gbk`, and the outbound
+UTF-8-to-encoding direction, are not built yet. When they land, a
+vendored converter is preferred over an `iconv` system dependency.
 
 ## NDJSON integration
 

@@ -54,7 +54,7 @@ Known v1.0 titles (column order is not significant):
 | `host`          | DNS name or IP                                                |
 | `port`          | TCP port                                                      |
 | `tls`           | `yes` / `no` — use TLS telnet                                 |
-| `encoding`      | `utf-8` (default), `cp437`, `latin1`, `gbk`, etc.             |
+| `encoding`      | `utf-8` (default), `latin1`, `windows-1252`, `cp437`          |
 | `description`   | longer human-readable description                             |
 | `url`           | MUD's homepage                                                |
 | `tags`          | space-separated list, user-defined                            |
