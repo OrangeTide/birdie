@@ -107,6 +107,38 @@ void bd_session_set_data_dir(bd_session *s, const char *dir);
  * aliases, and on.* hooks. */
 int bd_session_load_profile_script(bd_session *s);
 
+/*
+ * User triggers: a per-profile trigger set edited through the GUI and persisted
+ * to <data_dir>/profiles/<name>/triggers.csv, kept separate from the
+ * hand-written triggers.lua so saving never rewrites (and clobbers) that
+ * script. The session mirrors this list into the live engine, so user triggers
+ * fire alongside script triggers.
+ *
+ * _add installs the trigger in the live engine and records it in the user list
+ * (a duplicate type+pattern+class replaces the existing entry). _remove drops
+ * it from both. Neither writes to disk; call _save afterwards to persist. Both
+ * return 0 on success, -1 on error.
+ */
+int bd_session_user_trigger_add(bd_session *s, bd_trigger_type type,
+                                const char *pattern, const char *body,
+                                const char *cls, int priority, int stop);
+int bd_session_user_trigger_remove(bd_session *s, bd_trigger_type type,
+                                   const char *pattern, const char *cls);
+
+/* Number of user triggers currently held. */
+int bd_session_user_trigger_count(const bd_session *s);
+
+/* Write the user-trigger list to triggers.csv (creating the profile dir).
+ * Returns 0 on success, -1 if there is no data dir / profile name or on I/O
+ * error. An empty list writes a header-only file. */
+int bd_session_save_triggers(bd_session *s);
+
+/* Load triggers.csv (if present) and install each entry as a user trigger.
+ * Call once during session setup, after the data dir is set, alongside
+ * bd_session_load_profile_script. Returns the number loaded, or -1 on error;
+ * 0 when no file exists. */
+int bd_session_load_triggers(bd_session *s);
+
 /* Pull queued network output and fire events. Call once per frame (UI thread). */
 void bd_session_drain(bd_session *s);
 

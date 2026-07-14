@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>   /* rmdir */
 
 /* ---- test harness (matches test_gui.c / test_client.c) ---- */
 static int checks, fails;
@@ -292,6 +293,76 @@ main(void)
 	net_fire_state(BD_NET_CLOSED, "bye");
 	check("a close surfaces as a STATE event",
 	    ev_last_state == BD_NET_CLOSED);
+
+	/* user-trigger persistence: add through the session API, save to
+	 * triggers.csv, then reload in a fresh session and confirm it fires.
+	 * (After this block frees its sessions the fake g_net is NULL, so it runs
+	 * last, after the checks above that depend on the original session's net.) */
+	{
+		char tmpl[] = "/tmp/bd_sess_XXXXXX";
+		char *dir = mkdtemp(tmpl);
+		check("temp data dir created", dir != NULL);
+
+		bd_profile *p2 = bd_profiles_add(ps, "Persist");
+		bd_profile_set(p2, "host", "localhost");
+		bd_profile_set(p2, "port", "4000");
+		bd_session *sa = bd_session_new(p2);
+		bd_session_on_event(sa, on_event, NULL);
+		bd_session_set_data_dir(sa, dir);
+
+		check("user trigger add reports success",
+		    bd_session_user_trigger_add(sa, BD_TRIG_ALIAS, "gg",
+		        "get gold", NULL, 7, 1) == 0);
+		check("re-adding the same key does not grow the list",
+		    (bd_session_user_trigger_add(sa, BD_TRIG_ALIAS, "gg",
+		        "grab gold", NULL, 7, 1) == 0) &&
+		    bd_session_user_trigger_count(sa) == 1);
+		bd_session_user_trigger_add(sa, BD_TRIG_ACTION,
+		    "you see a chest", "open chest", "loot", -1, 0);
+		check("two distinct user triggers held",
+		    bd_session_user_trigger_count(sa) == 2);
+		check("save writes triggers.csv",
+		    bd_session_save_triggers(sa) == 0);
+		bd_session_free(sa);
+
+		/* fresh session, same profile + data dir: load and fire */
+		bd_session *sb = bd_session_new(p2);
+		bd_session_on_event(sb, on_event, NULL);
+		bd_session_set_data_dir(sb, dir);
+		check("load restores both user triggers",
+		    bd_session_load_triggers(sb) == 2 &&
+		    bd_session_user_trigger_count(sb) == 2);
+		check("connect starts the reloaded session",
+		    bd_session_connect(sb) == 0);
+		net_fire_state(BD_NET_CONNECTED, "ok");
+		sent_clear();
+		check("a reloaded alias body (last write wins) is sent",
+		    bd_session_send_line(sb, "gg") == 0 &&
+		    strcmp(g_sent, "grab gold\r\n") == 0);
+		sent_clear();
+		net_recv("you see a chest here\r\n");
+		check("a reloaded action fires on a matching line",
+		    strcmp(g_sent, "open chest\r\n") == 0);
+
+		/* remove drops it from the list and the live engine */
+		bd_session_user_trigger_remove(sb, BD_TRIG_ALIAS, "gg", NULL);
+		check("remove shrinks the user list",
+		    bd_session_user_trigger_count(sb) == 1);
+		sent_clear();
+		check("the removed alias no longer consumes input",
+		    bd_session_send_line(sb, "gg") == 2);
+		bd_session_free(sb);
+
+		/* clean up the temp files */
+		char path[1024];
+		snprintf(path, sizeof path, "%s/profiles/Persist/triggers.csv", dir);
+		remove(path);
+		snprintf(path, sizeof path, "%s/profiles/Persist", dir);
+		rmdir(path);
+		snprintf(path, sizeof path, "%s/profiles", dir);
+		rmdir(path);
+		rmdir(dir);
+	}
 
 	bd_session_free(s);
 	bd_profiles_free(ps);

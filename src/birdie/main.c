@@ -407,6 +407,10 @@ rebind_session(const bd_profile *p)
 	default:
 		break;          /* no script for this profile */
 	}
+
+	/* GUI-added triggers persist separately (triggers.csv), so loading them
+	 * here never duplicates the script's triggers. */
+	bd_session_load_triggers(session);
 }
 
 /* Sidebar label showing the current MUD (borrowed string, so keep it in a
@@ -1336,9 +1340,11 @@ on_trig_add(bd_id id, void *arg)
 		    "\033[31m*** a trigger needs a pattern\033[0m\r\n", -1);
 		return;
 	}
-	bd_trigger_add(t, (bd_trigger_type)(ti >= 0 ? ti : 0), pat, body,
+	bd_session_user_trigger_add(session,
+	    (bd_trigger_type)(ti >= 0 ? ti : 0), pat, body,
 	    (cls && cls[0]) ? cls : NULL, bd_spinner_get(trig_pri),
 	    bd_checkbox_get(trig_stop));
+	bd_session_save_triggers(session);              /* persist to triggers.csv */
 	bd_set(trig_pattern, BD_LABEL_S, "", BD_END);   /* ready for the next add */
 	bd_set(trig_body, BD_LABEL_S, "", BD_END);
 	trig_reload();
@@ -1354,7 +1360,9 @@ on_trig_remove(bd_id id, void *arg)
 	if (!t || sel < 0 || sel >= trig_nrows)
 		return;
 	struct trig_row *r = &trig_rows[sel];
-	bd_trigger_remove_pattern(t, r->type, r->pattern, r->cls[0] ? r->cls : NULL);
+	bd_session_user_trigger_remove(session, r->type, r->pattern,
+	    r->cls[0] ? r->cls : NULL);
+	bd_session_save_triggers(session);              /* persist to triggers.csv */
 	trig_reload();
 }
 
@@ -1399,6 +1407,7 @@ init(void)
 	install_ui_hooks(session);   /* GMCP Char.Vitals -> sidebar (host_ui only
 	                              * fires at runtime, after the labels exist) */
 	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
+	bd_session_load_triggers(session);   /* GUI-added triggers (triggers.csv) */
 
 	bd_id frame = bd_create(BD_NONE, BD_FRAME,
 		BD_LABEL_S, "Birdie",

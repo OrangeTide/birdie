@@ -53,8 +53,9 @@ import-collision, and the colour + file choosers wired in). Modals now **stack**
 so a chooser opens over another dialog: the connect dialog's Browse... opens the
 file chooser on top of it and drops the picked path into the import field, and
 the trigger editor's Colour... opens the colour picker on top of it and fills the
-body with the highlight SGR. Remaining follow-ups: trigger persistence and
-profile `encoding` wiring.
+body with the highlight SGR. The trigger editor now persists GUI-added triggers
+to a per-profile `triggers.csv`, kept separate from the hand-written
+`triggers.lua`. Remaining follow-up: profile `encoding` wiring.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -157,10 +158,13 @@ Built from the above, no new backend capability:
   priority spinner, a stop checkbox) and Remove-selected. It edits the **live**
   session trigger table through the `bd_trigger_*` C API (add /
   remove_pattern / foreach), so it works offline (the engine exists before
-  connect) and mirrors the `#action` verbs. It deliberately does **not** persist:
-  triggers live in a user-editable `triggers.lua`, and rewriting that from the
-  flat table would clobber hand-written Lua. Persisting would need a separate
-  per-profile trigger data file plus session load wiring (a future task).
+  connect) and mirrors the `#action` verbs. GUI-added triggers **persist** to a
+  per-profile `triggers.csv` (`bd_session_user_trigger_add/remove` +
+  `bd_session_save_triggers`), a separate file from the hand-written
+  `triggers.lua` so saving never rewrites (and clobbers) that script. The
+  session loads both on setup (`bd_session_load_triggers` alongside
+  `bd_session_load_profile_script`), so user triggers fire beside script
+  triggers without duplication. Round-tripped in `test_session`.
 - [x] **Export** (connect dialog > Export...): per-column checkboxes over the safe
   columns (name is always included) build a filter for `bd_profiles_export_csv`,
   written to a chosen path.

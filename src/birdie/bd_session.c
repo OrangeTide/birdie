@@ -8,6 +8,7 @@
 #include "bd_log.h"
 #include "bd_replay.h"
 #include "bd_mxp.h"
+#include "bd_csv.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -47,7 +48,51 @@ struct bd_session {
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
 	size_t line_len, line_cap;
+
+	/* user triggers (GUI-edited, persisted to triggers.csv; see header) */
+	struct user_trig *utrig;
+	int nutrig, ucap;
 };
+
+/* One GUI-managed trigger; the persisted mirror of a live engine trigger. */
+struct user_trig {
+	bd_trigger_type type;
+	char pattern[256];
+	char body[256];
+	char cls[64];
+	int priority;
+	int stop;
+};
+
+/* Canonical triggers.csv type names, indexed by bd_trigger_type. */
+static const char *const trig_type_names[] = {
+	"action", "alias", "prompt", "gmcp",
+	"gag", "substitute", "highlight", "mxp"
+};
+
+static const char *
+trig_type_name(bd_trigger_type t)
+{
+	if ((unsigned)t < sizeof trig_type_names / sizeof trig_type_names[0])
+		return trig_type_names[t];
+	return "action";
+}
+
+/* Parse a type name (case-sensitive, canonical form). Returns 0 on success. */
+static int
+trig_type_parse(const char *s, bd_trigger_type *out)
+{
+	size_t i;
+	if (!s)
+		return -1;
+	for (i = 0; i < sizeof trig_type_names / sizeof trig_type_names[0]; i++) {
+		if (strcmp(s, trig_type_names[i]) == 0) {
+			*out = (bd_trigger_type)i;
+			return 0;
+		}
+	}
+	return -1;
+}
 
 /* A non-cryptographic, process-unique id used to tag a session's log records
  * (doc/logging.md). Stable for the life of the bd_session. */
@@ -1089,6 +1134,7 @@ bd_session_free(bd_session *s)
 	free(s->data_dir);
 	free(s->linebuf);
 	free(s->scratch_rd);
+	free(s->utrig);
 	free(s);
 }
 
@@ -1238,6 +1284,229 @@ bd_session_load_profile_script(bd_session *s)
 	rc = bd_vm_eval(s->vm, buf);             /* runs in the sandbox */
 	free(buf);
 	return rc == 0 ? 1 : -1;
+}
+
+/* Find a user trigger by identity (type + pattern + class). A NULL/"" cls
+ * matches an entry whose class is also empty. Returns its index or -1. */
+static int
+user_trig_find(bd_session *s, bd_trigger_type type, const char *pattern,
+               const char *cls)
+{
+	int i;
+	const char *c = (cls && *cls) ? cls : "";
+	for (i = 0; i < s->nutrig; i++) {
+		if (s->utrig[i].type == type &&
+		    strcmp(s->utrig[i].pattern, pattern) == 0 &&
+		    strcmp(s->utrig[i].cls, c) == 0)
+			return i;
+	}
+	return -1;
+}
+
+int
+bd_session_user_trigger_add(bd_session *s, bd_trigger_type type,
+                            const char *pattern, const char *body,
+                            const char *cls, int priority, int stop)
+{
+	struct user_trig *u;
+	int idx;
+
+	if (!s || !s->trig || !pattern || !*pattern)
+		return -1;
+
+	/* install (or reinstall) in the live engine: drop any prior same-key
+	 * trigger first so a re-add updates rather than duplicates. */
+	bd_trigger_remove_pattern(s->trig, type, pattern,
+	                          (cls && *cls) ? cls : NULL);
+	if (bd_trigger_add(s->trig, type, pattern, body,
+	                   (cls && *cls) ? cls : NULL, priority, stop) < 0)
+		return -1;
+
+	idx = user_trig_find(s, type, pattern, cls);
+	if (idx < 0) {
+		if (s->nutrig >= s->ucap) {
+			int cap = s->ucap ? s->ucap * 2 : 16;
+			struct user_trig *p = realloc(s->utrig,
+			                              (size_t)cap * sizeof *p);
+			if (!p)
+				return -1;
+			s->utrig = p;
+			s->ucap = cap;
+		}
+		idx = s->nutrig++;
+	}
+	u = &s->utrig[idx];
+	u->type = type;
+	snprintf(u->pattern, sizeof u->pattern, "%s", pattern);
+	snprintf(u->body, sizeof u->body, "%s", body ? body : "");
+	snprintf(u->cls, sizeof u->cls, "%s", (cls && *cls) ? cls : "");
+	u->priority = priority;
+	u->stop = stop;
+	return 0;
+}
+
+int
+bd_session_user_trigger_remove(bd_session *s, bd_trigger_type type,
+                               const char *pattern, const char *cls)
+{
+	int idx;
+
+	if (!s || !s->trig || !pattern)
+		return -1;
+
+	bd_trigger_remove_pattern(s->trig, type, pattern,
+	                          (cls && *cls) ? cls : NULL);
+	idx = user_trig_find(s, type, pattern, cls);
+	if (idx >= 0) {
+		memmove(&s->utrig[idx], &s->utrig[idx + 1],
+		        (size_t)(s->nutrig - idx - 1) * sizeof *s->utrig);
+		s->nutrig--;
+	}
+	return 0;
+}
+
+int
+bd_session_user_trigger_count(const bd_session *s)
+{
+	return s ? s->nutrig : 0;
+}
+
+int
+bd_session_save_triggers(bd_session *s)
+{
+	char path[1024], dir[1024], *slash;
+	bd_csv_w *w;
+	const char *csv;
+	size_t len;
+	FILE *f;
+	int i;
+
+	if (!s || profile_file_path(s, "triggers.csv", path, sizeof path) != 0)
+		return -1;
+
+	w = bd_csv_w_new();
+	if (!w)
+		return -1;
+	bd_csv_w_field(w, "type");
+	bd_csv_w_field(w, "pattern");
+	bd_csv_w_field(w, "body");
+	bd_csv_w_field(w, "class");
+	bd_csv_w_field(w, "priority");
+	bd_csv_w_field(w, "stop");
+	bd_csv_w_endrow(w);
+	for (i = 0; i < s->nutrig; i++) {
+		char num[16];
+		const struct user_trig *u = &s->utrig[i];
+		bd_csv_w_field(w, trig_type_name(u->type));
+		bd_csv_w_field(w, u->pattern);
+		bd_csv_w_field(w, u->body);
+		bd_csv_w_field(w, u->cls);
+		snprintf(num, sizeof num, "%d", u->priority);
+		bd_csv_w_field(w, num);
+		snprintf(num, sizeof num, "%d", u->stop ? 1 : 0);
+		bd_csv_w_field(w, num);
+		bd_csv_w_endrow(w);
+	}
+	csv = bd_csv_w_str(w, &len);
+
+	snprintf(dir, sizeof dir, "%s", path);
+	slash = strrchr(dir, '/');
+	if (slash) {
+		*slash = '\0';
+		mkdir_p(dir);
+	}
+	f = fopen(path, "wb");
+	if (!f) {
+		bd_csv_w_free(w);
+		return -1;
+	}
+	fwrite(csv, 1, len, f);
+	fclose(f);
+	bd_csv_w_free(w);
+	return 0;
+}
+
+/* Column index of `name` in the header row, or -1. */
+static int
+csv_col(const bd_csv *c, const char *name)
+{
+	int n = bd_csv_cols(c, 0), i;
+	for (i = 0; i < n; i++) {
+		const char *h = bd_csv_get(c, 0, i);
+		if (h && strcmp(h, name) == 0)
+			return i;
+	}
+	return -1;
+}
+
+int
+bd_session_load_triggers(bd_session *s)
+{
+	char path[1024];
+	FILE *f;
+	long sz;
+	char *buf;
+	size_t got;
+	bd_csv *c;
+	int col_type, col_pat, col_body, col_cls, col_prio, col_stop;
+	int rows, r, loaded = 0;
+
+	if (!s || profile_file_path(s, "triggers.csv", path, sizeof path) != 0)
+		return 0;
+	f = fopen(path, "rb");
+	if (!f)
+		return 0;                       /* no user triggers for this profile */
+	fseek(f, 0, SEEK_END);
+	sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz <= 0) {
+		fclose(f);
+		return 0;
+	}
+	buf = malloc((size_t)sz);
+	if (!buf) {
+		fclose(f);
+		return -1;
+	}
+	got = fread(buf, 1, (size_t)sz, f);
+	fclose(f);
+
+	c = bd_csv_parse(buf, got);
+	free(buf);
+	if (!c)
+		return -1;
+
+	col_type = csv_col(c, "type");
+	col_pat = csv_col(c, "pattern");
+	col_body = csv_col(c, "body");
+	col_cls = csv_col(c, "class");
+	col_prio = csv_col(c, "priority");
+	col_stop = csv_col(c, "stop");
+	if (col_type < 0 || col_pat < 0) {      /* not our schema */
+		bd_csv_free(c);
+		return -1;
+	}
+
+	rows = bd_csv_rows(c);
+	for (r = 1; r < rows; r++) {
+		bd_trigger_type type;
+		const char *pat, *body, *cls, *prio, *stop;
+		if (trig_type_parse(bd_csv_get(c, r, col_type), &type) != 0)
+			continue;
+		pat = bd_csv_get(c, r, col_pat);
+		if (!pat || !*pat)
+			continue;
+		body = col_body >= 0 ? bd_csv_get(c, r, col_body) : NULL;
+		cls = col_cls >= 0 ? bd_csv_get(c, r, col_cls) : NULL;
+		prio = col_prio >= 0 ? bd_csv_get(c, r, col_prio) : NULL;
+		stop = col_stop >= 0 ? bd_csv_get(c, r, col_stop) : NULL;
+		if (bd_session_user_trigger_add(s, type, pat, body, cls,
+		                                prio ? atoi(prio) : -1,
+		                                stop ? atoi(stop) : 0) == 0)
+			loaded++;
+	}
+	bd_csv_free(c);
+	return loaded;
 }
 
 bd_triggers *
