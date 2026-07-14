@@ -44,11 +44,14 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-**Status:** Phases 0, 1, 2 and 4 are done (connect + edit-profile reworks, the
-Settings dialog, per-profile autoreconnect/term-type, the live trigger editor,
-and the export column-filter + import-collision dialogs). Phase 3's colour chooser is done (a
-reusable `BD_COLORPICK` widget + an app dialog); the file chooser is the
-remaining work.
+**Status:** All phases (0-4) are done. Phase 0 (modal ergonomics), Phase 1 (form
+controls + the overlay primitive), Phase 2 (the `bd_dialog` helper), Phase 3 (the
+`BD_COLORPICK` colour chooser and the file chooser), and Phase 4 (the app
+dialogs: connect + edit-profile reworks, Settings, per-profile
+autoreconnect/term-type, the live trigger editor, export column-filter,
+import-collision, and the colour + file choosers wired in). Follow-ups noted
+below: trigger persistence, profile `encoding` wiring, and optional modal
+stacking so choosers can layer over another dialog.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -110,8 +113,14 @@ first-field focus) and demoed by the gallery's "Dialog..." button.
 
 Built from the above, no new backend capability:
 
-- **File chooser** — a `BD_TREE` or list of entries + a path field + Open/Cancel.
-  For import CSV and the `on_connect` script path. (Not built yet.)
+- [x] **File chooser** — an app dialog (filesystem enumeration keeps the toolkit
+  host-neutral): a current-directory label, a `BD_LIST` of entries (directories
+  first, marked with a trailing `/`; `..` to go up), and a name field, over
+  `dirent`/`realpath`. `open_file_chooser(cb)` hands the joined path to a
+  callback, so it is reusable. Wired as File > Import profiles..., which browses
+  to a CSV and runs it through the importer (collision dialog included). Opened
+  as a standalone flow, not stacked over the connect dialog (one modal at a
+  time). The `on_connect` script path could reuse it later.
 - [x] **Color chooser** — shipped as a reusable `BD_COLORPICK` widget
   (`bd_widget_colorpick.*`): a saturation/value square, a hue bar, a live swatch,
   and a preset row, drawn as flat-cell gradients (no shader, backend-neutral),

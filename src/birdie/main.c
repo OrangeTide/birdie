@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 static bd_id status_label;              /* connection status, in the sidebar */
 static bd_id mud_label;                 /* current MUD name, in the sidebar */
@@ -55,6 +56,17 @@ static char imp_msg_buf[160];
 /* colour picker dialog: pick a colour, read its hex + #highlight SGR string */
 static bd_dialog *color_dlg;
 static bd_id color_pick, color_hex, color_sgr;
+
+/* file chooser dialog: browse directories, pick a file (callback gets its path) */
+#define FC_PATH  4096              /* a canonical path (PATH_MAX) */
+#define FC_JOIN  (FC_PATH + 300)   /* dir + '/' + a 255-byte name, no truncation */
+#define FC_MAX   400
+static bd_dialog *file_dlg;
+static bd_id file_list, file_dir_label, file_name_field;
+static char file_cwd[FC_PATH];
+static struct fentry { char name[256]; int is_dir; } file_entries[FC_MAX];
+static int file_nentries;
+static void (*file_on_pick)(const char *path);
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
@@ -693,12 +705,12 @@ merge_profiles(bd_profiles *dst, bd_profiles *src, int policy)
 
 /* ---- import a CSV file, resolving name collisions ---- */
 
-/* Import a local CSV file (path from the import field): parse into a scratch
- * store, and if any name already exists ask how to resolve it, else merge. */
+/* Import a local CSV file at `path`: parse into a scratch store, and if any name
+ * already exists ask how to resolve it, else merge. Shared by the import field
+ * and the file chooser. */
 static void
-on_import(bd_id id, void *arg)
+do_import(const char *path)
 {
-	const char *path = bd_get_s(import_path, BD_LABEL_S);
 	char line[200];
 	FILE *f;
 	long sz;
@@ -706,8 +718,6 @@ on_import(bd_id id, void *arg)
 	size_t got;
 	int n, coll;
 	bd_profiles *scratch;
-	(void)id;
-	(void)arg;
 
 	if (!path || !path[0]) {
 		bd_terminal_write(terminal,
@@ -772,6 +782,15 @@ on_import(bd_id id, void *arg)
 	bd_set(imp_msg, BD_LABEL_S, imp_msg_buf, BD_END);
 	bd_radio_set(imp_policy, IMP_OVERWRITE);
 	bd_dialog_open(import_dlg);
+}
+
+/* Import button in the connect dialog: import the path typed in the field. */
+static void
+on_import(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	do_import(bd_get_s(import_path, BD_LABEL_S));
 }
 
 /* Apply the chosen collision policy to the held rows. */
@@ -997,6 +1016,139 @@ on_settings_save(bd_id panel, void *arg)
 	bd_modal_close(panel);
 }
 
+/* ---- file chooser (browse to a file, hand its path to a callback) ---- */
+
+/* directories first, then case-sensitive by name */
+static int
+fentry_cmp(const void *a, const void *b)
+{
+	const struct fentry *x = a, *y = b;
+	if (x->is_dir != y->is_dir)
+		return y->is_dir - x->is_dir;
+	return strcmp(x->name, y->name);
+}
+
+/* List `dir` into the widget: resolve it, read its entries (dirs marked with a
+ * trailing '/'), sort, and update the path label. Keeps the old view on error. */
+static void
+file_scan(const char *dir)
+{
+	char *real = realpath(dir, NULL);   /* canonicalises "..", must exist */
+	DIR *d;
+	struct dirent *de;
+	static char items[FC_MAX * 260];
+	size_t off = 0;
+	int i;
+
+	if (!real)
+		return;
+	d = opendir(real);
+	if (!d) {
+		free(real);
+		return;
+	}
+	snprintf(file_cwd, sizeof file_cwd, "%s", real);
+	free(real);
+
+	file_nentries = 0;
+	while ((de = readdir(d)) && file_nentries < FC_MAX) {
+		char full[FC_JOIN];
+		struct stat st;
+		if (!strcmp(de->d_name, "."))
+			continue;                   /* keep ".." so the user can go up */
+		snprintf(full, sizeof full, "%s/%s", file_cwd, de->d_name);
+		file_entries[file_nentries].is_dir =
+		    (stat(full, &st) == 0 && S_ISDIR(st.st_mode));
+		snprintf(file_entries[file_nentries].name,
+		    sizeof file_entries[0].name, "%s", de->d_name);
+		file_nentries++;
+	}
+	closedir(d);
+	qsort(file_entries, file_nentries, sizeof file_entries[0], fentry_cmp);
+
+	for (i = 0; i < file_nentries && off < sizeof items - 1; i++) {
+		int wrote = snprintf(items + off, sizeof items - off, "%s%s%s",
+		    i ? "\n" : "", file_entries[i].name,
+		    file_entries[i].is_dir ? "/" : "");
+		if (wrote < 0)
+			break;
+		off += (size_t)wrote;
+	}
+	items[off < sizeof items ? off : sizeof items - 1] = '\0';
+	bd_list_set_items(file_list, items);
+	bd_set(file_dir_label, BD_LABEL_S, file_cwd, BD_END);
+}
+
+/* Activate (double-click / Enter) a list row: descend into a directory, or put
+ * a file's name in the name field. */
+static void
+on_file_activate(bd_id id, void *arg)
+{
+	int idx = bd_list_selected(file_list);
+	(void)id;
+	(void)arg;
+	if (idx < 0 || idx >= file_nentries)
+		return;
+	if (file_entries[idx].is_dir) {
+		char path[FC_JOIN];
+		snprintf(path, sizeof path, "%s/%s", file_cwd,
+		    file_entries[idx].name);
+		file_scan(path);
+	} else {
+		bd_set(file_name_field, BD_LABEL_S, file_entries[idx].name, BD_END);
+	}
+}
+
+/* Open: use the name field, or fall back to the list's selection (Enter fires
+ * this before the list's own activation). A selected directory is entered
+ * instead (the dialog stays open); a file's path is handed to the callback.
+ * The dialog closes first so the callback may open its own modal. */
+static void
+on_file_open(bd_id panel, void *arg)
+{
+	const char *name = bd_get_s(file_name_field, BD_LABEL_S);
+	static char full[FC_JOIN];
+	void (*cb)(const char *) = file_on_pick;
+	(void)arg;
+	if (!name || !name[0]) {            /* no typed name: use the list row */
+		int idx = bd_list_selected(file_list);
+		if (idx < 0 || idx >= file_nentries)
+			return;
+		if (file_entries[idx].is_dir) {
+			char path[FC_JOIN];
+			snprintf(path, sizeof path, "%s/%s", file_cwd,
+			    file_entries[idx].name);
+			file_scan(path);            /* enter it, keep the dialog open */
+			return;
+		}
+		name = file_entries[idx].name;
+	}
+	snprintf(full, sizeof full, "%s/%s", file_cwd, name);
+	bd_modal_close(panel);
+	if (cb)
+		cb(full);
+}
+
+/* Open the chooser, starting in the last directory (or $HOME), for callback cb. */
+static void
+open_file_chooser(void (*cb)(const char *path))
+{
+	const char *start = file_cwd[0] ? file_cwd : getenv("HOME");
+	file_on_pick = cb;
+	bd_set(file_name_field, BD_LABEL_S, "", BD_END);
+	file_scan(start && *start ? start : ".");
+	bd_dialog_open(file_dlg);
+}
+
+/* File > Import profiles...: browse to a CSV and run it through the importer. */
+static void
+on_import_browse(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	open_file_chooser(do_import);
+}
+
 /* ---- colour picker (compose a #highlight colour) ---- */
 
 /* Refresh the hex and SGR readouts from a packed colour. */
@@ -1204,6 +1356,8 @@ init(void)
 	bd_id m_file = bd_create(menu, BD_MENU, BD_LABEL_S, "File", BD_END);
 	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "New", BD_END);
 	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Open...", BD_END);
+	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Import profiles...",
+		BD_ON_CLICK_F, on_import_browse, BD_END);
 	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Save", BD_END);
 	bd_create(m_file, BD_BUTTON, BD_LABEL_S, "Quit",
 		BD_ON_CLICK_F, on_quit, BD_END);
@@ -1418,6 +1572,20 @@ init(void)
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	bd_dialog_button(color_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
 
+	/* the file chooser: a current-directory label, a list of entries (double-
+	 * click a dir to descend, a file to select it), and a name field. Open
+	 * hands the joined path to whatever callback open_file_chooser was given. */
+	file_dlg = bd_dialog_create("Open file", 460, 380);
+	bd_id fbody = bd_dialog_content(file_dlg);
+	file_dir_label = bd_create(fbody, BD_LABEL, BD_LABEL_S, "", BD_PREF_H_I, 18,
+		BD_END);
+	file_list = bd_create(fbody, BD_LIST, BD_GROW_I, 1,
+		BD_ON_CLICK_F, on_file_activate, BD_END);
+	file_name_field = bd_create(bd_dialog_field(file_dlg, "File"), BD_INPUT_LINE,
+		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	bd_dialog_button(file_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(file_dlg, "Open", BD_DIALOG_DEFAULT, on_file_open, NULL);
+
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
 		connect_profile(active);
@@ -1450,8 +1618,9 @@ cleanup(void)
 	bd_dialog_free(export_dlg);
 	bd_dialog_free(import_dlg);
 	bd_dialog_free(color_dlg);
+	bd_dialog_free(file_dlg);
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
-	export_dlg = import_dlg = color_dlg = NULL;
+	export_dlg = import_dlg = color_dlg = file_dlg = NULL;
 	bd_gui_cleanup();
 }
 
