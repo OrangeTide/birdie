@@ -33,6 +33,7 @@ Each `module.mk` declares targets via `EXECUTABLES`, `LIBRARIES`, and
 - `samples/demo03_text_dialogs/` — Font rendering + dialog box UI
 - `samples/demo04_sprites/` — Sprite rendering demo
 - `samples/demo08_picking/` — 3D color-id picking via offscreen render target (automatable; `--selftest`)
+- `samples/cliptest/` — clipboard copy/paste demo and cross-client round-trip self-test (`--selftest`)
 - `samples/demo05_audio/` — Multi-channel audio mixer demo
 - `samples/lilpc/` — 286 XT PC emulator with CGA display
 - `samples/tridrop/` — Triangle drop demo
@@ -144,6 +145,14 @@ Polled: `lud_key_down()`, `lud_mouse_pos()`, `lud_mouse_button_down()`,
 
 Gamepad axes have a rescaled dead zone (default 0.15), tunable via
 `lud_gamepad_set_deadzone()` / `lud_gamepad_deadzone()`.
+
+Clipboard: `lud_clipboard_get_text()` / `lud_clipboard_set_text()` for
+synchronous UTF-8 text (get returns a malloc'd string the caller frees;
+NULL on empty/timeout). `lud_clipboard_get_async(format, cb, user)` reads
+without blocking and delivers via callback during event processing; one
+request at a time. The `format` argument (e.g. `LUD_CLIPBOARD_TEXT`) leaves
+room for non-text targets later. X11 uses the CLIPBOARD selection; Emscripten
+is a stub (browser clipboard is permission-gated).
 
 ## Adding a New Sample Program
 
