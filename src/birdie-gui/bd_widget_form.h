@@ -49,4 +49,21 @@ bd_id bd_radio_create(bd_id parent, const bd_radio_desc *desc, ...);
 void  bd_radio_set(bd_id id, int index);   /* no callback */
 int   bd_radio_get(bd_id id);
 
+/* ---- numeric spinner: an integer field with up/down steppers ---- */
+
+typedef void (*bd_spinner_cb)(bd_id id, void *arg, int value);
+
+typedef struct bd_spinner_desc {
+    int             min;     /* inclusive lower bound (default 0) */
+    int             max;     /* inclusive upper bound; <= min means "no cap" */
+    int             step;    /* per stepper-click / arrow-key delta (default 1) */
+    int             value;   /* initial value (clamped into range) */
+    bd_spinner_cb   cb;      /* fired when the value changes */
+    void           *arg;
+} bd_spinner_desc;
+
+bd_id bd_spinner_create(bd_id parent, const bd_spinner_desc *desc, ...);
+void  bd_spinner_set(bd_id id, int value);   /* clamp to range; no callback */
+int   bd_spinner_get(bd_id id);
+
 #endif /* BD_WIDGET_FORM_H */

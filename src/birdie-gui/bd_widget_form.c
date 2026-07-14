@@ -10,6 +10,8 @@
 #include "bd_draw.h"
 #include <stdarg.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <limits.h>
 #include <math.h>
 
 #define BOX_GAP  6   /* px between the box and its label */
@@ -380,4 +382,151 @@ bd_radio_get(bd_id id)
     if (bd_widget_type(id) != radio_type)
         return -1;
     return ((struct radio *)bd_widget_state(id))->sel;
+}
+
+/* ================================================================== */
+/* numeric spinner                                                    */
+/* ================================================================== */
+
+#define SPIN_W  16   /* width of the stepper column on the right */
+
+struct spinner {
+    int           min, max, step, val;
+    bd_spinner_cb cb;
+    void         *arg;
+};
+
+static int spinner_type;
+
+static int
+spin_clamp(struct spinner *s, int v)
+{
+    if (v < s->min) v = s->min;
+    if (v > s->max) v = s->max;
+    return v;
+}
+
+static void
+spinner_init(bd_id id, void *state)
+{
+    (void)state;
+    bd_set(id, BD_PREF_H_I, (int)bd_draw_line_height() + 8,
+           BD_PREF_W_I, 72, BD_END);
+}
+
+static void
+spin_setval(bd_id id, struct spinner *s, int v)
+{
+    v = spin_clamp(s, v);
+    if (v == s->val)
+        return;
+    s->val = v;
+    if (s->cb)
+        s->cb(id, s->arg, v);
+}
+
+static void
+spinner_render(bd_id id, void *state)
+{
+    struct spinner *s = state;
+    const bd_theme *th = bd_gui_theme();
+    int x, y, w, h;
+    bd_widget_rect(id, &x, &y, &w, &h);
+    int sx = x + w - SPIN_W;   /* stepper column left edge */
+
+    /* recessed value field + focus ring */
+    bd_draw_rect((float)x, (float)y, (float)w, (float)h, th->press);
+    bd_draw_rect_lines((float)x, (float)y, (float)w, (float)h,
+        bd_focused() == id ? th->focus : th->border);
+
+    char buf[16];
+    snprintf(buf, sizeof buf, "%d", s->val);
+    float ty = y + (h - bd_draw_line_height()) * 0.5f;
+    bd_draw_text(buf, (float)(x + 6), ty, th->text_hi);
+
+    /* stepper column: a divider, an up triangle over a down triangle */
+    bd_draw_rect((float)sx, (float)y, (float)SPIN_W, (float)h, th->widget);
+    bd_draw_rect_lines((float)sx, (float)y, (float)SPIN_W, (float)h, th->border);
+    float cx = sx + SPIN_W * 0.5f;
+    float uy = y + h * 0.25f, dy = y + h * 0.75f;
+    bd_draw_quad(cx - 3, uy + 2, cx + 3, uy + 2, cx, uy - 2, cx, uy - 2,
+        th->text);              /* up */
+    bd_draw_quad(cx - 3, dy - 2, cx + 3, dy - 2, cx, dy + 2, cx, dy + 2,
+        th->text);              /* down */
+    bd_draw_rect((float)sx, (float)(y + h / 2), (float)SPIN_W, 1.0f, th->border);
+}
+
+static int
+spinner_event(bd_id id, void *state, const bd_event *ev)
+{
+    struct spinner *s = state;
+    if (ev->type == BD_EV_MOUSE_DOWN && ev->button == BD_MOUSE_LEFT) {
+        int x, y, w, h;
+        bd_widget_rect(id, &x, &y, &w, &h);
+        if (ev->x >= x + w - SPIN_W)        /* in the stepper column */
+            spin_setval(id, s, s->val + (ev->y < y + h / 2 ? s->step : -s->step));
+        return 1;
+    }
+    if (ev->type == BD_EV_KEY_DOWN) {
+        if (ev->key == BD_KEY_UP)   { spin_setval(id, s, s->val + s->step); return 1; }
+        if (ev->key == BD_KEY_DOWN) { spin_setval(id, s, s->val - s->step); return 1; }
+        if (ev->key == BD_KEY_BACKSPACE) { spin_setval(id, s, s->val / 10); return 1; }
+    }
+    if (ev->type == BD_EV_CHAR && ev->codepoint >= '0' && ev->codepoint <= '9') {
+        int d = (int)ev->codepoint - '0';
+        /* accumulate digits, guarding the multiply against overflow */
+        long v = (long)s->val * 10 + d;
+        if (v > INT_MAX) v = INT_MAX;
+        spin_setval(id, s, (int)v);
+        return 1;
+    }
+    return 0;
+}
+
+static const bd_widget_class spinner_class = {
+    .name = "spinner",
+    .state_size = sizeof(struct spinner),
+    .init = spinner_init,
+    .render = spinner_render,
+    .event = spinner_event,
+};
+
+bd_id
+bd_spinner_create(bd_id parent, const bd_spinner_desc *desc, ...)
+{
+    if (spinner_type == 0)
+        spinner_type = bd_register_widget_class(&spinner_class);
+
+    va_list ap;
+    va_start(ap, desc);
+    bd_id id = bd_create_va(parent, spinner_type, ap);
+    va_end(ap);
+
+    struct spinner *s = bd_widget_state(id);
+    if (s && desc) {
+        s->min = desc->min;
+        s->max = desc->max > desc->min ? desc->max : INT_MAX;
+        s->step = desc->step > 0 ? desc->step : 1;
+        s->val = spin_clamp(s, desc->value);
+        s->cb = desc->cb;
+        s->arg = desc->arg;
+    }
+    return id;
+}
+
+void
+bd_spinner_set(bd_id id, int value)
+{
+    if (bd_widget_type(id) != spinner_type)
+        return;
+    struct spinner *s = bd_widget_state(id);
+    s->val = spin_clamp(s, value);
+}
+
+int
+bd_spinner_get(bd_id id)
+{
+    if (bd_widget_type(id) != spinner_type)
+        return 0;
+    return ((struct spinner *)bd_widget_state(id))->val;
 }

@@ -319,6 +319,8 @@ static int rad_n, rad_last;
 static void on_rad(bd_id id, void *a, int idx){ (void)id; (void)a; rad_n++; rad_last = idx; }
 static int cmb_n, cmb_last;
 static void on_cmb(bd_id id, void *a, int idx){ (void)id; (void)a; cmb_n++; cmb_last = idx; }
+static int spn_n, spn_last;
+static void on_spn(bd_id id, void *a, int v){ (void)id; (void)a; spn_n++; spn_last = v; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2184,6 +2186,57 @@ main(void)
 	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=qx+qw/2, .y=qy+qh/2 });
 	bd_gui_render();   /* render with the list open */
 	check("combo renders (open) without crashing", bd_overlay_owner() == co);
+	bd_gui_cleanup();
+	}
+
+	/* ---- numeric spinner form control ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	spn_n = 0; spn_last = -1;
+	bd_id sp = bd_spinner_create(fr, &(bd_spinner_desc){
+	    .min = 0, .max = 9, .step = 1, .value = 3, .cb = on_spn }, BD_END);
+	bd_gui_layout(400, 300);
+	check("spinner starts at its initial value", bd_spinner_get(sp) == 3);
+
+	int px, py, pw, ph;
+	bd_widget_rect(sp, &px, &py, &pw, &ph);
+	/* click the up stepper (top-right corner) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=px+pw-4, .y=py+2 });
+	check("clicking up increments and fires",
+	    bd_spinner_get(sp) == 4 && spn_n == 1 && spn_last == 4);
+	check("clicking a stepper focuses the spinner", bd_focused() == sp);
+	/* click the down stepper (bottom-right corner) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=px+pw-4, .y=py+ph-2 });
+	check("clicking down decrements", bd_spinner_get(sp) == 3 && spn_last == 3);
+
+	/* arrow keys step too, and clamp at the bounds */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP });
+	check("Up arrow steps up", bd_spinner_get(sp) == 4);
+	for (int i = 0; i < 10; i++)
+	    bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP });
+	check("stepping up clamps at max", bd_spinner_get(sp) == 9);
+	for (int i = 0; i < 20; i++)
+	    bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	check("stepping down clamps at min", bd_spinner_get(sp) == 0);
+
+	/* digit entry accumulates, clamped to range */
+	spn_n = 0;
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='7' });
+	check("typing a digit sets the value", bd_spinner_get(sp) == 7 && spn_last == 7);
+	bd_gui_event(&(bd_event){ .type=BD_EV_CHAR, .codepoint='9' });
+	check("further digits accumulate but clamp to max", bd_spinner_get(sp) == 9);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_BACKSPACE });
+	check("Backspace drops the last digit", bd_spinner_get(sp) == 0);
+
+	bd_spinner_set(sp, 5);
+	int before = spn_n;
+	check("bd_spinner_set updates without firing", bd_spinner_get(sp) == 5 && spn_n == before);
+	bd_spinner_set(sp, 100);
+	check("bd_spinner_set clamps to max", bd_spinner_get(sp) == 9);
+
+	bd_gui_render();
+	check("spinner renders without crashing", 1);
 	bd_gui_cleanup();
 	}
 

@@ -194,6 +194,15 @@ on_combo(bd_id id, void *arg, int idx)
 }
 
 static void
+on_spinner(bd_id id, void *arg, int value)
+{
+	(void)id; (void)arg;
+	static char msg[32];
+	snprintf(msg, sizeof msg, "Port: %d", value);
+	report(msg);
+}
+
+static void
 on_xy(bd_id id, void *arg, float x, float y)
 {
 	(void)id;
@@ -683,6 +692,9 @@ build_ui(void)
 	bd_combo_create(srow, &(bd_combo_desc){ .items = enc_opts, .count = 4,
 		.selected = 0, .placeholder = "Encoding", .cb = on_combo },
 		BD_PREF_W_I, 100, BD_END);
+	/* numeric spinner (steppers, arrow keys, digit entry) */
+	bd_spinner_create(srow, &(bd_spinner_desc){ .min = 1, .max = 65535,
+		.step = 1, .value = 4000, .cb = on_spinner }, BD_PREF_W_I, 76, BD_END);
 
 	/* indicator lamps: LEDs (clear/frosted/jewel lens), a bi-color, and a
 	 * clickable lamp button that cycles off/red/green/amber */
