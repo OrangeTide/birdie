@@ -56,6 +56,7 @@ static char imp_msg_buf[160];
 /* colour picker dialog: pick a colour, read its hex + #highlight SGR string */
 static bd_dialog *color_dlg;
 static bd_id color_pick, color_hex, color_sgr;
+static void (*color_on_pick)(const char *sgr);   /* Use hands back the SGR */
 
 /* file chooser dialog: browse directories, pick a file (callback gets its path) */
 #define FC_PATH  4096              /* a canonical path (PATH_MAX) */
@@ -1188,13 +1189,38 @@ on_color_change(bd_id id, void *arg, uint32_t rgba)
 	color_fields_update(rgba);
 }
 
+/* Open the picker; a non-NULL cb receives the chosen colour's SGR from Use. */
+static void
+open_color_chooser(void (*cb)(const char *sgr))
+{
+	color_on_pick = cb;
+	color_fields_update(bd_colorpick_get(color_pick));
+	bd_dialog_open(color_dlg);
+}
+
+/* Use: hand the current colour's #highlight SGR to the pending callback. The
+ * dialog closes first (it may be stacked over the dialog the callback fills). */
+static void
+on_color_use(bd_id panel, void *arg)
+{
+	static char sgr[32];
+	uint32_t rgba = bd_colorpick_get(color_pick);
+	void (*cb)(const char *) = color_on_pick;
+	unsigned r = (rgba >> 24) & 0xFF, g = (rgba >> 16) & 0xFF, b = (rgba >> 8) & 0xFF;
+	(void)arg;
+	snprintf(sgr, sizeof sgr, "38;2;%u;%u;%u", r, g, b);
+	bd_modal_close(panel);
+	if (cb)
+		cb(sgr);
+}
+
+/* Edit > Colour picker...: standalone, just to read the hex / SGR to copy. */
 static void
 on_open_color(bd_id id, void *arg)
 {
 	(void)id;
 	(void)arg;
-	color_fields_update(bd_colorpick_get(color_pick));
-	bd_dialog_open(color_dlg);
+	open_color_chooser(NULL);
 }
 
 /* ---- trigger editor (live: edits the current session's trigger table) ----
@@ -1330,6 +1356,24 @@ on_trig_remove(bd_id id, void *arg)
 	struct trig_row *r = &trig_rows[sel];
 	bd_trigger_remove_pattern(t, r->type, r->pattern, r->cls[0] ? r->cls : NULL);
 	trig_reload();
+}
+
+/* Fill the add form with a highlight from the picked colour: the SGR as the
+ * body, and the type switched to Highlight (its enum is the combo index). */
+static void
+trig_body_from_color(const char *sgr)
+{
+	bd_set(trig_body, BD_LABEL_S, sgr, BD_END);
+	bd_combo_set(trig_type, BD_TRIG_HILITE);
+}
+
+/* Colour... in the trigger editor: open the picker stacked over it. */
+static void
+on_trig_pick_color(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	open_color_chooser(trig_body_from_color);
 }
 
 static void
@@ -1534,6 +1578,8 @@ init(void)
 	bd_create(trow2, BD_LABEL, BD_LABEL_S, "Body", BD_PREF_W_I, 40, BD_END);
 	trig_body = bd_create(trow2, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3,
 		BD_END);
+	bd_create(trow2, BD_BUTTON, BD_LABEL_S, "Colour...", BD_PREF_W_I, 78,
+		BD_ON_CLICK_F, on_trig_pick_color, BD_END);
 	/* row 3: class + priority + stop */
 	bd_id trow3 = bd_create(tbody, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
 		BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
@@ -1590,6 +1636,7 @@ init(void)
 	color_sgr = bd_create(bd_dialog_field(color_dlg, "Highlight"), BD_INPUT_LINE,
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	bd_dialog_button(color_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(color_dlg, "Use", BD_DIALOG_DEFAULT, on_color_use, NULL);
 
 	/* the file chooser: a current-directory label, a list of entries (double-
 	 * click a dir to descend, a file to select it), and a name field. Open

@@ -51,8 +51,10 @@ dialogs: connect + edit-profile reworks, Settings, per-profile
 autoreconnect/term-type, the live trigger editor, export column-filter,
 import-collision, and the colour + file choosers wired in). Modals now **stack**,
 so a chooser opens over another dialog: the connect dialog's Browse... opens the
-file chooser on top of it and drops the picked path into the import field.
-Remaining follow-ups: trigger persistence and profile `encoding` wiring.
+file chooser on top of it and drops the picked path into the import field, and
+the trigger editor's Colour... opens the colour picker on top of it and fills the
+body with the highlight SGR. Remaining follow-ups: trigger persistence and
+profile `encoding` wiring.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
