@@ -44,7 +44,9 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-### Phase 0 — modal ergonomics (small, in core `widget.c`)
+**Status:** Phase 0 and Phase 1 are done. Phases 2-4 remain.
+
+### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
 Extend the modal layer, not replace it:
 
@@ -52,24 +54,31 @@ Extend the modal layer, not replace it:
 - **Initial focus.** Focus `focus` if given, else the first focusable descendant, so the user can type immediately.
 - No change to dimming / centering / routing.
 
-### Phase 1 — form controls (the blocking gap; extension widgets)
+### Phase 1 — form controls (the blocking gap; extension widgets) — DONE
 
-Ordered by dependency and value:
+Shipped as `bd_widget_form.{c,h}` (checkbox, radio, spinner) and
+`bd_widget_combo.{c,h}` (the drop-down, separate because it opens a popup):
 
-1. **`BD_CHECKBOX`** — labeled boolean for forms. Decide: restyle the sliding
-   toggle as a check, or a distinct box+tick widget (leaning distinct: a toggle
-   reads as a switch, a form wants a checkbox). Backs the export column filter.
-2. **Radio group** — mutually-exclusive options sharing a group id; one value.
-   Backs the import-collision dialog (skip / rename / overwrite).
-3. **`BD_COMBO` / drop-down** — a button showing the current item that opens a
-   `BD_LIST` popup; select one of N. The single most-requested control (encoding
-   picker, trigger `type`, profile fields).
-4. **Numeric spinner / stepper** — an integer field with up/down steppers and
-   min/max/step; exact small integers (port, timeouts, trigger priority 0-9).
+1. **`BD_CHECKBOX`** — a distinct box+tick widget (not a restyled toggle: a
+   toggle reads as a switch, a form wants a checkbox). Toggles on click / Space.
+2. **Radio group** — one widget owning the mutually-exclusive set (so it is a
+   single Tab stop); click or arrow-key to move the selection.
+3. **`BD_COMBO` / drop-down** — a closed box with a chevron that opens a floating
+   list through the new shared overlay primitive (`bd_overlay_*`, see below), so
+   the list floats above siblings and above a dialog the combo sits in.
+4. **Numeric spinner / stepper** — an integer field with up/down steppers,
+   min/max/step, arrow-key steps, and digit entry.
 
-Each ships with: a `bd_*_desc` create, `_get`/`_set`, an `on_change` callback,
+Each ships with a `bd_*_desc` create, `_get`/`_set`, an `on_change` callback,
 keyboard support, a form-row-friendly preferred size, and headless checks in
 `test_gui`.
+
+**Shared overlay primitive.** The combo needed a top-most pop-up that escapes
+its own widget rect, so Phase 1 also added `bd_overlay_open/close/owner`
+(`widget_ext.h`): one overlay at a time, owned by an extension widget, drawn
+above every frame / modal / notice and given first crack at input (a press
+outside or an unconsumed Escape dismisses it). This is the convergence target
+noted in Scope below; the editor autocomplete can move onto it later.
 
 ### Phase 2 — dialog composition helper
 
