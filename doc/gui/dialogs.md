@@ -45,9 +45,10 @@ hand, and the form controls real dialogs need do not exist yet.
 ## 3. Build order
 
 **Status:** Phases 0, 1 and 2 are done. Phase 4 has landed the connect and
-edit-profile reworks, the app-wide Settings dialog, and the per-profile
-autoreconnect/term-type fields; its remaining net-new dialogs (trigger editor,
-export column-filter, import-collision) and Phase 3 (choosers) are still open.
+edit-profile reworks, the app-wide Settings dialog, the per-profile
+autoreconnect/term-type fields, and the live trigger editor; its remaining
+net-new dialogs (export column-filter, import-collision) and Phase 3 (choosers)
+are still open.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -133,7 +134,15 @@ Built from the above, no new backend capability:
   and a term-type field (both read by `bd_session` at connect). `encoding` was
   left out: it is a safe profile column but is not wired to any behavior yet
   (needs CHARSET/NEW_ENVIRON telopt work), and a dead control is worse than none.
-- [ ] **Trigger editor** — a combo for the trigger type, pattern/body fields, class.
+- [x] **Trigger editor** (Session > Triggers...): a `BD_TABLE` of the session's
+  triggers plus a compact add form (type combo, pattern/body/class inputs, a
+  priority spinner, a stop checkbox) and Remove-selected. It edits the **live**
+  session trigger table through the `bd_trigger_*` C API (add /
+  remove_pattern / foreach), so it works offline (the engine exists before
+  connect) and mirrors the `#action` verbs. It deliberately does **not** persist:
+  triggers live in a user-editable `triggers.lua`, and rewriting that from the
+  flat table would clobber hand-written Lua. Persisting would need a separate
+  per-profile trigger data file plus session load wiring (a future task).
 - [ ] **Export** — per-column checkboxes (`doc/profiles.md`).
 - **Import-collision** — a radio group (skip / rename / overwrite).
 

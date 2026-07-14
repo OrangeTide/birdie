@@ -10,6 +10,7 @@
 #include "bd_profile.h"
 #include "bd_telopt.h"
 #include "bd_verb.h"
+#include "bd_trigger.h"
 #include "ludica.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -30,6 +31,9 @@ static bd_id edit_name, edit_host, edit_port, edit_tls;
 static bd_id edit_reconnect, edit_termtype;
 static bd_dialog *settings_dlg;         /* app-wide preferences */
 static bd_id set_cols, set_rows, set_scheme;
+static bd_dialog *triggers_dlg;         /* live trigger editor */
+static bd_id trig_table;                /* list of the session's triggers */
+static bd_id trig_type, trig_pattern, trig_body, trig_class, trig_pri, trig_stop;
 static bd_id import_path;               /* CSV import file-path field */
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
@@ -778,6 +782,150 @@ on_settings_save(bd_id panel, void *arg)
 	bd_modal_close(panel);
 }
 
+/* ---- trigger editor (live: edits the current session's trigger table) ----
+ * Triggers are persisted in each profile's triggers.lua (a user-editable Lua
+ * script loaded when the session is created); there is no API to write them
+ * back, and rewriting the script would clobber hand-written Lua. So this editor
+ * operates on the running session only, exactly like the #action / #alias
+ * verbs: adds and removes take effect immediately and live for the life of the
+ * session (they are not saved; switching profiles rebuilds it from the script).
+ * The engine exists before connecting, so the editor works while offline. */
+
+/* combo/table order matches bd_trigger_type, so a combo index IS the enum. */
+static const char *const trig_type_labels[] = {
+	"Action", "Alias", "Prompt", "GMCP", "Gag", "Substitute", "Highlight", "MXP"
+};
+#define N_TRIG_TYPES ((int)(sizeof trig_type_labels / sizeof trig_type_labels[0]))
+
+static const char *
+trig_type_name(bd_trigger_type type)
+{
+	int i = (int)type;
+	return (i >= 0 && i < N_TRIG_TYPES) ? trig_type_labels[i] : "?";
+}
+
+/* A snapshot of one trigger, copied out of the engine so the table model can
+ * read it after bd_trigger_foreach returns (the callback strings are borrowed).*/
+struct trig_row {
+	bd_trigger_type type;
+	int             priority;
+	int             enabled;
+	char            pattern[512];
+	char            body[512];
+	char            cls[64];
+};
+static struct trig_row trig_rows[256];
+static int trig_nrows;
+
+static void
+trig_collect(bd_trigger_type type, const char *pattern, const char *body,
+             const char *cls, const char *chain, int state, int priority,
+             int enabled, void *ctx)
+{
+	struct trig_row *r;
+	(void)chain;
+	(void)state;
+	(void)ctx;
+	if (trig_nrows >= (int)(sizeof trig_rows / sizeof trig_rows[0]))
+		return;
+	r = &trig_rows[trig_nrows++];
+	r->type = type;
+	r->priority = priority;
+	r->enabled = enabled;
+	snprintf(r->pattern, sizeof r->pattern, "%s", pattern ? pattern : "");
+	snprintf(r->body, sizeof r->body, "%s", body ? body : "");
+	snprintf(r->cls, sizeof r->cls, "%s", cls ? cls : "");
+}
+
+/* Re-read the session's triggers into trig_rows and refresh the table. */
+static void
+trig_reload(void)
+{
+	bd_triggers *t = session ? bd_session_triggers(session) : NULL;
+	trig_nrows = 0;
+	if (t)
+		bd_trigger_foreach(t, trig_collect, NULL);
+	if (trig_table)
+		bd_table_refresh(trig_table);
+}
+
+static int
+trig_rows_count(void *ctx)
+{
+	(void)ctx;
+	return trig_nrows;
+}
+
+static const char *
+trig_cell(void *ctx, int row, int col)
+{
+	static char num[8];
+	(void)ctx;
+	if (row < 0 || row >= trig_nrows)
+		return "";
+	struct trig_row *r = &trig_rows[row];
+	switch (col) {
+	case 0: return trig_type_name(r->type);
+	case 1: return r->pattern;
+	case 2: return r->body;
+	case 3: return r->cls;
+	case 4: snprintf(num, sizeof num, "%d", r->priority); return num;
+	case 5: return r->enabled ? "yes" : "no";
+	}
+	return "";
+}
+
+static void
+on_trig_add(bd_id id, void *arg)
+{
+	bd_triggers *t = session ? bd_session_triggers(session) : NULL;
+	const char *pat = bd_get_s(trig_pattern, BD_LABEL_S);
+	const char *body = bd_get_s(trig_body, BD_LABEL_S);
+	const char *cls = bd_get_s(trig_class, BD_LABEL_S);
+	int ti = bd_combo_get(trig_type);
+	(void)id;
+	(void)arg;
+	if (!t) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** no active session to add a trigger to\033[0m\r\n", -1);
+		return;
+	}
+	if (!pat || !pat[0]) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** a trigger needs a pattern\033[0m\r\n", -1);
+		return;
+	}
+	bd_trigger_add(t, (bd_trigger_type)(ti >= 0 ? ti : 0), pat, body,
+	    (cls && cls[0]) ? cls : NULL, bd_spinner_get(trig_pri),
+	    bd_checkbox_get(trig_stop));
+	bd_set(trig_pattern, BD_LABEL_S, "", BD_END);   /* ready for the next add */
+	bd_set(trig_body, BD_LABEL_S, "", BD_END);
+	trig_reload();
+}
+
+static void
+on_trig_remove(bd_id id, void *arg)
+{
+	bd_triggers *t = session ? bd_session_triggers(session) : NULL;
+	int sel = trig_table ? bd_table_current(trig_table) : -1;
+	(void)id;
+	(void)arg;
+	if (!t || sel < 0 || sel >= trig_nrows)
+		return;
+	struct trig_row *r = &trig_rows[sel];
+	bd_trigger_remove_pattern(t, r->type, r->pattern, r->cls[0] ? r->cls : NULL);
+	trig_reload();
+}
+
+static void
+on_open_triggers(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	trig_reload();
+	bd_dialog_open(triggers_dlg);
+}
+
 static void
 init(void)
 {
@@ -825,6 +973,8 @@ init(void)
 		BD_ON_CLICK_F, on_open_connect, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Disconnect",
 		BD_ON_CLICK_F, on_disconnect, BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Triggers...",
+		BD_ON_CLICK_F, on_open_triggers, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Reload Script",
 		BD_ON_CLICK_F, on_reload_script, BD_END);
 
@@ -929,6 +1079,53 @@ init(void)
 	bd_dialog_button(settings_dlg, "Save", BD_DIALOG_DEFAULT,
 		on_settings_save, NULL);
 
+	/* the live trigger editor: a table of the session's triggers plus a compact
+	 * add form. Add is the default button (Enter adds and keeps the dialog open;
+	 * a trigger pattern typed in a field confirms with Enter), Close cancels. */
+	triggers_dlg = bd_dialog_create("Triggers (this session)", 620, 380);
+	bd_id tbody = bd_dialog_content(triggers_dlg);
+	static const bd_table_column tcols[] = {
+		{ "Type",    64, BD_TABLE_LEFT,  0 },
+		{ "Pattern", 0,  BD_TABLE_LEFT,  0 },
+		{ "Body",    0,  BD_TABLE_LEFT,  0 },
+		{ "Class",   80, BD_TABLE_LEFT,  0 },
+		{ "Pri",     34, BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
+		{ "On",      32, BD_TABLE_CENTER, BD_TABLE_COL_NOSORT },
+	};
+	trig_table = bd_table_create(tbody, tcols, 6,
+		&(bd_table_model){ trig_rows_count, trig_cell, NULL }, NULL,
+		BD_GROW_I, 1, BD_END);
+	bd_create(tbody, BD_BUTTON, BD_LABEL_S, "Remove selected", BD_PREF_H_I, 26,
+		BD_ON_CLICK_F, on_trig_remove, BD_END);
+	/* add form, row 1: type + pattern */
+	bd_id trow1 = bd_create(tbody, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
+	trig_type = bd_combo_create(trow1, &(bd_combo_desc){
+		.items = trig_type_labels, .count = N_TRIG_TYPES, .selected = 0 },
+		BD_PREF_W_I, 110, BD_END);
+	trig_pattern = bd_create(trow1, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3,
+		BD_END);
+	/* row 2: body */
+	bd_id trow2 = bd_create(tbody, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
+	bd_create(trow2, BD_LABEL, BD_LABEL_S, "Body", BD_PREF_W_I, 40, BD_END);
+	trig_body = bd_create(trow2, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3,
+		BD_END);
+	/* row 3: class + priority + stop */
+	bd_id trow3 = bd_create(tbody, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 28, BD_GAP_I, 6, BD_END);
+	bd_create(trow3, BD_LABEL, BD_LABEL_S, "Class", BD_PREF_W_I, 40, BD_END);
+	trig_class = bd_create(trow3, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3,
+		BD_END);
+	bd_create(trow3, BD_LABEL, BD_LABEL_S, "Pri", BD_PREF_W_I, 26, BD_END);
+	trig_pri = bd_spinner_create(trow3, &(bd_spinner_desc){
+		.min = 0, .max = 9, .value = BD_TRIG_PRIO_DEFAULT }, BD_PREF_W_I, 64,
+		BD_END);
+	trig_stop = bd_checkbox_create(trow3, &(bd_checkbox_desc){ .label = "Stop" },
+		BD_PREF_W_I, 70, BD_END);
+	bd_dialog_button(triggers_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(triggers_dlg, "Add", BD_DIALOG_DEFAULT, on_trig_add, NULL);
+
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
 		connect_profile(active);
@@ -953,7 +1150,8 @@ cleanup(void)
 	bd_dialog_free(connect_dlg);    /* before bd_gui_cleanup frees the pool */
 	bd_dialog_free(edit_dlg);
 	bd_dialog_free(settings_dlg);
-	connect_dlg = edit_dlg = settings_dlg = NULL;
+	bd_dialog_free(triggers_dlg);
+	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
 	bd_gui_cleanup();
 }
 
