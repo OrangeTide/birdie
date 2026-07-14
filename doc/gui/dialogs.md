@@ -44,11 +44,10 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-**Status:** Phases 0, 1 and 2 are done. Phase 4 has landed the connect and
-edit-profile reworks, the app-wide Settings dialog, the per-profile
-autoreconnect/term-type fields, and the live trigger editor; its remaining
-net-new dialogs (export column-filter, import-collision) and Phase 3 (choosers)
-are still open.
+**Status:** Phases 0, 1, 2 and 4 are done (connect + edit-profile reworks, the
+Settings dialog, per-profile autoreconnect/term-type, the live trigger editor,
+and the export column-filter + import-collision dialogs). Phase 3 (file / color
+choosers) is the remaining work.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -143,7 +142,14 @@ Built from the above, no new backend capability:
   triggers live in a user-editable `triggers.lua`, and rewriting that from the
   flat table would clobber hand-written Lua. Persisting would need a separate
   per-profile trigger data file plus session load wiring (a future task).
-- [ ] **Export** — per-column checkboxes (`doc/profiles.md`).
+- [x] **Export** (connect dialog > Export...): per-column checkboxes over the safe
+  columns (name is always included) build a filter for `bd_profiles_export_csv`,
+  written to a chosen path.
+- [x] **Import-collision** (fires from Import when a name already exists): a radio
+  group (Overwrite / Skip / Rename). Import parses into a scratch store, counts
+  name clashes, and if any exist opens the dialog; the chosen policy is applied
+  by a public-API merge (no CSV re-parsing, no clobbering hand data). The merge
+  (all three policies) is covered in `test_client`.
 - **Import-collision** — a radio group (skip / rename / overwrite).
 
 ## 4. Testing

@@ -422,6 +422,140 @@ test_profile(void)
 }
 
 /* ================================================================== */
+/* bd_profile -- import-collision merge (skip / rename / overwrite)    */
+/* ================================================================== */
+/* These mirror main.c's import-collision helpers (pure, public-API only).
+ * The app has no client-UI test harness, so the merge algorithm the import
+ * dialog runs is validated here against the real profile store. */
+enum { M_OVERWRITE, M_SKIP, M_RENAME };
+
+static void
+mtest_copy_keys(bd_profile *dst, const bd_profile *src, const char *force_name)
+{
+	int i, n = bd_profile_count(src);
+	for (i = 0; i < n; i++) {
+		const char *k = bd_profile_key(src, i);
+		if (force_name && !strcmp(k, "name"))
+			continue;
+		bd_profile_set(dst, k, bd_profile_val(src, i));
+	}
+	if (force_name)
+		bd_profile_set(dst, "name", force_name);
+}
+
+static void
+mtest_unique(bd_profiles *ps, const char *base, char *out, size_t sz)
+{
+	int i;
+	for (i = 2; i < 100000; i++) {
+		snprintf(out, sz, "%s (%d)", base, i);
+		if (!bd_profiles_find(ps, out))
+			return;
+	}
+}
+
+static int
+mtest_count_coll(bd_profiles *dst, bd_profiles *src)
+{
+	int i, c = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		const char *name = bd_profile_get(bd_profiles_at(src, i), "name");
+		if (name && *name && bd_profiles_find(dst, name))
+			c++;
+	}
+	return c;
+}
+
+static int
+mtest_merge(bd_profiles *dst, bd_profiles *src, int policy)
+{
+	int i, changed = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		bd_profile *sp = bd_profiles_at(src, i);
+		const char *name = bd_profile_get(sp, "name");
+		bd_profile *ex, *np;
+		if (!name || !*name)
+			continue;
+		ex = bd_profiles_find(dst, name);
+		if (!ex) {
+			np = bd_profiles_add(dst, name);
+			if (np) { mtest_copy_keys(np, sp, NULL); changed++; }
+		} else if (policy == M_SKIP) {
+			continue;
+		} else if (policy == M_RENAME) {
+			char nm[160];
+			mtest_unique(dst, name, nm, sizeof nm);
+			np = bd_profiles_add(dst, nm);
+			if (np) { mtest_copy_keys(np, sp, nm); changed++; }
+		} else {
+			mtest_copy_keys(ex, sp, NULL);
+			changed++;
+		}
+	}
+	return changed;
+}
+
+/* Build a store with one "Aardwolf" profile (host=old.host). */
+static bd_profiles *
+mtest_base(void)
+{
+	bd_profiles *d = bd_profiles_new();
+	bd_profile_set(bd_profiles_add(d, "Aardwolf"), "host", "old.host");
+	return d;
+}
+
+static void
+test_profile_merge(void)
+{
+	printf("bd_profile (import-collision merge):\n");
+	static const char *incoming =
+	    "name,host\nAardwolf,new.host\nNewMud,new.example\n";
+
+	bd_profiles *base = mtest_base();
+	bd_profiles *scratch = bd_profiles_new();
+	bd_profiles_import_csv(scratch, incoming, strlen(incoming), NULL);
+	check("scratch parsed the two incoming profiles",
+	    bd_profiles_count(scratch) == 2);
+	check("exactly one incoming name collides with the base",
+	    mtest_count_coll(base, scratch) == 1);
+	bd_profiles_free(base);
+
+	/* OVERWRITE: the clash is updated, the fresh name is added */
+	bd_profiles *d1 = mtest_base();
+	int c1 = mtest_merge(d1, scratch, M_OVERWRITE);
+	check("overwrite updates the clash and adds the new profile",
+	    c1 == 2 && bd_profiles_count(d1) == 2 &&
+	    strcmp(bd_profile_get(bd_profiles_find(d1, "Aardwolf"), "host"),
+	           "new.host") == 0 &&
+	    bd_profiles_find(d1, "NewMud") != NULL);
+	bd_profiles_free(d1);
+
+	/* SKIP: the clash is left as-is, the fresh name still lands */
+	bd_profiles *d2 = mtest_base();
+	int c2 = mtest_merge(d2, scratch, M_SKIP);
+	check("skip keeps the existing clash but adds the new profile",
+	    c2 == 1 && bd_profiles_count(d2) == 2 &&
+	    strcmp(bd_profile_get(bd_profiles_find(d2, "Aardwolf"), "host"),
+	           "old.host") == 0 &&
+	    bd_profiles_find(d2, "NewMud") != NULL);
+	bd_profiles_free(d2);
+
+	/* RENAME: the incoming clash lands under a fresh name, original kept */
+	bd_profiles *d3 = mtest_base();
+	int c3 = mtest_merge(d3, scratch, M_RENAME);
+	check("rename keeps the original and adds a renamed copy",
+	    c3 == 2 && bd_profiles_count(d3) == 3 &&
+	    strcmp(bd_profile_get(bd_profiles_find(d3, "Aardwolf"), "host"),
+	           "old.host") == 0 &&
+	    bd_profiles_find(d3, "Aardwolf (2)") != NULL &&
+	    strcmp(bd_profile_get(bd_profiles_find(d3, "Aardwolf (2)"), "host"),
+	           "new.host") == 0);
+	bd_profiles_free(d3);
+
+	bd_profiles_free(scratch);
+}
+
+/* ================================================================== */
 /* bd_verb -- the TinTin++-style #verb command parser                 */
 /* ================================================================== */
 static void
@@ -552,6 +686,7 @@ main(void)
 	test_verb();
 	test_mxp();
 	test_profile();
+	test_profile_merge();
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

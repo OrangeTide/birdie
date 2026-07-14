@@ -35,6 +35,21 @@ static bd_dialog *triggers_dlg;         /* live trigger editor */
 static bd_id trig_table;                /* list of the session's triggers */
 static bd_id trig_type, trig_pattern, trig_body, trig_class, trig_pri, trig_stop;
 static bd_id import_path;               /* CSV import file-path field */
+
+/* export column-filter dialog */
+static const char *const export_cols[] = { "host", "port", "tls", "encoding",
+                                           "description", "url", "tags" };
+#define N_EXPORT_COLS ((int)(sizeof export_cols / sizeof export_cols[0]))
+static bd_dialog *export_dlg;
+static bd_id exp_check[N_EXPORT_COLS];
+static bd_id export_path;
+
+/* import-collision dialog: resolves name clashes when merging an imported list */
+enum { IMP_OVERWRITE, IMP_SKIP, IMP_RENAME };
+static bd_dialog *import_dlg;
+static bd_id imp_msg, imp_policy;
+static bd_profiles *pending_import;     /* parsed rows awaiting a resolution */
+static char imp_msg_buf[160];
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
@@ -542,8 +557,139 @@ on_delete(bd_id id, void *arg)
 	bd_table_refresh(mudlist);
 }
 
-/* Import a local CSV file (path from the import field) into the store, merging
- * by name and dropping any column outside the safe set. */
+/* ---- export the profile list (a chosen column subset) ---- */
+
+/* The Export button in the connect dialog opens the column picker. */
+static void
+on_open_export(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_dialog_open(export_dlg);
+}
+
+/* Build the column filter from the ticked boxes (name is always included, it
+ * is the row identity), export, and write it to the given path. */
+static void
+on_export(bd_id panel, void *arg)
+{
+	char filter[256] = "name";
+	const char *path = bd_get_s(export_path, BD_LABEL_S);
+	char *csv;
+	size_t len;
+	FILE *f;
+	int i;
+	(void)arg;
+
+	if (!path || !path[0]) {
+		bd_terminal_write(terminal,
+		    "\033[33m*** enter a path to export to\033[0m\r\n", -1);
+		return;
+	}
+	for (i = 0; i < N_EXPORT_COLS; i++)
+		if (bd_checkbox_get(exp_check[i])) {
+			size_t used = strlen(filter);
+			snprintf(filter + used, sizeof filter - used, ",%s",
+			    export_cols[i]);
+		}
+	csv = bd_profiles_export_csv(profiles, filter, &len);
+	if (!csv) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** export failed\033[0m\r\n", -1);
+		return;
+	}
+	f = fopen(path, "wb");
+	if (!f) {
+		free(csv);
+		bd_terminal_write(terminal,
+		    "\033[31m*** cannot write the export file\033[0m\r\n", -1);
+		return;
+	}
+	fwrite(csv, 1, len, f);
+	fclose(f);
+	free(csv);
+	bd_terminal_write(terminal,
+	    "\033[36m*** exported the profile list\033[0m\r\n", -1);
+	bd_modal_close(panel);
+}
+
+/* ---- import merge helpers (used with the collision policy) ---- */
+
+/* Copy every key from src into dst. force_name (if set) is kept as dst's name
+ * instead of src's, for the rename policy. */
+static void
+copy_profile_keys(bd_profile *dst, const bd_profile *src, const char *force_name)
+{
+	int i, n = bd_profile_count(src);
+	for (i = 0; i < n; i++) {
+		const char *k = bd_profile_key(src, i);
+		if (force_name && !strcmp(k, "name"))
+			continue;
+		bd_profile_set(dst, k, bd_profile_val(src, i));
+	}
+	if (force_name)
+		bd_profile_set(dst, "name", force_name);
+}
+
+/* "base (2)", "base (3)", ... : the first that no profile in ps already uses. */
+static void
+unique_profile_name(bd_profiles *ps, const char *base, char *out, size_t outsz)
+{
+	int i;
+	for (i = 2; i < 100000; i++) {
+		snprintf(out, outsz, "%s (%d)", base, i);
+		if (!bd_profiles_find(ps, out))
+			return;
+	}
+}
+
+/* Number of profiles in src whose name already exists in dst. */
+static int
+count_collisions(bd_profiles *dst, bd_profiles *src)
+{
+	int i, c = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		const char *name = bd_profile_get(bd_profiles_at(src, i), "name");
+		if (name && *name && bd_profiles_find(dst, name))
+			c++;
+	}
+	return c;
+}
+
+/* Merge src into dst under `policy` (IMP_*). Returns the count added/updated. */
+static int
+merge_profiles(bd_profiles *dst, bd_profiles *src, int policy)
+{
+	int i, changed = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		bd_profile *sp = bd_profiles_at(src, i);
+		const char *name = bd_profile_get(sp, "name");
+		bd_profile *ex, *np;
+		if (!name || !*name)
+			continue;
+		ex = bd_profiles_find(dst, name);
+		if (!ex) {                          /* no clash: add as-is */
+			np = bd_profiles_add(dst, name);
+			if (np) { copy_profile_keys(np, sp, NULL); changed++; }
+		} else if (policy == IMP_SKIP) {
+			continue;                       /* keep the existing one */
+		} else if (policy == IMP_RENAME) {
+			char nm[160];
+			unique_profile_name(dst, name, nm, sizeof nm);
+			np = bd_profiles_add(dst, nm);
+			if (np) { copy_profile_keys(np, sp, nm); changed++; }
+		} else {                            /* IMP_OVERWRITE (merge fields) */
+			copy_profile_keys(ex, sp, NULL);
+			changed++;
+		}
+	}
+	return changed;
+}
+
+/* ---- import a CSV file, resolving name collisions ---- */
+
+/* Import a local CSV file (path from the import field): parse into a scratch
+ * store, and if any name already exists ask how to resolve it, else merge. */
 static void
 on_import(bd_id id, void *arg)
 {
@@ -553,7 +699,8 @@ on_import(bd_id id, void *arg)
 	long sz;
 	char *buf;
 	size_t got;
-	int n;
+	int n, coll;
+	bd_profiles *scratch;
 	(void)id;
 	(void)arg;
 
@@ -584,18 +731,81 @@ on_import(bd_id id, void *arg)
 	got = fread(buf, 1, (size_t)sz, f);
 	fclose(f);
 	buf[got] = '\0';
-	n = bd_profiles_import_csv(profiles, buf, got, BD_PROFILE_SAFE_COLUMNS);
+
+	scratch = bd_profiles_new();
+	if (!scratch) {
+		free(buf);
+		return;
+	}
+	n = bd_profiles_import_csv(scratch, buf, got, BD_PROFILE_SAFE_COLUMNS);
 	free(buf);
 	if (n < 0) {
+		bd_profiles_free(scratch);
 		bd_terminal_write(terminal,
 		    "\033[31m*** import failed (parse error)\033[0m\r\n", -1);
 		return;
 	}
+
+	coll = count_collisions(profiles, scratch);
+	if (coll == 0) {                        /* no clashes: merge straight in */
+		int added = merge_profiles(profiles, scratch, IMP_OVERWRITE);
+		bd_profiles_free(scratch);
+		save_profiles();
+		bd_table_refresh(mudlist);
+		snprintf(line, sizeof line,
+		    "\033[36m*** imported %d profile%s\033[0m\r\n",
+		    added, added == 1 ? "" : "s");
+		bd_terminal_write(terminal, line, -1);
+		return;
+	}
+
+	/* clashes exist: hold the parsed rows and ask the user how to resolve */
+	pending_import = scratch;
+	snprintf(imp_msg_buf, sizeof imp_msg_buf,
+	    "%d of %d imported profile%s already exist. Resolve conflicts:",
+	    coll, n, n == 1 ? "" : "s");
+	bd_set(imp_msg, BD_LABEL_S, imp_msg_buf, BD_END);
+	bd_radio_set(imp_policy, IMP_OVERWRITE);
+	bd_dialog_open(import_dlg);
+}
+
+/* Apply the chosen collision policy to the held rows. */
+static void
+on_import_apply(bd_id panel, void *arg)
+{
+	int policy = bd_radio_get(imp_policy);
+	int added;
+	char line[120];
+	(void)arg;
+
+	if (!pending_import) {
+		bd_modal_close(panel);
+		return;
+	}
+	added = merge_profiles(profiles, pending_import,
+	    policy < 0 ? IMP_OVERWRITE : policy);
+	bd_profiles_free(pending_import);
+	pending_import = NULL;
 	save_profiles();
 	bd_table_refresh(mudlist);
 	snprintf(line, sizeof line,
-	    "\033[36m*** imported %d profile%s\033[0m\r\n", n, n == 1 ? "" : "s");
+	    "\033[36m*** imported %d profile%s\033[0m\r\n", added, added == 1 ? "" : "s");
 	bd_terminal_write(terminal, line, -1);
+	bd_modal_close(panel);
+}
+
+/* Cancel / Escape: drop the held rows (fires for both the button and Escape). */
+static void
+on_import_cancel(bd_id panel, void *arg)
+{
+	(void)panel;
+	(void)arg;
+	if (pending_import) {
+		bd_profiles_free(pending_import);
+		pending_import = NULL;
+	}
+	bd_terminal_write(terminal,
+	    "\033[33m*** import cancelled\033[0m\r\n", -1);
 }
 
 /* Double-click / Enter on a dialog row connects to it and closes the dialog. */
@@ -1036,13 +1246,15 @@ init(void)
 		BD_ON_CLICK_F, on_edit, BD_END);
 	bd_create(mbtn, BD_BUTTON, BD_LABEL_S, "Delete", BD_GROW_I, 1,
 		BD_ON_CLICK_F, on_delete, BD_END);
-	/* import row: a local CSV file path + import */
+	/* import / export row: a local CSV file path + import + export */
 	bd_id ibtn = bd_create(cbody, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 26, BD_GAP_I, 6, BD_END);
 	import_path = bd_create(ibtn, BD_INPUT_LINE, BD_GROW_I, 1,
 		BD_PAD_I, 3, BD_END);
-	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import CSV", BD_PREF_W_I, 100,
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Import CSV", BD_PREF_W_I, 90,
 		BD_ON_CLICK_F, on_import, BD_END);
+	bd_create(ibtn, BD_BUTTON, BD_LABEL_S, "Export...", BD_PREF_W_I, 80,
+		BD_ON_CLICK_F, on_open_export, BD_END);
 	bd_dialog_button(connect_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(connect_dlg, "Connect", BD_DIALOG_DEFAULT,
 		on_dialog_connect, NULL);
@@ -1126,6 +1338,36 @@ init(void)
 	bd_dialog_button(triggers_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(triggers_dlg, "Add", BD_DIALOG_DEFAULT, on_trig_add, NULL);
 
+	/* the export column-filter form: pick columns (name is always included),
+	 * choose a path, Export writes the CSV */
+	export_dlg = bd_dialog_create("Export profiles", 360, 300);
+	bd_id ebody = bd_dialog_content(export_dlg);
+	bd_create(ebody, BD_LABEL, BD_LABEL_S, "Columns to include (name is always):",
+		BD_PREF_H_I, 18, BD_END);
+	for (int i = 0; i < N_EXPORT_COLS; i++)
+		exp_check[i] = bd_checkbox_create(ebody, &(bd_checkbox_desc){
+			.label = export_cols[i], .checked = 1 }, BD_END);
+	export_path = bd_create(bd_dialog_field(export_dlg, "To file"),
+		BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	bd_dialog_button(export_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(export_dlg, "Export", BD_DIALOG_DEFAULT, on_export, NULL);
+
+	/* the import-collision form: a radio of resolution policies. Opened only
+	 * when an import hits an existing name (see on_import). */
+	static const char *const imp_policy_labels[] = {
+		"Overwrite existing", "Skip existing", "Rename imported"
+	};
+	import_dlg = bd_dialog_create("Import conflicts", 380, 190);
+	imp_msg = bd_create(bd_dialog_content(import_dlg), BD_LABEL, BD_LABEL_S, "",
+		BD_PREF_H_I, 20, BD_END);
+	imp_policy = bd_radio_create(bd_dialog_content(import_dlg),
+		&(bd_radio_desc){ .labels = imp_policy_labels, .count = 3,
+		.selected = IMP_OVERWRITE, .orient = BD_VERTICAL }, BD_END);
+	bd_dialog_button(import_dlg, "Cancel", BD_DIALOG_CANCEL, on_import_cancel,
+		NULL);
+	bd_dialog_button(import_dlg, "Import", BD_DIALOG_DEFAULT, on_import_apply,
+		NULL);
+
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
 		connect_profile(active);
@@ -1147,11 +1389,18 @@ cleanup(void)
 	session = NULL;
 	bd_profiles_free(profiles);
 	profiles = NULL;
+	if (pending_import) {
+		bd_profiles_free(pending_import);
+		pending_import = NULL;
+	}
 	bd_dialog_free(connect_dlg);    /* before bd_gui_cleanup frees the pool */
 	bd_dialog_free(edit_dlg);
 	bd_dialog_free(settings_dlg);
 	bd_dialog_free(triggers_dlg);
+	bd_dialog_free(export_dlg);
+	bd_dialog_free(import_dlg);
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
+	export_dlg = import_dlg = NULL;
 	bd_gui_cleanup();
 }
 
