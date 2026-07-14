@@ -44,9 +44,10 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-**Status:** Phases 0, 1 and 2 are done. Phase 4's dialog reworks (connect,
-edit-profile) are done; its net-new dialogs (settings, trigger editor, export,
-import-collision) and Phase 3 (choosers) remain.
+**Status:** Phases 0, 1 and 2 are done. Phase 4 has landed the connect and
+edit-profile reworks, the app-wide Settings dialog, and the per-profile
+autoreconnect/term-type fields; its remaining net-new dialogs (trigger editor,
+export column-filter, import-collision) and Phase 3 (choosers) are still open.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -122,7 +123,16 @@ Built from the above, no new backend capability:
   `BD_CHECKBOX` replacing the toggle) with Save (default) / Cancel. Both gain
   Enter-confirms / Escape-cancels and first-field focus for free, and the
   hand-rolled panel/label/button boilerplate is gone (-30 lines net).
-- [ ] **Settings** — checkboxes + combos (dialog does not exist yet).
+- [x] **Settings** — an app-wide preferences dialog (Edit > Settings...): terminal
+  grid size (Columns/Rows spinners, applied over NAWS via `bd_session_set_winsize`)
+  and a colour-scheme combo (Default / Green phosphor / Amber, applied via
+  `bd_terminal_set_palette`), persisted to a new `<data_dir>/settings.csv`
+  (flat key,value) loaded at startup. Birdie has little app-wide config (most is
+  per-profile), so this is deliberately small; every control has a live effect.
+- [x] Per-profile fields on the **edit-profile** dialog: an autoreconnect checkbox
+  and a term-type field (both read by `bd_session` at connect). `encoding` was
+  left out: it is a safe profile column but is not wired to any behavior yet
+  (needs CHARSET/NEW_ENVIRON telopt work), and a dead control is worse than none.
 - [ ] **Trigger editor** — a combo for the trigger type, pattern/body fields, class.
 - [ ] **Export** — per-column checkboxes (`doc/profiles.md`).
 - **Import-collision** — a radio group (skip / rename / overwrite).

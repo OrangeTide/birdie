@@ -3,6 +3,7 @@
 #include "bd_widget_table.h"
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
+#include "bd_widget_combo.h"
 #include "bd_dialog.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
@@ -26,11 +27,48 @@ static bd_id mudlist;                   /* BD_TABLE inside the connect dialog */
 static bd_dialog *connect_dlg;          /* the modal MUD picker */
 static bd_dialog *edit_dlg;             /* add/edit a profile */
 static bd_id edit_name, edit_host, edit_port, edit_tls;
+static bd_id edit_reconnect, edit_termtype;
+static bd_dialog *settings_dlg;         /* app-wide preferences */
+static bd_id set_cols, set_rows, set_scheme;
 static bd_id import_path;               /* CSV import file-path field */
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
 static bd_session *session;
+
+/* ---- application settings (app-wide, persisted to <data_dir>/settings.csv) ----
+ * Birdie's per-connection config lives in profiles; these are the few genuinely
+ * app-wide preferences with a live effect: the terminal grid the session
+ * advertises over NAWS, and the terminal color scheme. */
+
+static const char *const scheme_ids[]    = { "default", "green", "amber" };
+static const char *const scheme_labels[] = { "Default", "Green phosphor",
+                                             "Amber" };
+#define N_SCHEMES ((int)(sizeof scheme_ids / sizeof scheme_ids[0]))
+
+static struct {
+	int cols, rows;   /* terminal grid advertised over NAWS */
+	int scheme;       /* index into scheme_ids */
+} settings = { 80, 24, 0 };
+
+/* The palette for a color scheme: start from the toolkit default and recolor
+ * only the default fg/bg (the 16 ANSI entries stay, so colored MUD output is
+ * unchanged). Scheme 0 is the plain default. */
+static bd_palette
+scheme_palette(int idx)
+{
+	bd_palette p = bd_palette_default();
+	if (idx == 1) {                     /* green phosphor */
+		p.default_fg = 0x33FF66FFu;
+		p.default_bg = 0x001200FFu;
+		p.bold_fg    = 0x99FFB0FFu;
+	} else if (idx == 2) {              /* amber */
+		p.default_fg = 0xFFB000FFu;
+		p.default_bg = 0x1A0F00FFu;
+		p.bold_fg    = 0xFFD070FFu;
+	}
+	return p;
+}
 
 /* Per-user data dir (defined below) and the profile-list CSV under it. */
 static const char *data_dir(void);
@@ -57,6 +95,91 @@ save_profiles(void)
 	if (d)
 		mkdir(d, 0755);         /* ensure the dir exists (best effort) */
 	bd_profiles_save(profiles, path);
+}
+
+/* ---- application settings persistence (<data_dir>/settings.csv) ----
+ * A flat "key,value" CSV (one setting per line), human-editable like the
+ * profile list. Unknown keys are ignored; missing file means all defaults. */
+
+static const char *
+settings_path(void)
+{
+	static char buf[600];
+	const char *d = data_dir();
+	if (!d)
+		return NULL;
+	snprintf(buf, sizeof buf, "%s/settings.csv", d);
+	return buf;
+}
+
+static void
+load_settings(void)
+{
+	const char *path = settings_path();
+	FILE *f;
+	char line[128];
+
+	if (!path || !(f = fopen(path, "r")))
+		return;
+	while (fgets(line, sizeof line, f)) {
+		char *nl = strpbrk(line, "\r\n");
+		char *comma = strchr(line, ',');
+		if (nl)
+			*nl = '\0';
+		if (!comma)
+			continue;
+		*comma = '\0';
+		const char *key = line, *val = comma + 1;
+		if (!strcmp(key, "cols"))
+			settings.cols = atoi(val);
+		else if (!strcmp(key, "rows"))
+			settings.rows = atoi(val);
+		else if (!strcmp(key, "scheme")) {
+			for (int i = 0; i < N_SCHEMES; i++)
+				if (!strcmp(val, scheme_ids[i]))
+					settings.scheme = i;
+		}
+	}
+	fclose(f);
+	/* clamp to the same ranges the spinners enforce */
+	if (settings.cols < 20) settings.cols = 20;
+	if (settings.cols > 500) settings.cols = 500;
+	if (settings.rows < 5) settings.rows = 5;
+	if (settings.rows > 200) settings.rows = 200;
+	if (settings.scheme < 0 || settings.scheme >= N_SCHEMES)
+		settings.scheme = 0;
+}
+
+static void
+save_settings(void)
+{
+	const char *path = settings_path();
+	const char *d = data_dir();
+	FILE *f;
+
+	if (!path)
+		return;
+	if (d)
+		mkdir(d, 0755);
+	if (!(f = fopen(path, "w")))
+		return;
+	fprintf(f, "cols,%d\n", settings.cols);
+	fprintf(f, "rows,%d\n", settings.rows);
+	fprintf(f, "scheme,%s\n", scheme_ids[settings.scheme]);
+	fclose(f);
+}
+
+/* Push the current settings into the live session + terminal. Safe to call
+ * before either exists (each part is guarded). */
+static void
+apply_settings(void)
+{
+	if (session)
+		bd_session_set_winsize(session, settings.cols, settings.rows);
+	if (terminal) {
+		bd_palette pal = scheme_palette(settings.scheme);
+		bd_terminal_set_palette(terminal, &pal);
+	}
 }
 
 /* ---- MUD-list table model (reads the profile store) ---- */
@@ -225,7 +348,7 @@ rebind_session(const bd_profile *p)
 	active = p;
 	session = bd_session_new(active);
 	bd_session_on_event(session, on_session_event, NULL);
-	bd_session_set_winsize(session, 80, 24);
+	bd_session_set_winsize(session, settings.cols, settings.rows);
 	install_ui_hooks(session);
 	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
 
@@ -330,6 +453,8 @@ open_edit(const bd_profile *p)
 	const char *port = p ? bd_profile_get(p, "port") : NULL;
 	const char *name = p ? bd_profile_get(p, "name") : NULL;
 	const char *tls = p ? bd_profile_get(p, "tls") : NULL;
+	const char *rc = p ? bd_profile_get(p, "autoreconnect") : NULL;
+	const char *tt = p ? bd_profile_get(p, "termtype") : NULL;
 
 	snprintf(editing_name, sizeof editing_name, "%s", name ? name : "");
 	bd_set(edit_name, BD_LABEL_S, name ? name : "", BD_END);
@@ -337,6 +462,11 @@ open_edit(const bd_profile *p)
 	bd_set(edit_port, BD_LABEL_S, port ? port : "23", BD_END);
 	bd_checkbox_set(edit_tls, tls && strcmp(tls, "no") != 0 &&
 	    strcmp(tls, "") != 0);
+	/* autoreconnect defaults on (the session's default), so only an explicit
+	 * off value ("no"/"false"/"0"/"off") unticks it */
+	bd_checkbox_set(edit_reconnect, !(rc && (!strcmp(rc, "no") ||
+	    !strcmp(rc, "false") || !strcmp(rc, "0") || !strcmp(rc, "off"))));
+	bd_set(edit_termtype, BD_LABEL_S, tt ? tt : "", BD_END);
 	bd_dialog_open(edit_dlg);
 }
 
@@ -382,6 +512,13 @@ on_edit_save(bd_id id, void *arg)
 	bd_profile_set(p, "host", bd_get_s(edit_host, BD_LABEL_S));
 	bd_profile_set(p, "port", bd_get_s(edit_port, BD_LABEL_S));
 	bd_profile_set(p, "tls", bd_checkbox_get(edit_tls) ? "yes" : "no");
+	bd_profile_set(p, "autoreconnect",
+	    bd_checkbox_get(edit_reconnect) ? "yes" : "no");
+	/* an empty term type removes the key so the session's default applies */
+	{
+		const char *tt = bd_get_s(edit_termtype, BD_LABEL_S);
+		bd_profile_set(p, "termtype", (tt && tt[0]) ? tt : NULL);
+	}
 	save_profiles();
 	bd_table_refresh(mudlist);
 	bd_dialog_close(edit_dlg);
@@ -613,16 +750,45 @@ on_event(const lud_event_t *ev)
 	return 0;
 }
 
+/* ---- settings dialog ---- */
+
+static void
+on_open_settings(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_spinner_set(set_cols, settings.cols);
+	bd_spinner_set(set_rows, settings.rows);
+	bd_combo_set(set_scheme, settings.scheme);
+	bd_dialog_open(settings_dlg);
+}
+
+/* Save reads the controls, applies live (NAWS resize + palette), and persists. */
+static void
+on_settings_save(bd_id panel, void *arg)
+{
+	int sc;
+	(void)arg;
+	settings.cols = bd_spinner_get(set_cols);
+	settings.rows = bd_spinner_get(set_rows);
+	sc = bd_combo_get(set_scheme);
+	settings.scheme = (sc >= 0 && sc < N_SCHEMES) ? sc : 0;
+	apply_settings();
+	save_settings();
+	bd_modal_close(panel);
+}
+
 static void
 init(void)
 {
 	bd_gui_init(&bd_backend_ludica, NULL);
+	load_settings();   /* before the session/terminal so both start configured */
 
 	profiles = bd_profiles_new();
 	active = load_profiles();
 	session = bd_session_new(active);
 	bd_session_on_event(session, on_session_event, NULL);
-	bd_session_set_winsize(session, 80, 24);   /* matches the terminal grid */
+	bd_session_set_winsize(session, settings.cols, settings.rows);
 	install_ui_hooks(session);   /* GMCP Char.Vitals -> sidebar (host_ui only
 	                              * fires at runtime, after the labels exist) */
 	bd_session_set_data_dir(session, data_dir());   /* loads the var table */
@@ -651,6 +817,8 @@ init(void)
 	bd_id m_edit = bd_create(menu, BD_MENU, BD_LABEL_S, "Edit", BD_END);
 	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Copy", BD_END);
 	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Paste", BD_END);
+	bd_create(m_edit, BD_BUTTON, BD_LABEL_S, "Settings...",
+		BD_ON_CLICK_F, on_open_settings, BD_END);
 
 	bd_id m_sess = bd_create(menu, BD_MENU, BD_LABEL_S, "Session", BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Connect...",
@@ -687,6 +855,7 @@ init(void)
 	bd_id right = bd_create(body, BD_PANEL,
 		BD_LAYOUT_I, BD_LAYOUT_COL, BD_GROW_I, 1, BD_GAP_I, 4, BD_END);
 	terminal = bd_terminal_create(right, BD_GROW_I, 1, BD_END);
+	apply_settings();   /* colour scheme now that the terminal exists */
 	bd_terminal_write(terminal,
 		"\033[1mbirdie v0.0\033[0m\r\n"
 		"Session > Connect... to choose a MUD.\r\n",
@@ -729,7 +898,7 @@ init(void)
 		on_dialog_connect, NULL);
 
 	/* the add/edit profile form, composed with the bd_dialog helper */
-	edit_dlg = bd_dialog_create("Profile", 360, 210);
+	edit_dlg = bd_dialog_create("Profile", 380, 300);
 	edit_name = bd_create(bd_dialog_field(edit_dlg, "Name"), BD_INPUT_LINE,
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	edit_host = bd_create(bd_dialog_field(edit_dlg, "Host"), BD_INPUT_LINE,
@@ -738,8 +907,27 @@ init(void)
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	edit_tls = bd_checkbox_create(bd_dialog_field(edit_dlg, "Security"),
 		&(bd_checkbox_desc){ .label = "TLS" }, BD_END);
+	edit_reconnect = bd_checkbox_create(bd_dialog_field(edit_dlg, "Reconnect"),
+		&(bd_checkbox_desc){ .label = "Automatically" }, BD_END);
+	edit_termtype = bd_create(bd_dialog_field(edit_dlg, "Term type"),
+		BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	bd_dialog_button(edit_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(edit_dlg, "Save", BD_DIALOG_DEFAULT, on_edit_save, NULL);
+
+	/* the app-wide settings form (terminal grid + colour scheme) */
+	settings_dlg = bd_dialog_create("Settings", 340, 200);
+	set_cols = bd_spinner_create(bd_dialog_field(settings_dlg, "Columns"),
+		&(bd_spinner_desc){ .min = 20, .max = 500, .value = settings.cols },
+		BD_PREF_W_I, 90, BD_END);
+	set_rows = bd_spinner_create(bd_dialog_field(settings_dlg, "Rows"),
+		&(bd_spinner_desc){ .min = 5, .max = 200, .value = settings.rows },
+		BD_PREF_W_I, 90, BD_END);
+	set_scheme = bd_combo_create(bd_dialog_field(settings_dlg, "Colors"),
+		&(bd_combo_desc){ .items = scheme_labels, .count = N_SCHEMES,
+		.selected = settings.scheme }, BD_GROW_I, 1, BD_END);
+	bd_dialog_button(settings_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
+	bd_dialog_button(settings_dlg, "Save", BD_DIALOG_DEFAULT,
+		on_settings_save, NULL);
 
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
@@ -764,7 +952,8 @@ cleanup(void)
 	profiles = NULL;
 	bd_dialog_free(connect_dlg);    /* before bd_gui_cleanup frees the pool */
 	bd_dialog_free(edit_dlg);
-	connect_dlg = edit_dlg = NULL;
+	bd_dialog_free(settings_dlg);
+	connect_dlg = edit_dlg = settings_dlg = NULL;
 	bd_gui_cleanup();
 }
 
