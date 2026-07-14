@@ -313,6 +313,8 @@ static int clicked;
 static void on_click(bd_id id, void *arg){ (void)id; (void)arg; clicked++; }
 static int chk_n, chk_last;
 static void on_chk(bd_id id, void *a, int checked){ (void)id; (void)a; chk_n++; chk_last = checked; }
+static int rad_n, rad_last;
+static void on_rad(bd_id id, void *a, int idx){ (void)id; (void)a; rad_n++; rad_last = idx; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2067,6 +2069,53 @@ main(void)
 
 	bd_gui_render();
 	check("checkbox renders (checked) without crashing", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- radio group form control ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	rad_n = 0; rad_last = -1;
+	static const char *const opts[] = { "Low", "Medium", "High" };
+	bd_id rg = bd_radio_create(fr, &(bd_radio_desc){
+	    .labels = opts, .count = 3, .selected = 1, .orient = BD_VERTICAL,
+	    .cb = on_rad }, BD_END);
+	bd_gui_layout(400, 300);
+	check("radio starts on the initial selection", bd_radio_get(rg) == 1);
+
+	int rx, ry, rw, rh;
+	bd_widget_rect(rg, &rx, &ry, &rw, &rh);
+	int row = rh / 3;
+	/* click the first option's row */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=rx+4, .y=ry+row/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=rx+4, .y=ry+row/2 });
+	check("clicking an option selects it and fires once",
+	    bd_radio_get(rg) == 0 && rad_n == 1 && rad_last == 0);
+	check("clicking focuses the radio group", bd_focused() == rg);
+
+	/* clicking the same option again does not re-fire */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=rx+4, .y=ry+row/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=rx+4, .y=ry+row/2 });
+	check("re-selecting the current option is a no-op", rad_n == 1);
+
+	/* Down arrow advances the selection */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN });
+	check("Down arrow moves to the next option",
+	    bd_radio_get(rg) == 1 && rad_n == 2 && rad_last == 1);
+
+	/* Up arrow past the top clamps (no fire) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_UP });
+	check("Up arrow clamps at the first option",
+	    bd_radio_get(rg) == 0 && rad_n == 3);
+
+	bd_radio_set(rg, 2);
+	check("bd_radio_set updates without firing the callback",
+	    bd_radio_get(rg) == 2 && rad_n == 3);
+
+	bd_gui_render();
+	check("radio group renders without crashing", 1);
 	bd_gui_cleanup();
 	}
 

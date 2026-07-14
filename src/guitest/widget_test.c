@@ -176,6 +176,14 @@ on_check(bd_id id, void *arg, int checked)
 }
 
 static void
+on_radio(bd_id id, void *arg, int idx)
+{
+	(void)id; (void)arg;
+	static const char *names[] = { "Radio: Slow", "Radio: Normal", "Radio: Fast" };
+	report(idx >= 0 && idx < 3 ? names[idx] : "Radio: none");
+}
+
+static void
 on_xy(bd_id id, void *arg, float x, float y)
 {
 	(void)id;
@@ -656,6 +664,10 @@ build_ui(void)
 		.cb = on_check, .arg = (void *)"auto-login" }, BD_END);
 	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Log to file",
 		.cb = on_check, .arg = (void *)"logging" }, BD_END);
+	/* radio group: one exclusive choice (click or arrow keys) */
+	static const char *const rate_opts[] = { "Slow", "Normal", "Fast" };
+	bd_radio_create(srow, &(bd_radio_desc){ .labels = rate_opts, .count = 3,
+		.selected = 1, .orient = BD_VERTICAL, .cb = on_radio }, BD_END);
 
 	/* indicator lamps: LEDs (clear/frosted/jewel lens), a bi-color, and a
 	 * clickable lamp button that cycles off/red/green/amber */

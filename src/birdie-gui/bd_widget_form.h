@@ -2,6 +2,7 @@
 #define BD_WIDGET_FORM_H
 
 #include "widget.h"
+#include "bd_widget_value.h"   /* shared BD_HORIZONTAL / BD_VERTICAL enum */
 
 /*
  * Form controls -- the widgets a dialog form is built from, on the extension
@@ -30,5 +31,22 @@ typedef struct bd_checkbox_desc {
 bd_id bd_checkbox_create(bd_id parent, const bd_checkbox_desc *desc, ...);
 void  bd_checkbox_set(bd_id id, int checked);   /* no callback */
 int   bd_checkbox_get(bd_id id);
+
+/* ---- radio group: one exclusive choice among labeled options ---- */
+
+typedef void (*bd_radio_cb)(bd_id id, void *arg, int index);
+
+typedef struct bd_radio_desc {
+    const char *const *labels;   /* option captions, `count` of them (borrowed) */
+    int             count;       /* number of options */
+    int             selected;    /* initial selection, -1 for none */
+    int             orient;      /* BD_HORIZONTAL (default) or BD_VERTICAL */
+    bd_radio_cb     cb;          /* fired when the selection changes */
+    void           *arg;
+} bd_radio_desc;
+
+bd_id bd_radio_create(bd_id parent, const bd_radio_desc *desc, ...);
+void  bd_radio_set(bd_id id, int index);   /* no callback */
+int   bd_radio_get(bd_id id);
 
 #endif /* BD_WIDGET_FORM_H */
