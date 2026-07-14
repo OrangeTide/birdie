@@ -15,6 +15,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
 #include "bd_widget_combo.h"
+#include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
@@ -325,6 +326,8 @@ static void on_spn(bd_id id, void *a, int v){ (void)id; (void)a; spn_n++; spn_la
 static int dbtn_ok, dbtn_cancel;
 static void on_dbtn_ok(bd_id id, void *a){ (void)id; (void)a; dbtn_ok++; }
 static void on_dbtn_cancel(bd_id id, void *a){ (void)id; (void)a; dbtn_cancel++; }
+static int cp_n; static uint32_t cp_last;
+static void on_cp(bd_id id, void *a, uint32_t rgba){ (void)id; (void)a; cp_n++; cp_last = rgba; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2303,6 +2306,64 @@ main(void)
 	bd_gui_render();
 	check("dialog renders without crashing", 1);
 	bd_dialog_free(d);
+	bd_gui_cleanup();
+	}
+
+	/* ---- BD_COLORPICK: HSV round-trip + pointer picking ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	cp_n = 0; cp_last = 0;
+	bd_id cp = bd_colorpick_create(fr, &(bd_colorpick_desc){
+	    .color = 0x00FF00FFu, .cb = on_cp }, BD_PREF_W_I, 220, BD_PREF_H_I, 180,
+	    BD_END);
+	bd_gui_layout(400, 300);
+	check("colorpick starts at the set colour", bd_colorpick_get(cp) == 0x00FF00FFu);
+
+	/* pure colours round-trip exactly through HSV */
+	bd_colorpick_set(cp, 0xFF0000FFu);
+	check("red round-trips", bd_colorpick_get(cp) == 0xFF0000FFu);
+	bd_colorpick_set(cp, 0x0000FFFFu);
+	check("blue round-trips", bd_colorpick_get(cp) == 0x0000FFFFu);
+	bd_colorpick_set(cp, 0xFFFFFFFFu);
+	check("white round-trips", bd_colorpick_get(cp) == 0xFFFFFFFFu);
+	bd_colorpick_set(cp, 0x000000FFu);
+	check("black round-trips", bd_colorpick_get(cp) == 0x000000FFu);
+	check("bd_colorpick_set does not fire the callback", cp_n == 0);
+
+	/* alpha is preserved through set/get */
+	bd_colorpick_set(cp, 0xFF000080u);
+	check("alpha is preserved", (bd_colorpick_get(cp) & 0xFFu) == 0x80u);
+
+	/* geometry mirrors regions_of(): swatch 28, gap 6, hue 20, presets 22 */
+	int x, y, w, h;
+	bd_widget_rect(cp, &x, &y, &w, &h);
+	int toph = h - 22 - 6, svw = w - 60;
+
+	/* click the saturation/value square: hue kept, s/v taken from the point */
+	bd_colorpick_set(cp, 0xFF0000FFu);   /* hue 0 (red), s=v=1 */
+	cp_n = 0;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x = x + svw / 2, .y = y + toph / 2 });
+	check("clicking the SV square fires and moves off pure red",
+	    cp_n == 1 && bd_colorpick_get(cp) != 0xFF0000FFu &&
+	    (bd_colorpick_get(cp) >> 24) > (bd_colorpick_get(cp) >> 8 & 0xFF));
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x = x + svw / 2, .y = y + toph / 2 });
+
+	/* click a preset cell (index 3 == pure red): exact colour */
+	cp_n = 0;
+	int pcx = x + (int)((3 + 0.5f) * w / 12);
+	int pcy = y + h - 22 / 2;
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT,
+	    .x = pcx, .y = pcy });
+	check("clicking a preset sets that exact colour",
+	    cp_n == 1 && bd_colorpick_get(cp) == 0xFF0000FFu);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP, .button=BD_MOUSE_LEFT,
+	    .x = pcx, .y = pcy });
+
+	bd_gui_render();
+	check("colorpick renders without crashing", 1);
 	bd_gui_cleanup();
 	}
 

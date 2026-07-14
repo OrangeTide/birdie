@@ -19,6 +19,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
 #include "bd_widget_combo.h"
+#include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
@@ -131,6 +132,15 @@ on_slider(bd_id id, void *arg, float t)
 	(void)id;
 	static char b[64];
 	snprintf(b, sizeof b, "%s: %d%%", (const char *)arg, (int)(t * 100 + 0.5f));
+	report(b);
+}
+
+static void
+on_color(bd_id id, void *arg, uint32_t rgba)
+{
+	(void)id; (void)arg;
+	static char b[32];
+	snprintf(b, sizeof b, "Colour: #%06X", (unsigned)(rgba >> 8));
 	report(b);
 }
 
@@ -793,6 +803,12 @@ build_ui(void)
 	bd_slider_create(hwrap, &(bd_slider_desc){ .orient = BD_HORIZONTAL,
 		.value = 0.4f, .cb = on_slider, .arg = (void *)"Wet" },
 		BD_PREF_H_I, 24, BD_END);
+
+	/* HSV colour picker (SV square + hue bar + swatch + presets) */
+	bd_id cprow = section(pads, "Colour picker (drag the square / hue bar)",
+		BD_LAYOUT_ROW, 190);
+	bd_colorpick_create(cprow, &(bd_colorpick_desc){ .color = 0x3399FFFFu,
+		.cb = on_color }, BD_GROW_I, 1, BD_END);
 
 	/* -- Meters: the 0..1 instrument styles + a progress bar (animated in the
 	 * main loop so ballistics, peak-hold, and the liquid fill are visible) -- */
