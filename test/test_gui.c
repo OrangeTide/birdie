@@ -15,6 +15,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
 #include "bd_widget_combo.h"
+#include "bd_dialog.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -321,6 +322,9 @@ static int cmb_n, cmb_last;
 static void on_cmb(bd_id id, void *a, int idx){ (void)id; (void)a; cmb_n++; cmb_last = idx; }
 static int spn_n, spn_last;
 static void on_spn(bd_id id, void *a, int v){ (void)id; (void)a; spn_n++; spn_last = v; }
+static int dbtn_ok, dbtn_cancel;
+static void on_dbtn_ok(bd_id id, void *a){ (void)id; (void)a; dbtn_ok++; }
+static void on_dbtn_cancel(bd_id id, void *a){ (void)id; (void)a; dbtn_cancel++; }
 static int modal_accept_n, modal_cancel_n;
 static void on_dlg_accept(bd_id id, void *arg){ (void)id; (void)arg; modal_accept_n++; }
 static void on_dlg_cancel(bd_id id, void *arg){ (void)id; (void)arg; modal_cancel_n++; }
@@ -2237,6 +2241,68 @@ main(void)
 
 	bd_gui_render();
 	check("spinner renders without crashing", 1);
+	bd_gui_cleanup();
+	}
+
+	/* ---- bd_dialog composition helper ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	bd_dialog *d = bd_dialog_create("Settings", 320, 200);
+	check("dialog created", d != NULL && bd_dialog_panel(d) != BD_NONE);
+	check("content container available", bd_dialog_content(d) != BD_NONE);
+
+	bd_id row = bd_dialog_field(d, "Name");
+	check("field returns a row", row != BD_NONE);
+	bd_id inp = bd_create(row, BD_INPUT_LINE, BD_GROW_I, 1, BD_END);
+
+	dbtn_ok = dbtn_cancel = 0;
+	bd_id bcancel = bd_dialog_button(d, "Cancel", BD_DIALOG_CANCEL, on_dbtn_cancel, NULL);
+	bd_id bok = bd_dialog_button(d, "OK", BD_DIALOG_DEFAULT, on_dbtn_ok, NULL);
+	check("buttons created", bcancel != BD_NONE && bok != BD_NONE);
+
+	bd_dialog_open(d);
+	bd_gui_layout(800, 600);
+	check("open shows the dialog modal", bd_modal_active() == bd_dialog_panel(d));
+	check("the first field is focused", bd_focused() == inp);
+
+	/* Enter fires the default button but does not auto-close (validate-then-close) */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ENTER });
+	check("Enter fires the default button callback", dbtn_ok == 1);
+	check("Enter (default) does not auto-close",
+	    bd_modal_active() == bd_dialog_panel(d));
+
+	/* clicking the Cancel button runs its callback and closes */
+	int bx, by, bw, bh;
+	bd_widget_rect(bcancel, &bx, &by, &bw, &bh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+bw/2, .y=by+bh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+bw/2, .y=by+bh/2 });
+	check("clicking Cancel fires its callback and closes",
+	    dbtn_cancel == 1 && bd_modal_active() == BD_NONE);
+
+	/* reopen: Escape fires the cancel callback and closes */
+	dbtn_cancel = 0;
+	bd_dialog_open(d);
+	bd_gui_layout(800, 600);
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_ESCAPE });
+	check("Escape fires the cancel callback and closes",
+	    dbtn_cancel == 1 && bd_modal_active() == BD_NONE);
+
+	/* clicking the default (OK) button fires its callback but stays open */
+	dbtn_ok = 0;
+	bd_dialog_open(d);
+	bd_gui_layout(800, 600);
+	bd_widget_rect(bok, &bx, &by, &bw, &bh);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=bx+bw/2, .y=by+bh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=bx+bw/2, .y=by+bh/2 });
+	check("clicking the default fires its callback and stays open",
+	    dbtn_ok == 1 && bd_modal_active() == bd_dialog_panel(d));
+
+	bd_dialog_close(d);
+	check("bd_dialog_close dismisses the modal", bd_modal_active() == BD_NONE);
+
+	bd_gui_render();
+	check("dialog renders without crashing", 1);
+	bd_dialog_free(d);
 	bd_gui_cleanup();
 	}
 

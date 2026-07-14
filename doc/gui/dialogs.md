@@ -44,7 +44,7 @@ hand, and the form controls real dialogs need do not exist yet.
 
 ## 3. Build order
 
-**Status:** Phase 0 and Phase 1 are done. Phases 2-4 remain.
+**Status:** Phases 0, 1 and 2 are done. Phases 3-4 remain.
 
 ### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
 
@@ -80,21 +80,27 @@ above every frame / modal / notice and given first crack at input (a press
 outside or an unconsumed Escape dismisses it). This is the convergence target
 noted in Scope below; the editor autocomplete can move onto it later.
 
-### Phase 2 — dialog composition helper
+### Phase 2 — dialog composition helper — DONE
 
-A thin shell over `bd_modal`:
+Shipped as `bd_dialog.{c,h}`, a thin shell over `bd_modal`:
 
-- `bd_dialog_create(title)` -> a detached panel with a title bar, a content
-  container (column layout, standard pad/gap), and a button row.
-- `bd_dialog_button(dlg, label, role, cb, arg)` where role marks default /
-  cancel so Enter/Escape wire up automatically and buttons order consistently.
-- `bd_dialog_field(dlg, label, control)` — a labeled row (label + control) with
-  the required `PREF_H`/`GROW` already set, so forms read top-to-bottom without
-  the layout gotcha.
-- `bd_dialog_open(dlg)` / `bd_dialog_close(dlg)` wrap the modal calls.
+- `bd_dialog_create(title, w, h)` -> a titled panel with a content column
+  (standard pad/gap) and a right-aligned button row.
+- `bd_dialog_button(dlg, label, role, cb, arg)` where `role`
+  (`BD_DIALOG_DEFAULT` / `BD_DIALOG_CANCEL` / `BD_DIALOG_NORMAL`) wires Enter to
+  the default button and Escape to the cancel button. A cancel button also
+  closes on click; the default does not (its callback validates, then closes).
+- `bd_dialog_field(dlg, label)` — a labeled row with the required `PREF_H`
+  already set; the caller creates the control INTO the returned row with
+  `BD_GROW_I`. It returns the row rather than taking a pre-built control because
+  the toolkit does not reparent.
+- `bd_dialog_content(dlg)` hands back the content column for arbitrary widgets.
+- `bd_dialog_open` / `bd_dialog_close` wrap the modal calls (open focuses the
+  first field); `bd_dialog_free` destroys the subtree and the handle.
 
-This is convenience, not a new layout engine: callers still add arbitrary
-widgets to the content container.
+Convenience, not a new layout engine: callers still add arbitrary widgets to the
+content container. Covered in `test_gui` (Enter/Escape wiring, click roles,
+first-field focus) and demoed by the gallery's "Dialog..." button.
 
 ### Phase 3 — composite chooser dialogs
 

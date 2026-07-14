@@ -19,6 +19,7 @@
 #include "bd_widget_value.h"
 #include "bd_widget_form.h"
 #include "bd_widget_combo.h"
+#include "bd_dialog.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -200,6 +201,46 @@ on_spinner(bd_id id, void *arg, int value)
 	static char msg[32];
 	snprintf(msg, sizeof msg, "Port: %d", value);
 	report(msg);
+}
+
+/* a demo of the bd_dialog composition helper (Phase 2): built once, reopened */
+static bd_dialog *demo_dialog;
+
+static void
+on_dialog_save(bd_id panel, void *arg)
+{
+	(void)arg;
+	report("Dialog: saved");
+	bd_modal_close(panel);   /* the default button closes on success */
+}
+
+static void
+on_dialog_cancel(bd_id panel, void *arg)
+{
+	(void)panel; (void)arg;
+	report("Dialog: cancelled");
+}
+
+static void
+on_open_dialog(bd_id id, void *arg)
+{
+	(void)id; (void)arg;
+	if (!demo_dialog) {
+		demo_dialog = bd_dialog_create("Profile settings", 340, 210);
+		bd_id r1 = bd_dialog_field(demo_dialog, "Name");
+		bd_create(r1, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+		bd_id r2 = bd_dialog_field(demo_dialog, "TLS");
+		bd_checkbox_create(r2, &(bd_checkbox_desc){ .label = "Enabled" }, BD_END);
+		bd_id r3 = bd_dialog_field(demo_dialog, "Speed");
+		static const char *const spd[] = { "Slow", "Normal", "Fast" };
+		bd_combo_create(r3, &(bd_combo_desc){ .items = spd, .count = 3,
+			.selected = 1 }, BD_GROW_I, 1, BD_END);
+		bd_dialog_button(demo_dialog, "Cancel", BD_DIALOG_CANCEL,
+			on_dialog_cancel, NULL);
+		bd_dialog_button(demo_dialog, "Save", BD_DIALOG_DEFAULT,
+			on_dialog_save, NULL);
+	}
+	bd_dialog_open(demo_dialog);
 }
 
 static void
@@ -683,6 +724,9 @@ build_ui(void)
 		.cb = on_check, .arg = (void *)"auto-login" }, BD_END);
 	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Log to file",
 		.cb = on_check, .arg = (void *)"logging" }, BD_END);
+	/* opens a composed modal built with the bd_dialog helper (Phase 2) */
+	bd_create(chkcol, BD_BUTTON, BD_LABEL_S, "Dialog...", BD_PREF_H_I, 24,
+		BD_ON_CLICK_F, on_open_dialog, BD_END);
 	/* radio group: one exclusive choice (click or arrow keys) */
 	static const char *const rate_opts[] = { "Slow", "Normal", "Fast" };
 	bd_radio_create(srow, &(bd_radio_desc){ .labels = rate_opts, .count = 3,
