@@ -728,7 +728,7 @@ build_ui(void)
 		.relative = 1, .dimples = 3, .cb = on_jog }, /* endless jog dial */
 		BD_PREF_W_I, 76, BD_END);
 	/* checkboxes: a column of labeled booleans (click or Space to toggle) */
-	bd_id chkcol = bd_create(srow, BD_PANEL, BD_LAYOUT_COL, BD_PREF_W_I, 120,
+	bd_id chkcol = bd_create(srow, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL, BD_PREF_W_I, 120,
 		BD_PAD_I, 4, BD_GAP_I, 2, BD_END);
 	bd_checkbox_create(chkcol, &(bd_checkbox_desc){ .label = "Enable TLS",
 		.checked = 1, .cb = on_check, .arg = (void *)"TLS on" }, BD_END);
