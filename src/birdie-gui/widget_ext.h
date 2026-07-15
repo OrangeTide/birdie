@@ -56,6 +56,16 @@ enum {
 	 * move whose coords leave the widget is delivered too, so it can clear the
 	 * hover. */
 	BD_WC_WANTS_HOVER       = 1ull << 1,
+
+	/* clip the widget's children to its own rect while rendering: the render
+	 * walk brackets the child loop with a backend scissor. For scrolling or
+	 * masking containers whose children are laid out beyond the viewport.
+	 * Implies BD_WC_CONTAINS_CHILDREN. Events already clip (the hit walk
+	 * rejects points outside a widget's rect before recursing). The backend
+	 * scissor is a single rect, not a stack, so nesting a clipping container
+	 * inside another (or a child that scissors its own content) does not
+	 * compose; the innermost region wins. */
+	BD_WC_CLIP_CHILDREN     = 1ull << 2,
 };
 
 /*

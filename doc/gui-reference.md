@@ -343,6 +343,44 @@ void  bd_split_set_min_size(bd_id split, int px);   void bd_split_set_sash_size(
 void  bd_split_on_change(bd_id split, bd_callback_fn, void *data);  /* fired on a drag */
 ```
 
+
+### Group box (`bd_widget_groupbox.h`)
+
+A captioned etched-border fieldset (OPEN LOOK / Motif) for grouping related form
+fields. The group box IS the content container: add fields straight into it and
+they stack in a column below the caption band. Group boxes nest. The title is
+borrowed. No core capability; a plain container with a title-band spacer and a
+groove-drawing render hook.
+
+```c
+typedef struct bd_groupbox_desc { const char *title; } bd_groupbox_desc;
+bd_id       bd_groupbox_create(bd_id parent, const bd_groupbox_desc *, ...);
+void        bd_groupbox_set_title(bd_id, const char *title);
+const char *bd_groupbox_title(bd_id);
+```
+
+### Scroll-view (`bd_widget_scrollview.h`)
+
+A fixed-size viewport that clips a taller content column and scrolls it, for a
+form with more fields than fit its panel. Unlike the list / tree / editor (which
+scroll their own drawn content), it scrolls a subtree of real child widgets. Add
+fields into the content column returned by `bd_scrollview_content`; a vertical
+scrollbar appears and the wheel scrolls when the column overflows. The wheel
+bubbles, so it works even when the pointer is over an inner field.
+
+It works by offsetting the single content child (`BD_Y_I = -scroll_y`) and
+measuring the content height from the children's `PREF_H`; the stacked children
+must carry a `PREF_H` (the form controls and `bd_dialog_field` rows do). It uses
+the `BD_WC_CLIP_CHILDREN` class flag (widget_ext.h), a general capability the
+render walk honours by scissoring a container's children to its rect.
+
+```c
+typedef struct bd_scrollview_desc { int always_bar; } bd_scrollview_desc;
+bd_id bd_scrollview_create(bd_id parent, const bd_scrollview_desc *, ...);
+bd_id bd_scrollview_content(bd_id);          /* the column to fill */
+void  bd_scrollview_scroll_to(bd_id, int y_px);
+int   bd_scrollview_scroll(bd_id);           int bd_scrollview_content_height(bd_id);
+```
 ### Icon (`bd_widget_icon.h`)
 
 The shared icon "cell" the dock, action bar, and inventory render and drag

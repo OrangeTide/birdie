@@ -213,6 +213,16 @@ What is built:
   drag clamps to a per-pane minimum. The sash is a private extension widget, so
   a press on pane content still reaches it. Second of the Smalltalk-IDE
   primitives from `doc/gui/smalltalk-ide.md`.
+- **Group box** (extension) — `bd_widget_groupbox`, a captioned etched-border
+  fieldset (OPEN LOOK / Motif). The group box is the content container: add
+  fields into it and they stack below a reserved caption band. A title-band
+  spacer plus a groove-drawing render hook; no core capability. Groups nest.
+- **Scroll-view** (extension) — `bd_widget_scrollview`, a viewport that clips a
+  taller content column and scrolls a subtree of real child widgets, for a form
+  taller than its panel. Offsets a single content child (`BD_Y_I = -scroll_y`),
+  measures the content from its children's `PREF_H`, and shows a scrollbar plus
+  wheel (the wheel bubbles from inner fields). Uses the new `BD_WC_CLIP_CHILDREN`
+  class flag — a general render-walk scissor that any clipping container can use.
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`
   reads it and `bd_focus(id)` sets it (e.g. focus an input line the app just
   opened, so the user types without clicking it first).

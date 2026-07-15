@@ -30,6 +30,8 @@
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
 #include "bd_widget_split.h"
+#include "bd_widget_groupbox.h"
+#include "bd_widget_scrollview.h"
 #include "bd_widget_chart.h"
 #include "bd_widget_icon.h"
 #include "bd_asset.h"
@@ -3049,6 +3051,81 @@ main(void)
 	bd_gui_layout(400, 300);
 	bd_gui_render();
 	check("a nested split renders without crashing", 1);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_GROUPBOX: title-band reservation + etched-border render ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id groot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 4, BD_END);
+	bd_id gb = bd_groupbox_create(groot,
+	    &(bd_groupbox_desc){ .title = "Connection" }, BD_GROW_I, 1, BD_END);
+	check("groupbox stores its title",
+	    bd_groupbox_title(gb) && strcmp(bd_groupbox_title(gb), "Connection") == 0);
+	bd_id gf1 = bd_create(gb, BD_LABEL, BD_LABEL_S, "Host", BD_PREF_H_I, 20, BD_END);
+	bd_create(gb, BD_LABEL, BD_LABEL_S, "Port", BD_PREF_H_I, 20, BD_END);
+	bd_gui_layout(300, 200);
+	bd_gui_render();
+	check("groupbox renders without crashing", 1);
+	/* the reserved title-band spacer plus the two fields */
+	int gn = 0;
+	for (bd_id c = bd_first_child(gb); c != BD_NONE; c = bd_next_sibling(c))
+	    gn++;
+	check("groupbox reserves a title band before its fields", gn == 3);
+	/* the first field sits below the title band, not at the top edge */
+	int gx, gy, gw, gh, fx, fy, fw, fh;
+	bd_widget_rect(gb, &gx, &gy, &gw, &gh);
+	bd_widget_rect(gf1, &fx, &fy, &fw, &fh);
+	check("groupbox first field is below the caption band",
+	    fy >= gy + (int)bd_draw_line_height());
+	bd_groupbox_set_title(gb, "Server");
+	check("groupbox set_title", strcmp(bd_groupbox_title(gb), "Server") == 0);
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_SCROLLVIEW: measure, clip, wheel (+ bubble), clamp ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id sroot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 0, BD_END);
+	bd_id sv = bd_scrollview_create(sroot, NULL, BD_GROW_I, 1, BD_END);
+	bd_id content = bd_scrollview_content(sv);
+	check("scrollview content container is valid", content != BD_NONE);
+	/* an event-hook field at the top (to exercise wheel bubbling) then many
+	 * tall rows, so the column far exceeds a short viewport */
+	bd_id cb = bd_checkbox_create(content,
+	    &(bd_checkbox_desc){ .label = "opt" }, BD_PREF_H_I, 20, BD_END);
+	for (int i = 0; i < 20; i++)
+	    bd_create(content, BD_LABEL, BD_LABEL_S, "row", BD_PREF_H_I, 24, BD_END);
+	/* frame 1 measures in the layout hook; frame 2 applies the geometry */
+	bd_gui_layout(200, 120);
+	bd_gui_render();
+	bd_gui_layout(200, 120);
+	check("scrollview measures the tall content",
+	    bd_scrollview_content_height(sv) > 120);
+	check("scrollview starts scrolled to the top", bd_scrollview_scroll(sv) == 0);
+
+	/* a CLIP_CHILDREN container scissors its children while rendering */
+	n_scissor = 0;
+	bd_gui_render();
+	check("scrollview clips its content with scissor", n_scissor > 0);
+
+	/* wheel over the top checkbox: it does not consume the wheel, so it
+	 * bubbles to the scroll-view (the core scroll-bubbling path) */
+	int cx, cy, cw, ch;
+	bd_widget_rect(cb, &cx, &cy, &cw, &ch);
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = cx + 2, .y = cy + 2 });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_SCROLL, .scroll_dy = -2.0f });
+	check("wheel over a field bubbles to the scroll-view",
+	    bd_scrollview_scroll(sv) > 0);
+
+	/* scroll_to clamps at both ends */
+	int maxs = bd_scrollview_content_height(sv) - 120;
+	bd_scrollview_scroll_to(sv, 100000);
+	check("scroll_to clamps to the bottom", bd_scrollview_scroll(sv) == maxs);
+	bd_scrollview_scroll_to(sv, -50);
+	check("scroll_to clamps at the top", bd_scrollview_scroll(sv) == 0);
 	}
 	bd_gui_cleanup();
 

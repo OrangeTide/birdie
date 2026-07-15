@@ -279,10 +279,18 @@ is_text_field(int type)
 /* ------------------------------------------------------------------ */
 
 #define BD_TYPE_CUSTOM_BASE 256
-#define MAX_WIDGET_CLASSES  32   /* toolkit ships ~14; leave room for host + test classes */
 
-static const bd_widget_class *classes[MAX_WIDGET_CLASSES];
+/*
+ * Registered widget classes, indexed by (type - BD_TYPE_CUSTOM_BASE). The
+ * registry grows on demand, so there is no fixed ceiling on how many extension
+ * classes may be registered: the toolkit's own widgets and any number of
+ * app-defined ones share it. The array holds borrowed pointers to caller-owned
+ * (static) class structs and persists for the process, since a type id is
+ * handed out once and must stay valid across bd_gui_init/cleanup cycles.
+ */
+static const bd_widget_class **classes;
 static int class_count;
+static int class_cap;
 
 static const bd_widget_class *
 class_of(int type)
@@ -296,8 +304,17 @@ class_of(int type)
 int
 bd_register_widget_class(const bd_widget_class *cls)
 {
-	if (!cls || class_count >= MAX_WIDGET_CLASSES)
+	if (!cls)
 		return 0;
+	if (class_count >= class_cap) {
+		int ncap = class_cap ? class_cap * 2 : 32;
+		const bd_widget_class **grown =
+		    realloc(classes, (size_t)ncap * sizeof *grown);
+		if (!grown)
+			return 0;
+		classes = grown;
+		class_cap = ncap;
+	}
 	classes[class_count] = cls;
 	return BD_TYPE_CUSTOM_BASE + class_count++;
 }
@@ -2107,9 +2124,22 @@ render_widget(bd_id id)
 	    w->type == BD_SCROLLBAR ||
 	    (cls && !(cls->flags & BD_WC_CONTAINS_CHILDREN)));
 	if (!leaf) {
+		/* a clipping container (BD_WC_CLIP_CHILDREN) masks its children to
+		 * its own rect, so a scrolled child laid out beyond the viewport is
+		 * cut off. Bracket the child loop with a backend scissor. */
+		int clip = be && be->scissor && cls &&
+		    (cls->flags & BD_WC_CLIP_CHILDREN);
+		if (clip) {
+			bd_draw_flush();
+			be->scissor(w->x, w->y, w->w, w->h);
+		}
 		bd_id c;
 		for (c = w->first_child; c != BD_NONE; c = pool[c].next_sib)
 			render_widget(c);
+		if (clip) {
+			bd_draw_flush();
+			be->scissor_off();
+		}
 	}
 }
 
@@ -4771,9 +4801,20 @@ bd_gui_event(const bd_event *ev)
 				pool[li].scroll_y = 0.0f;
 			return 1;
 		}
-		bd_id ext = hit_extension(frame, mouse_x, mouse_y);
-		if (ext != BD_NONE && ext_event(ext, ev))
-			return 1;
+		/* deliver to the extension widget under the pointer; if it does not
+		 * consume the wheel, bubble up to the nearest scrollable ancestor (a
+		 * scroll-view catches a wheel that started over one of its fields) */
+		for (bd_id a = hit_extension(frame, mouse_x, mouse_y); a != BD_NONE; ) {
+			if (ext_event(a, ev))
+				return 1;
+			bd_id p = pool[a].parent;
+			a = BD_NONE;
+			for (; p != BD_NONE; p = pool[p].parent) {
+				const bd_widget_class *pc = class_of(pool[p].type);
+				if (pc && pc->event) { a = p; break; }
+				if (p == frame) break;
+			}
+		}
 		return 0;
 	}
 

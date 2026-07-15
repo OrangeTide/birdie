@@ -35,6 +35,8 @@
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
 #include "bd_widget_split.h"
+#include "bd_widget_groupbox.h"
+#include "bd_widget_scrollview.h"
 #include "bd_widget_chart.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
@@ -1065,6 +1067,43 @@ build_ui(void)
 	bd_create(bp, BD_LABEL, BD_LABEL_S, "Bottom pane (an editor):",
 		BD_PREF_H_I, 18, BD_END);
 	bd_editor_create(bp, BD_GROW_I, 1, BD_END);
+
+	/* -- Forms: group box (etched fieldset) + scroll-view (BD_GROUPBOX,
+	 * BD_SCROLLVIEW) -- */
+	bd_id formspane = bd_tabview_add_pane(tabs, "Forms");
+	bd_set(formspane, BD_PAD_I, 8, BD_GAP_I, 8, BD_END);
+	bd_id frow = bd_create(formspane, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_GROW_I, 1, BD_GAP_I, 10, BD_END);
+
+	/* left: a group box grouping a few fields */
+	bd_id gcon = bd_groupbox_create(frow,
+		&(bd_groupbox_desc){ .title = "Connection" }, BD_PREF_W_I, 240, BD_END);
+	bd_create(gcon, BD_LABEL, BD_LABEL_S, "Host: mud.example.org",
+		BD_PREF_H_I, 22, BD_END);
+	bd_create(gcon, BD_LABEL, BD_LABEL_S, "Port: 4000", BD_PREF_H_I, 22, BD_END);
+	bd_checkbox_create(gcon,
+		&(bd_checkbox_desc){ .label = "Auto-reconnect", .checked = 1 },
+		BD_PREF_H_I, 24, BD_END);
+	bd_checkbox_create(gcon, &(bd_checkbox_desc){ .label = "Use TLS" },
+		BD_PREF_H_I, 24, BD_END);
+
+	/* right: a group box wrapping a scroll-view of many rows (drag the bar or
+	 * wheel over it -- the wheel bubbles even from an inner checkbox) */
+	bd_id gscroll = bd_groupbox_create(frow,
+		&(bd_groupbox_desc){ .title = "Triggers (scroll)" }, BD_GROW_I, 1, BD_END);
+	bd_id fsv = bd_scrollview_create(gscroll, NULL, BD_GROW_I, 1, BD_END);
+	bd_id fsc = bd_scrollview_content(fsv);
+	static char frowbuf[48][28];
+	for (int i = 0; i < 48; i++) {
+		snprintf(frowbuf[i], sizeof frowbuf[i], "trigger rule #%d", i + 1);
+		if (i % 4 == 0)
+			bd_checkbox_create(fsc,
+				&(bd_checkbox_desc){ .label = frowbuf[i], .checked = 1 },
+				BD_PREF_H_I, 24, BD_END);
+		else
+			bd_create(fsc, BD_LABEL, BD_LABEL_S, frowbuf[i],
+				BD_PREF_H_I, 22, BD_END);
+	}
 
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,
