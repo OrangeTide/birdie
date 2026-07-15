@@ -103,14 +103,22 @@ typedef struct bd_fs_platform {
   surfaces real devices mounted under `/media`, `/run/media`, `/mnt`, or
   `/Volumes`. Truly identifying removable media is a UDisks2/dbus (or GIO) job,
   deferred on purpose so the core needs no dbus dependency.
-- **Win32** (`bd_fs_win32.c`): `FindFirstFileW`; `SHGetKnownFolderPath`;
-  `GetLogicalDrives` for drive letters; the Recent Items folder plus
-  `SHAddToRecentDocs` for `add_recent`. UTF-16 converts to and from UTF-8 at the
-  boundary via `bd_utf8`. Guarded by `#ifdef _WIN32` so it compiles under the
-  mingw cross-build.
-- **macOS / Android / iOS**: stub implementations that return the home directory
-  and fail the rest gracefully, so the widget is usable everywhere and each OS is
-  a later drop-in.
+- **Win32** (the `_WIN32` branch of `bd_fs.c`): `FindFirstFileW` for entries
+  (with a `FILETIME`-to-Unix-seconds conversion), `SHGetKnownFolderPath` for
+  known folders, `GetLogicalDrives` for drive-letter volumes, `CreateDirectoryW`
+  for New Folder, and `SHAddToRecentDocs` for `add_recent`. UTF-16 converts to
+  and from UTF-8 at the boundary (`WideCharToMultiByte`/`MultiByteToWideChar`,
+  `CP_UTF8`). Guarded by `#ifdef _WIN32` and compiled by the mingw cross-build.
+  Note: `make windows-check` compiles and archives but does not link, so this is
+  compile-verified only, not run- or link-verified. Enumerating the Recent
+  folder (resolving its `.lnk` shortcuts via COM `IShellLink`) is a follow-up;
+  `recents` returns empty for now, so the Recent shortcut appears but is
+  unpopulated on Windows until then.
+- **macOS**: compiles in the Unix branch. Directory scanning, home, and volume
+  enumeration (`getmntinfo`) work; the freedesktop XDG user-dirs and
+  `recently-used.xbel` are Linux/BSD-desktop conventions macOS lacks, so known
+  folders fall back to `$HOME/Desktop` etc. and recents are empty. A native
+  Cocoa backend is a later drop-in.
 
 ### Layer 3: `bd_filedlg` widget
 
@@ -204,8 +212,12 @@ dialog. The connect dialog's Browse... already relies on this.
   no filename/filter, accept returns the chosen or current folder). The platform
   seam gained `make_dir`. The app's profile export now has a Save As... button
   that opens the Save chooser and drops the path into the export field.
-- **P4** Win32 platform backend and `make windows-check` coverage; macOS /
-  Android / iOS stubs behind the vtable.
+- **P4** (done, compile-verified) Win32 platform backend: `FindFirstFileW`
+  scandir, `SHGetKnownFolderPath` known folders, `GetLogicalDrives` volumes,
+  `CreateDirectoryW` mkdir, `SHAddToRecentDocs` register, UTF-16↔UTF-8 at the
+  boundary. Compiled + archived by `make windows-check` (not linked or run here).
+  Follow-ups: Recent-folder `.lnk`/COM enumeration, and a native Cocoa backend
+  for macOS (which otherwise runs the Unix branch with graceful gaps).
 - **P5** (optional) A native-dialog escape hatch per platform.
 
 ## 4. Testing

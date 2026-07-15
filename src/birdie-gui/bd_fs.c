@@ -548,64 +548,238 @@ bd_fs_add_recent(bd_fs *fs, const char *path)
 }
 
 /****************************************************************
- * Default platform: POSIX. The Windows implementation lands in a
- * later phase; its branch is stubbed here so the cross-build
- * (make windows-check) still compiles this translation unit.
+ * Default platform, selected at compile time: a Win32 backend and a
+ * Unix (POSIX + freedesktop) backend. Each host compiles only its own
+ * branch; the other is skipped by the preprocessor. The cross-build
+ * (make windows-check) compiles the Win32 branch.
  ****************************************************************/
 
+/* Append an entry (by value) to a growable array, doubling capacity. Shared by
+ * both platforms' scandir. */
+static int
+push_entry(bd_fs_entry **arr, int *n, int *cap, const bd_fs_entry *e)
+{
+	if (*n == *cap) {
+		int nc = *cap ? *cap * 2 : 32;
+		bd_fs_entry *na = realloc(*arr, (size_t)nc * sizeof *na);
+		if (!na)
+			return -1;
+		*arr = na;
+		*cap = nc;
+	}
+	(*arr)[(*n)++] = *e;
+	return 0;
+}
+
 #if defined(_WIN32)
+
+#include <windows.h>
+#include <shlobj.h>
+#include <stdio.h>
+#include <wchar.h>
+
+/* UTF-16 (native Win32) <-> UTF-8 (the toolkit's encoding). Return 0 on ok. */
+static int
+w2u(const WCHAR *w, char *out, int cap)
+{
+	return WideCharToMultiByte(CP_UTF8, 0, w, -1, out, cap, NULL, NULL) > 0
+	    ? 0 : -1;
+}
+
+static int
+u2w(const char *u, WCHAR *out, int cap)
+{
+	return MultiByteToWideChar(CP_UTF8, 0, u, -1, out, cap) > 0 ? 0 : -1;
+}
+
+/* FILETIME (100 ns ticks since 1601) to Unix seconds. */
+static int64_t
+filetime_unix(FILETIME ft)
+{
+	ULONGLONG t = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+	return t < 116444736000000000ULL ? 0
+	    : (int64_t)((t - 116444736000000000ULL) / 10000000ULL);
+}
 
 static int
 plat_scandir(const char *dir, bd_fs_entry **out, int *n)
 {
-	(void)dir;
 	*out = NULL;
 	*n = 0;
-	return -1;
+
+	char pat[4096];
+	snprintf(pat, sizeof pat, "%s/*", dir);
+	WCHAR wpat[4096];
+	if (u2w(pat, wpat, 4096) != 0)
+		return -1;
+
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW(wpat, &fd);
+	if (h == INVALID_HANDLE_VALUE)
+		return -1;
+
+	bd_fs_entry *arr = NULL;
+	int cnt = 0, cap = 0;
+	do {
+		if (wcscmp(fd.cFileName, L".") == 0 ||
+		    wcscmp(fd.cFileName, L"..") == 0)
+			continue;
+		char name[1024];
+		if (w2u(fd.cFileName, name, sizeof name) != 0)
+			continue;
+		bd_fs_entry e = {0};
+		e.is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		    ? 1 : 0;
+		e.is_link = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+		    ? 1 : 0;
+		e.size = ((int64_t)fd.nFileSizeHigh << 32) |
+		    (int64_t)fd.nFileSizeLow;
+		e.mtime = filetime_unix(fd.ftLastWriteTime);
+		e.name = strdup(name);
+		if (!e.name || push_entry(&arr, &cnt, &cap, &e) != 0) {
+			free(e.name);
+			continue;
+		}
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+
+	*out = arr;
+	*n = cnt;
+	return 0;
 }
 
 static int
 plat_known_folder(int which, char *out, size_t cap)
 {
-	(void)which;
-	(void)out;
-	(void)cap;
-	return -1;
+	const KNOWNFOLDERID *id;
+	switch (which) {
+	case BD_FS_HOME:      id = &FOLDERID_Profile;   break;
+	case BD_FS_DESKTOP:   id = &FOLDERID_Desktop;   break;
+	case BD_FS_DOCUMENTS: id = &FOLDERID_Documents; break;
+	case BD_FS_DOWNLOADS: id = &FOLDERID_Downloads; break;
+	default:              return -1;
+	}
+	PWSTR w = NULL;
+	if (SHGetKnownFolderPath(id, 0, NULL, &w) != S_OK) {
+		if (w)
+			CoTaskMemFree(w);
+		return -1;
+	}
+	int r = w2u(w, out, (int)cap);
+	CoTaskMemFree(w);
+	return r;
 }
 
+/* Lexical normalize: fold '\\' to '/', collapse "." and ".." segments, and
+ * preserve an optional "X:" drive prefix. */
 static void
 plat_normalize(char *path)
 {
-	(void)path;
+	for (char *p = path; *p; p++)
+		if (*p == '\\')
+			*p = '/';
+
+	char drive = 0;
+	char *body = path;
+	if (((path[0] >= 'A' && path[0] <= 'Z') ||
+	     (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':') {
+		drive = path[0];
+		body = path + 2;
+	}
+	int absolute = (body[0] == '/');
+
+	char *segs[256];
+	int nseg = 0;
+	for (char *p = body; *p; ) {
+		while (*p == '/')
+			p++;
+		if (!*p)
+			break;
+		char *start = p;
+		while (*p && *p != '/')
+			p++;
+		size_t len = (size_t)(p - start);
+		if (len == 1 && start[0] == '.') {
+			/* skip */
+		} else if (len == 2 && start[0] == '.' && start[1] == '.') {
+			if (nseg > 0 &&
+			    !(strncmp(segs[nseg - 1], "..", 2) == 0 &&
+			      segs[nseg - 1][2] == '\0'))
+				nseg--;
+			else if (!absolute && nseg < 256)
+				segs[nseg++] = start;
+		} else if (nseg < 256) {
+			segs[nseg++] = start;
+		}
+		if (*p)
+			*p++ = '\0';
+	}
+
+	char *w = path;
+	if (drive) {
+		*w++ = drive;
+		*w++ = ':';
+	}
+	if (absolute)
+		*w++ = '/';
+	for (int i = 0; i < nseg; i++) {
+		if (i > 0)
+			*w++ = '/';
+		size_t len = strlen(segs[i]);
+		memmove(w, segs[i], len);
+		w += len;
+	}
+	if (w == path)			/* nothing at all: current dir */
+		*w++ = '.';
+	*w = '\0';
 }
 
 static int
 plat_volumes(bd_fs_place **out, int *n)
 {
-	*out = NULL;
-	*n = 0;
-	return -1;
+	bd_fs_place *arr = NULL;
+	int cnt = 0, cap = 0;
+	DWORD mask = GetLogicalDrives();
+	for (int i = 0; i < 26; i++) {
+		if (!(mask & (1u << i)))
+			continue;
+		char label[3] = { (char)('A' + i), ':', '\0' };
+		char path[4]  = { (char)('A' + i), ':', '/', '\0' };
+		place_add(&arr, &cnt, &cap, strdup(label), strdup(path),
+		    BD_FS_PLACE_VOLUME, 1);
+	}
+	*out = arr;
+	*n = cnt;
+	return 0;
 }
 
+/* Enumerating the Recent folder's .lnk shortcuts and resolving their targets
+ * needs COM (IShellLink), which cannot even be link-verified without a Windows
+ * host, so it is a follow-up. It returns empty (the Recent shortcut still
+ * appears, just unpopulated); registration below already works. */
 static int
 plat_recents(bd_fs_place **out, int *n)
 {
 	*out = NULL;
 	*n = 0;
-	return -1;
+	return 0;
 }
 
 static void
 plat_add_recent(const char *path)
 {
-	(void)path;
+	WCHAR w[4096];
+	if (u2w(path, w, 4096) == 0)
+		SHAddToRecentDocs(SHARD_PATHW, w);
 }
 
 static int
 plat_make_dir(const char *path)
 {
-	(void)path;
-	return -1;
+	WCHAR w[4096];
+	if (u2w(path, w, 4096) != 0)
+		return -1;
+	return CreateDirectoryW(w, NULL) ? 0 : -1;
 }
 
 #else /* Unix: X11 desktops (Linux, the BSDs, ...) via POSIX + freedesktop */
@@ -622,21 +796,6 @@ plat_make_dir(const char *path)
  * above their definitions can use them. */
 static const char *get_home(void);
 static char *read_file(const char *path);
-
-static int
-push_entry(bd_fs_entry **arr, int *n, int *cap, const bd_fs_entry *e)
-{
-	if (*n == *cap) {
-		int nc = *cap ? *cap * 2 : 32;
-		bd_fs_entry *na = realloc(*arr, (size_t)nc * sizeof *na);
-		if (!na)
-			return -1;
-		*arr = na;
-		*cap = nc;
-	}
-	(*arr)[(*n)++] = *e;
-	return 0;
-}
 
 static int
 plat_scandir(const char *dir, bd_fs_entry **out, int *n)
