@@ -122,13 +122,14 @@ all :: $(BD_FONT_OUT)
 #
 #   make test         build + run the headless tests (test/module.mk):
 #                      test_gui (toolkit), test_client (MUD-client units),
-#                      test_session (bd_session integration), and test_netloop
-#                      (real bd_net over a loopback socket).
+#                      test_fs (file-dialog model), test_session (bd_session
+#                      integration), and test_netloop (real bd_net over a
+#                      loopback socket).
 #   make widget-test   build the opt-in widget gallery (src/guitest/module.mk).
 # ----------------------------------------------------------------------
 .PHONY : test
-test : run-test-test_gui run-test-test_client run-test-test_session \
-       run-test-test_netloop
+test : run-test-test_gui run-test-test_client run-test-test_fs \
+       run-test-test_session run-test-test_netloop
 
 .PHONY : widget-test
 widget-test : $(BD_FONT_OUT)

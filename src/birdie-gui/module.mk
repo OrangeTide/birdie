@@ -34,6 +34,8 @@ birdie_gui_SRCS = \
 	bd_asset.c \
 	bd_color.c \
 	bd_utf8.c \
+	bd_fs.c \
+	bd_filedlg.c \
 	bd_widget_value.c \
 	bd_widget_form.c \
 	bd_widget_combo.c \

@@ -48,6 +48,21 @@ define test_client_TESTCMD
 $(test_client_EXEC)
 endef
 
+# test_fs exercises bd_fs, the file-dialog filesystem model. The model is
+# UI-agnostic and its OS access sits behind a platform vtable, so the test
+# compiles bd_fs.c directly (no toolkit, no backend, no window) and drives it
+# through a fake platform plus one real POSIX scandir against a temp directory.
+EXECUTABLES  += test_fs
+TEST_TARGETS += test_fs
+
+test_fs_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+test_fs_SRCS  = test_fs.c ../src/birdie-gui/bd_fs.c
+test_fs_CFLAGS = -I$(test_fs_DIR)../src/birdie-gui
+
+define test_fs_TESTCMD
+$(test_fs_EXEC)
+endef
+
 # test_session is an integration test for bd_session, the seam that wires the
 # transport to line assembly, triggers, and the front-end event stream. It links
 # a FAKE bd_net (defined in the test) in place of the real socket/thread/TLS
