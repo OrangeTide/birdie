@@ -6,6 +6,7 @@
 #include "bd_widget_combo.h"
 #include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
+#include "bd_filedlg.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -59,16 +60,10 @@ static bd_dialog *color_dlg;
 static bd_id color_pick, color_hex, color_sgr;
 static void (*color_on_pick)(const char *sgr);   /* Use hands back the SGR */
 
-/* file chooser dialog: browse directories, pick a file (callback gets its path) */
-#define FC_PATH  4096              /* a canonical path (PATH_MAX) */
-#define FC_JOIN  (FC_PATH + 300)   /* dir + '/' + a 255-byte name, no truncation */
-#define FC_MAX   400
-static bd_dialog *file_dlg;
-static bd_id file_list, file_dir_label, file_name_field;
-static char file_cwd[FC_PATH];
-static struct fentry { char name[256]; int is_dir; } file_entries[FC_MAX];
-static int file_nentries;
+/* file chooser: bd_filedlg (bd_fs-backed) hands the picked path to this
+ * callback. last_dir remembers where the last pick was, so it reopens there. */
 static void (*file_on_pick)(const char *path);
+static char last_dir[4096];
 static char editing_name[128];          /* profile being edited ("" = add new) */
 static bd_profiles *profiles;
 static const bd_profile *active;        /* the profile we connect with */
@@ -605,6 +600,36 @@ on_open_export(bd_id id, void *arg)
 	bd_dialog_open(export_dlg);
 }
 
+/* Drop a chosen destination into the export dialog's path field. */
+static void
+export_path_picked(const char *path, void *user)
+{
+	(void)user;
+	bd_set(export_path, BD_LABEL_S, path, BD_END);
+}
+
+/* Save As... in the export dialog: pick the destination with the Save chooser
+ * (stacked over the export dialog), defaulting to a CSV name. */
+static void
+on_export_saveas(bd_id id, void *arg)
+{
+	static const bd_filedlg_filter filters[] = {
+		{ "CSV files", "*.csv" },
+		{ "All files", "*" },
+	};
+	(void)id;
+	(void)arg;
+	bd_filedlg_open(&(bd_filedlg_opts){
+		.title = "Export profiles to",
+		.mode = BD_FILEDLG_SAVE,
+		.start_dir = last_dir[0] ? last_dir : NULL,
+		.default_name = "profiles.csv",
+		.filters = filters,
+		.nfilters = 2,
+		.on_accept = export_path_picked,
+	});
+}
+
 /* Build the column filter from the ticked boxes (name is always included, it
  * is the row identity), export, and write it to the given path. */
 static void
@@ -1038,126 +1063,43 @@ on_settings_save(bd_id panel, void *arg)
 
 /* ---- file chooser (browse to a file, hand its path to a callback) ---- */
 
-/* directories first, then case-sensitive by name */
-static int
-fentry_cmp(const void *a, const void *b)
-{
-	const struct fentry *x = a, *y = b;
-	if (x->is_dir != y->is_dir)
-		return y->is_dir - x->is_dir;
-	return strcmp(x->name, y->name);
-}
-
-/* List `dir` into the widget: resolve it, read its entries (dirs marked with a
- * trailing '/'), sort, and update the path label. Keeps the old view on error. */
+/* bd_filedlg hands back the chosen path: remember its directory so the next
+ * open starts there, then forward to whatever open_file_chooser was given. */
 static void
-file_scan(const char *dir)
+file_picked(const char *path, void *user)
 {
-	char *real = realpath(dir, NULL);   /* canonicalises "..", must exist */
-	DIR *d;
-	struct dirent *de;
-	static char items[FC_MAX * 260];
-	size_t off = 0;
-	int i;
-
-	if (!real)
-		return;
-	d = opendir(real);
-	if (!d) {
-		free(real);
-		return;
+	const char *slash = strrchr(path, '/');
+	(void)user;
+	if (slash && slash != path) {
+		size_t n = (size_t)(slash - path);
+		if (n >= sizeof last_dir)
+			n = sizeof last_dir - 1;
+		memcpy(last_dir, path, n);
+		last_dir[n] = '\0';
 	}
-	snprintf(file_cwd, sizeof file_cwd, "%s", real);
-	free(real);
-
-	file_nentries = 0;
-	while ((de = readdir(d)) && file_nentries < FC_MAX) {
-		char full[FC_JOIN];
-		struct stat st;
-		if (!strcmp(de->d_name, "."))
-			continue;                   /* keep ".." so the user can go up */
-		snprintf(full, sizeof full, "%s/%s", file_cwd, de->d_name);
-		file_entries[file_nentries].is_dir =
-		    (stat(full, &st) == 0 && S_ISDIR(st.st_mode));
-		snprintf(file_entries[file_nentries].name,
-		    sizeof file_entries[0].name, "%s", de->d_name);
-		file_nentries++;
-	}
-	closedir(d);
-	qsort(file_entries, file_nentries, sizeof file_entries[0], fentry_cmp);
-
-	for (i = 0; i < file_nentries && off < sizeof items - 1; i++) {
-		int wrote = snprintf(items + off, sizeof items - off, "%s%s%s",
-		    i ? "\n" : "", file_entries[i].name,
-		    file_entries[i].is_dir ? "/" : "");
-		if (wrote < 0)
-			break;
-		off += (size_t)wrote;
-	}
-	items[off < sizeof items ? off : sizeof items - 1] = '\0';
-	bd_list_set_items(file_list, items);
-	bd_set(file_dir_label, BD_LABEL_S, file_cwd, BD_END);
+	if (file_on_pick)
+		file_on_pick(path);
 }
 
-/* Activate (double-click / Enter) a list row: descend into a directory, or put
- * a file's name in the name field. */
-static void
-on_file_activate(bd_id id, void *arg)
-{
-	int idx = bd_list_selected(file_list);
-	(void)id;
-	(void)arg;
-	if (idx < 0 || idx >= file_nentries)
-		return;
-	if (file_entries[idx].is_dir) {
-		char path[FC_JOIN];
-		snprintf(path, sizeof path, "%s/%s", file_cwd,
-		    file_entries[idx].name);
-		file_scan(path);
-	} else {
-		bd_set(file_name_field, BD_LABEL_S, file_entries[idx].name, BD_END);
-	}
-}
-
-/* Open: use the name field, or fall back to the list's selection (Enter fires
- * this before the list's own activation). A selected directory is entered
- * instead (the dialog stays open); a file's path is handed to the callback.
- * The dialog closes first so the callback may open its own modal. */
-static void
-on_file_open(bd_id panel, void *arg)
-{
-	const char *name = bd_get_s(file_name_field, BD_LABEL_S);
-	static char full[FC_JOIN];
-	void (*cb)(const char *) = file_on_pick;
-	(void)arg;
-	if (!name || !name[0]) {            /* no typed name: use the list row */
-		int idx = bd_list_selected(file_list);
-		if (idx < 0 || idx >= file_nentries)
-			return;
-		if (file_entries[idx].is_dir) {
-			char path[FC_JOIN];
-			snprintf(path, sizeof path, "%s/%s", file_cwd,
-			    file_entries[idx].name);
-			file_scan(path);            /* enter it, keep the dialog open */
-			return;
-		}
-		name = file_entries[idx].name;
-	}
-	snprintf(full, sizeof full, "%s/%s", file_cwd, name);
-	bd_modal_close(panel);
-	if (cb)
-		cb(full);
-}
-
-/* Open the chooser, starting in the last directory (or $HOME), for callback cb. */
+/* Open the chooser, starting in the last directory (or $HOME), for callback cb.
+ * A CSV filter leads, since the client's profile import/export is CSV, with an
+ * "All files" fallback. */
 static void
 open_file_chooser(void (*cb)(const char *path))
 {
-	const char *start = file_cwd[0] ? file_cwd : getenv("HOME");
+	static const bd_filedlg_filter filters[] = {
+		{ "CSV files", "*.csv" },
+		{ "All files", "*" },
+	};
 	file_on_pick = cb;
-	bd_set(file_name_field, BD_LABEL_S, "", BD_END);
-	file_scan(start && *start ? start : ".");
-	bd_dialog_open(file_dlg);
+	bd_filedlg_open(&(bd_filedlg_opts){
+		.title = "Open File",
+		.mode = BD_FILEDLG_OPEN,
+		.start_dir = last_dir[0] ? last_dir : NULL,
+		.filters = filters,
+		.nfilters = 2,
+		.on_accept = file_picked,
+	});
 }
 
 /* File > Import profiles...: browse to a CSV and run it through the importer. */
@@ -1624,15 +1566,18 @@ init(void)
 
 	/* the export column-filter form: pick columns (name is always included),
 	 * choose a path, Export writes the CSV */
-	export_dlg = bd_dialog_create("Export profiles", 360, 300);
+	export_dlg = bd_dialog_create("Export profiles", 440, 360);
 	bd_id ebody = bd_dialog_content(export_dlg);
 	bd_create(ebody, BD_LABEL, BD_LABEL_S, "Columns to include (name is always):",
 		BD_PREF_H_I, 18, BD_END);
 	for (int i = 0; i < N_EXPORT_COLS; i++)
 		exp_check[i] = bd_checkbox_create(ebody, &(bd_checkbox_desc){
 			.label = export_cols[i], .checked = 1 }, BD_END);
-	export_path = bd_create(bd_dialog_field(export_dlg, "To file"),
-		BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
+	bd_id erow = bd_dialog_field(export_dlg, "To file");
+	export_path = bd_create(erow, BD_INPUT_LINE, BD_GROW_I, 1, BD_PAD_I, 3,
+		BD_END);
+	bd_create(erow, BD_BUTTON, BD_LABEL_S, "Save As...", BD_PREF_W_I, 84,
+		BD_ON_CLICK_F, on_export_saveas, BD_END);
 	bd_dialog_button(export_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(export_dlg, "Export", BD_DIALOG_DEFAULT, on_export, NULL);
 
@@ -1664,20 +1609,6 @@ init(void)
 		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
 	bd_dialog_button(color_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(color_dlg, "Use", BD_DIALOG_DEFAULT, on_color_use, NULL);
-
-	/* the file chooser: a current-directory label, a list of entries (double-
-	 * click a dir to descend, a file to select it), and a name field. Open
-	 * hands the joined path to whatever callback open_file_chooser was given. */
-	file_dlg = bd_dialog_create("Open file", 460, 380);
-	bd_id fbody = bd_dialog_content(file_dlg);
-	file_dir_label = bd_create(fbody, BD_LABEL, BD_LABEL_S, "", BD_PREF_H_I, 18,
-		BD_END);
-	file_list = bd_create(fbody, BD_LIST, BD_GROW_I, 1,
-		BD_ON_CLICK_F, on_file_activate, BD_END);
-	file_name_field = bd_create(bd_dialog_field(file_dlg, "File"), BD_INPUT_LINE,
-		BD_GROW_I, 1, BD_PAD_I, 3, BD_END);
-	bd_dialog_button(file_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
-	bd_dialog_button(file_dlg, "Open", BD_DIALOG_DEFAULT, on_file_open, NULL);
 
 	/* Optionally connect on startup (testing/automation). */
 	if (getenv("BIRDIE_AUTOCONNECT"))
@@ -1711,9 +1642,9 @@ cleanup(void)
 	bd_dialog_free(export_dlg);
 	bd_dialog_free(import_dlg);
 	bd_dialog_free(color_dlg);
-	bd_dialog_free(file_dlg);
+	/* the file chooser (bd_filedlg) owns and reclaims its own dialog */
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
-	export_dlg = import_dlg = color_dlg = file_dlg = NULL;
+	export_dlg = import_dlg = color_dlg = NULL;
 	bd_gui_cleanup();
 }
 
