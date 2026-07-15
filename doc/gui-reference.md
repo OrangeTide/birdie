@@ -83,6 +83,7 @@ knows the width to pull. Terminate a list with `BD_END`.
 | `BD_GRAVITY_I`  | int  | floating frame    | `enum bd_gravity` edge/corner dock         |
 | `BD_LABEL_S`    | str  | most              | text / items (`\n`-separated for list/tabs)|
 | `BD_NAME_S`     | str  | any               | accessibility name                         |
+| `BD_TIP_S`      | str  | any               | hover tooltip text (dwell-triggered bubble)|
 | `BD_ON_CLICK_F` / `BD_ON_CLOSE_F` | cb | button, menu, frame | `void(bd_id, void*)` handler   |
 | `BD_ON_CLICK_P` / `BD_ON_CLOSE_P` | ptr | ″ | user data passed to the handler             |
 | `BD_FG_C` / `BD_BG_C` | color | any         | foreground / background RGBA (`0xRRGGBBAA`)|

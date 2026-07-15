@@ -3395,6 +3395,55 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- tooltips (BD_TIP_S) ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id fr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED,
+	    BD_PAD_I, 0, BD_END);
+	/* a plain panel: its own render is hover-independent, so any change in the
+	 * draw count between two renders at a fixed pointer is the tooltip alone */
+	bd_id p = bd_create(fr, BD_PANEL, BD_X_I, 100, BD_Y_I, 100,
+	    BD_PREF_W_I, 80, BD_PREF_H_I, 40, BD_TIP_S, "Hello tip", BD_END);
+	bd_gui_layout(400, 300);
+	check("BD_TIP_S round-trips through bd_get_s",
+	    bd_get_s(p, BD_TIP_S) && strcmp(bd_get_s(p, BD_TIP_S), "Hello tip") == 0);
+
+	/* pointer over empty frame area (nothing tipped): no bubble. The stub clock
+	 * advances a full second per bd_time() call, so the dwell always elapses by
+	 * the next render -- the bubble's presence is what we are isolating. */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 10, .y = 10 });
+	int base = n_drawverts;
+	bd_gui_render();
+	int away = n_drawverts - base;
+
+	/* pointer resting over the tipped panel: the bubble adds draw output */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 140, .y = 120 });
+	base = n_drawverts;
+	bd_gui_render();
+	int over = n_drawverts - base;
+	check("a resting pointer over a tipped widget draws a tooltip bubble",
+	    over > away);
+
+	/* a press (any non-move event) dismisses it without moving the pointer, so
+	 * the draw count falls back to the untipped baseline */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 140, .y = 120,
+	    .button = BD_MOUSE_LEFT });
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_UP, .x = 140, .y = 120,
+	    .button = BD_MOUSE_LEFT });
+	base = n_drawverts;
+	bd_gui_render();
+	check("a press dismisses the tooltip", n_drawverts - base == away);
+
+	/* clearing the tip string suppresses the bubble even while hovered */
+	bd_set(p, BD_TIP_S, (const char *)NULL, BD_END);
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_MOVE, .x = 141, .y = 121 });
+	base = n_drawverts;
+	bd_gui_render();
+	check("clearing BD_TIP_S removes the tooltip", n_drawverts - base == away);
+	}
+	bd_gui_cleanup();
+
+
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
 }

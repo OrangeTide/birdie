@@ -118,6 +118,7 @@ enum {
 
 	BD_LABEL_S    = 0x012,
 	BD_NAME_S     = 0x022,
+	BD_TIP_S      = 0x032,   /* hover tooltip text (borrowed, like BD_LABEL_S) */
 
 	BD_ON_CLICK_P = 0x013,
 	BD_ON_CLOSE_P = 0x023,
@@ -241,6 +242,18 @@ enum { BD_MOTION_AUTO = 0, BD_MOTION_FULL, BD_MOTION_REDUCED };
 void bd_set_reduced_motion(int mode);    /* BD_MOTION_* */
 void bd_reduced_motion_hint(int reduce); /* external AUTO contribution */
 int  bd_reduced_motion(void);            /* effective flag; widgets read this */
+
+/*
+ * Tooltips. Any widget carrying BD_TIP_S shows a small hover-help bubble after
+ * the pointer rests over it briefly (a short dwell). It works for every widget
+ * type, core or extension, which is how otherwise-unlabeled chrome (icon
+ * buttons, an action bar, a dock tile) gets a readable hint. The string is
+ * borrowed like BD_LABEL_S; set or clear it any time with bd_set(id, BD_TIP_S,
+ * text, BD_END). The bubble is drawn top-most near the pointer, is
+ * non-interactive (pointer events pass through to the widget), and is dismissed
+ * by any press, wheel, key, or drag. The deepest tipped widget under the
+ * pointer wins, so an untipped child still shows a tipped ancestor's hint.
+ */
 
 /* BD_LIST: a scrolling, selectable list of newline-separated items. Set the
  * items with BD_LABEL_S (or bd_list_set_items). BD_ON_CLICK_F runs on

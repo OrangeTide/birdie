@@ -241,6 +241,12 @@ What is built:
   focus-gained/lost on SDL3). The toolkit tracks focus per top-level window;
   `bd_gui_focused()` / `bd_window_focused(frame)` let an app throttle its render
   loop (pause animation, drop framerate, lower quality) while in the background.
+- **Tooltips** — any widget carrying `BD_TIP_S` shows a hover-help bubble after
+  a short pointer dwell (`TIP_DELAY`), drawn top-most near the pointer. It works
+  for every widget type, core or extension, so unlabeled chrome (icon buttons,
+  an action bar, a dock tile) gets a readable hint. The bubble is
+  non-interactive (input passes through), the deepest tipped widget under the
+  pointer wins, and any press, wheel, key, or drag dismisses it.
 - **Reduced motion** — a toolkit-wide flag widgets read (`bd_reduced_motion()`)
   to skip animation while still drawing the final state: the cursor stops
   blinking and the toggle thumb snaps instead of sliding. Policy is

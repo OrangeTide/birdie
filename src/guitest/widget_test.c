@@ -707,7 +707,8 @@ build_ui(void)
 	bd_id krow = section(right, "Knobs & dials", BD_LAYOUT_ROW, 96);
 	bd_knob_create(krow, &(bd_knob_desc){
 		.min = 0, .max = 1, .value = 0.3f, .dial = BD_DIAL_DOTS,
-		.cb = on_knob, .arg = (void *)"Gain" }, BD_PREF_W_I, 60, BD_END);
+		.cb = on_knob, .arg = (void *)"Gain" }, BD_PREF_W_I, 60,
+		BD_TIP_S, "Drag up or down to turn the dial", BD_END);
 	bd_knob_create(krow, &(bd_knob_desc){
 		.min = -1, .max = 1, .value = 0, .dial = BD_DIAL_BALANCE,
 		.cb = on_knob, .arg = (void *)"Balance" }, BD_PREF_W_I, 60, BD_END);
@@ -1110,9 +1111,11 @@ build_ui(void)
 		BD_LAYOUT_I, BD_LAYOUT_ROW, BD_PREF_H_I, 30,
 		BD_PAD_I, 4, BD_GAP_I, 4, BD_END);
 	bd_create(bar, BD_BUTTON, BD_LABEL_S, "New Window", BD_PREF_W_I, 110,
-		BD_ON_CLICK_F, on_new_window, BD_END);
+		BD_ON_CLICK_F, on_new_window,
+		BD_TIP_S, "Open another top-level window", BD_END);
 	bd_create(bar, BD_BUTTON, BD_LABEL_S, "Quit", BD_PREF_W_I, 90,
-		BD_ON_CLICK_F, on_quit, BD_END);
+		BD_ON_CLICK_F, on_quit,
+		BD_TIP_S, "Close the gallery", BD_END);
 	bd_slider_create(bar, &(bd_slider_desc){ .orient = BD_HORIZONTAL,
 		.value = 0.5f, .cb = on_slider, .arg = (void *)"Volume" },
 		BD_GROW_I, 1, BD_END);

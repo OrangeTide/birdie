@@ -58,6 +58,7 @@ struct widget {
 	int visible, enabled;
 	int role;
 	const char *acc_name;
+	const char *tip;         /* BD_TIP_S: hover tooltip text, or NULL */
 
 	bd_callback_fn on_click;
 	void *on_click_data;
@@ -204,6 +205,16 @@ static int   ancestors_visible(bd_id id);
 static bd_id active_press = BD_NONE;
 static bd_id pointer_capture = BD_NONE; /* extension widget grabbing a drag */
 static bd_id hover_ext = BD_NONE;       /* wants_hover widget under the pointer */
+
+/* Tooltip state: the deepest tipped widget under the pointer, when its dwell
+ * began, and the pointer position anchoring the bubble. tip_widget is BD_NONE
+ * when the pointer is over nothing tipped (or a tip was just dismissed). See
+ * tooltip_track / render_tooltip and BD_TIP_S in widget.h. */
+#define TIP_DELAY 0.6                   /* dwell (s) before the bubble appears */
+#define TIP_MOVE  5                     /* pointer jitter (px) that resets dwell */
+static bd_id  tip_widget = BD_NONE;
+static double tip_since;
+static int    tip_x, tip_y;
 /* per-finger capture: each active touch id grabs the widget it landed on, so
  * several widgets (e.g. knobs) can be dragged at once */
 #define MAX_TOUCHES 10
@@ -776,6 +787,7 @@ apply_s(struct widget *w, int attr, const char *val)
 		}
 		break;
 	case BD_NAME_S:  w->acc_name = val; break;
+	case BD_TIP_S:   w->tip = val; break;
 	}
 }
 
@@ -1481,6 +1493,8 @@ bd_destroy(bd_id id)
 		}
 	if (hover_ext == id)
 		hover_ext = BD_NONE;
+	if (tip_widget == id)
+		tip_widget = BD_NONE;
 	if (wm_active_frame == id)
 		wm_active_frame = BD_NONE;
 	if (wm_drag_frame == id)
@@ -1554,6 +1568,7 @@ bd_get_s(bd_id id, int attr)
 			return pool[id].text_buf;
 		return pool[id].label;
 	case BD_NAME_S:  return pool[id].acc_name;
+	case BD_TIP_S:   return pool[id].tip;
 	}
 	return NULL;
 }
@@ -3031,6 +3046,7 @@ bd_gui_cleanup(void)
 	pointer_capture = BD_NONE;
 	dnd_active = 0;
 	hover_ext = BD_NONE;
+	tip_widget = BD_NONE;
 	pen_capture = BD_NONE;
 	drag_menu = BD_NONE;
 	focus_id = BD_NONE;
@@ -3733,6 +3749,92 @@ render_dnd_ghost(int W, int H)
 	bd_draw_end();
 }
 
+/* Deepest visible widget under the pointer that carries a BD_TIP_S string. A
+ * tipped ancestor wins only when no tipped descendant is under the pointer;
+ * later siblings (drawn on top) win over earlier ones. */
+static bd_id
+hit_tip(bd_id id, int mx, int my)
+{
+	struct widget *w = &pool[id];
+	if (!w->alive || !w->visible)
+		return BD_NONE;
+	if (!in_rect(mx, my, w->x, w->y, w->w, w->h))
+		return BD_NONE;
+	bd_id found = BD_NONE;
+	for (bd_id c = w->first_child; c != BD_NONE; c = pool[c].next_sib) {
+		bd_id r = hit_tip(c, mx, my);
+		if (r != BD_NONE)
+			found = r;
+	}
+	if (found != BD_NONE)
+		return found;
+	return (w->tip && w->tip[0]) ? id : BD_NONE;
+}
+
+/* On a bare mouse-move, refresh the tooltip dwell. A changed tipped widget or a
+ * jitter past TIP_MOVE restarts the timer, so the bubble appears only once the
+ * pointer settles; render_tooltip shows it after TIP_DELAY. */
+static void
+tooltip_track(bd_id frame, int mx, int my)
+{
+	bd_id t = hit_tip(frame, mx, my);
+	if (t != tip_widget || abs(mx - tip_x) > TIP_MOVE ||
+	    abs(my - tip_y) > TIP_MOVE) {
+		tip_widget = t;
+		tip_since = bd_time();
+		tip_x = mx;
+		tip_y = my;
+	}
+}
+
+/* Dismiss any pending/shown tooltip (a press, wheel, or key ends the dwell). */
+static void
+tooltip_hide(void)
+{
+	tip_widget = BD_NONE;
+}
+
+/* The hover-help bubble: drawn top-most (after the drag ghost) near the pointer
+ * once the dwell has elapsed, in the primary window's coordinate space. It is
+ * non-interactive; input never routes to it. Suppressed while another gesture
+ * or top-most layer owns the pointer. */
+static void
+render_tooltip(int W, int H)
+{
+	if (tip_widget == BD_NONE || !pool[tip_widget].alive ||
+	    !pool[tip_widget].tip || !pool[tip_widget].tip[0])
+		return;
+	if (dnd_active || pointer_capture != BD_NONE ||
+	    bd_overlay_owner() != BD_NONE || active_notice != BD_NONE)
+		return;
+	if (bd_time() - tip_since < TIP_DELAY)
+		return;
+
+	const char *s = pool[tip_widget].tip;
+	const int padx = 6, pady = 3, off = 18;
+	int tw = (int)bd_draw_text_width(s);
+	int lh = (int)bd_draw_line_height();
+	int bw = tw + 2 * padx;
+	int bh = lh + 2 * pady;
+	int bx = tip_x + off;         /* below-right of the pointer by default */
+	int by = tip_y + off;
+	if (bx + bw > W)              /* keep the bubble on screen */
+		bx = W - bw;
+	if (bx < 0)
+		bx = 0;
+	if (by + bh > H)             /* flip above the pointer if it would clip */
+		by = tip_y - off - bh;
+	if (by < 0)
+		by = 0;
+
+	bd_draw_begin(W, H);
+	fill_rect(bx, by, bw, bh, theme.panel);
+	stroke_rect(bx, by, bw, bh, theme.border);
+	queue_text(s, (float)(bx + padx),
+	    (float)(by + pady) + bd_draw_ascent(), theme.text_hi);
+	bd_draw_end();
+}
+
 void
 bd_gui_render(void)
 {
@@ -3758,6 +3860,8 @@ bd_gui_render(void)
 				    be->window_height(id));
 				render_dnd_ghost(be->window_width(id),
 				    be->window_height(id));
+				render_tooltip(be->window_width(id),
+				    be->window_height(id));
 			}
 			be->window_swap(id);
 		}
@@ -3778,6 +3882,7 @@ bd_gui_render(void)
 		render_notice(be->width(), be->height());
 		render_overlay(be->width(), be->height());
 		render_dnd_ghost(be->width(), be->height());
+		render_tooltip(be->width(), be->height());
 	}
 
 	handle_ime_state();
@@ -4774,6 +4879,10 @@ bd_gui_event(const bd_event *ev)
 			return 1;
 	}
 
+	/* any interaction other than a bare move dismisses a live tooltip */
+	if (ev->type != BD_EV_MOUSE_MOVE)
+		tooltip_hide();
+
 	switch (ev->type) {
 	case BD_EV_MOUSE_MOVE:
 		/* a captured widget keeps the pointer through a drag */
@@ -4791,6 +4900,7 @@ bd_gui_event(const bd_event *ev)
 		}
 		update_hover(frame, ev->x, ev->y);
 		deliver_hover_move(frame, ev);
+		tooltip_track(frame, ev->x, ev->y);
 		return 0;
 
 	case BD_EV_MOUSE_SCROLL: {

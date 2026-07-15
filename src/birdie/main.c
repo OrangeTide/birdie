@@ -1440,7 +1440,8 @@ init(void)
 		"Session > Connect... to choose a MUD.\r\n",
 		-1);
 	input_line = bd_create(right, BD_INPUT_LINE,
-		BD_PREF_H_I, 24, BD_PAD_I, 4, BD_ON_CLICK_F, on_submit, BD_END);
+		BD_PREF_H_I, 24, BD_PAD_I, 4, BD_ON_CLICK_F, on_submit,
+		BD_TIP_S, "Type a command and press Enter to send it", BD_END);
 
 	/* the modal connect dialog: the MUD-list table plus manage / import rows,
 	 * composed with the bd_dialog helper (Enter connects, Escape cancels) */
