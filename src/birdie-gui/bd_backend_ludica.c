@@ -167,7 +167,12 @@ static void be_destroy_texture(bd_texture t)
 
 /* ---- scissor ---- */
 
-static void be_scissor(int x, int y, int w, int h) { lud_scissor(x, y, w, h); }
+/* The toolkit's clip rect is top-left pixels; lud_scissor is bottom-left
+ * (raw glScissor). Flip against the window height, matching the GLES backend
+ * (bd_gles_scissor). Without this, clipped widgets (input lines, text areas)
+ * blank out. */
+static void be_scissor(int x, int y, int w, int h)
+{ lud_scissor(x, lud_height() - (y + h), w, h); }
 static void be_scissor_off(void) { lud_scissor_off(); }
 
 /* ---- asset resolution ---- */

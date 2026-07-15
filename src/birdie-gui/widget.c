@@ -63,6 +63,8 @@ struct widget {
 	void *on_click_data;
 	bd_callback_fn on_close;
 	void *on_close_data;
+	bd_callback_fn on_change;   /* BD_LIST: single-click selection change */
+	void *on_change_data;
 
 	int hover, pressed;
 
@@ -764,8 +766,9 @@ static void
 apply_p(struct widget *w, int attr, void *val)
 {
 	switch (attr) {
-	case BD_ON_CLICK_P: w->on_click_data = val; break;
-	case BD_ON_CLOSE_P: w->on_close_data = val; break;
+	case BD_ON_CLICK_P:  w->on_click_data = val; break;
+	case BD_ON_CLOSE_P:  w->on_close_data = val; break;
+	case BD_ON_CHANGE_P: w->on_change_data = val; break;
 	}
 }
 
@@ -773,8 +776,9 @@ static void
 apply_f(struct widget *w, int attr, bd_callback_fn val)
 {
 	switch (attr) {
-	case BD_ON_CLICK_F: w->on_click = val; break;
-	case BD_ON_CLOSE_F: w->on_close = val; break;
+	case BD_ON_CLICK_F:  w->on_click = val; break;
+	case BD_ON_CLOSE_F:  w->on_close = val; break;
+	case BD_ON_CHANGE_F: w->on_change = val; break;
 	}
 }
 
@@ -1845,6 +1849,11 @@ render_widget(bd_id id)
 
 		float base_y = chrome_baseline_y(w->y, w->h);
 
+		/* clip the (horizontally scrolled) text to the interior, so a
+		 * value longer than the field cannot spill past its edges */
+		bd_draw_flush();
+		be->scissor((int)vis_x, w->y, (int)vis_w, w->h);
+
 		/* selection highlight */
 		if (focused && w->sel_anchor >= 0 &&
 		    w->sel_anchor != w->cursor) {
@@ -1878,6 +1887,9 @@ render_widget(bd_id id)
 			if (bd_reduced_motion() || ((int)(t * 2.0)) % 2 == 0)
 				fill_rect((int)caret_x, w->y + 2, 2, w->h - 4, w->fg);
 		}
+
+		bd_draw_flush();
+		be->scissor_off();
 		break;
 	}
 
@@ -4797,12 +4809,15 @@ bd_gui_event(const bd_event *ev)
 			if (hit != BD_NONE && pool[hit].type == BD_LIST) {
 				focus_id = hit;
 				int row = list_click(hit, my);
+				struct widget *l = &pool[hit];
+				/* single-click selection change */
+				if (row >= 0 && l->on_change)
+					l->on_change(hit, l->on_change_data);
 				double now = bd_time();
 				if (row >= 0 && hit == list_last_id &&
 				    row == list_last_row &&
 				    now - list_last_time < 0.4) {
 					/* double-click activates */
-					struct widget *l = &pool[hit];
 					if (l->on_click)
 						l->on_click(hit, l->on_click_data);
 					list_last_id = BD_NONE;

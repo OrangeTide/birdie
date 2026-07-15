@@ -121,9 +121,11 @@ enum {
 
 	BD_ON_CLICK_P = 0x013,
 	BD_ON_CLOSE_P = 0x023,
+	BD_ON_CHANGE_P = 0x033,
 
 	BD_ON_CLICK_F = 0x014,
 	BD_ON_CLOSE_F = 0x024,
+	BD_ON_CHANGE_F = 0x034,   /* BD_LIST: fired on single-click selection */
 
 	BD_FG_C       = 0x015,
 	BD_BG_C       = 0x025,
@@ -241,9 +243,10 @@ void bd_reduced_motion_hint(int reduce); /* external AUTO contribution */
 int  bd_reduced_motion(void);            /* effective flag; widgets read this */
 
 /* BD_LIST: a scrolling, selectable list of newline-separated items. Set the
- * items with BD_LABEL_S (or bd_list_set_items); the selection callback runs on
- * activation (double-click or Enter) via BD_ON_CLICK_F. The host reads the
- * selected row index (-1 if none) and can set it. */
+ * items with BD_LABEL_S (or bd_list_set_items). BD_ON_CLICK_F runs on
+ * activation (double-click or Enter); BD_ON_CHANGE_F runs on a single-click
+ * selection change (for sidebars that navigate on one click). The host reads
+ * the selected row index (-1 if none) and can set it. */
 void bd_list_set_items(bd_id id, const char *newline_separated);
 int  bd_list_count(bd_id id);
 int  bd_list_selected(bd_id id);
