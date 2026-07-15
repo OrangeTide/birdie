@@ -4,8 +4,8 @@ Made by a machine. PUBLIC DOMAIN (CC0-1.0)
 
 A plan to make dialogs a first-class, low-friction part of birdie-gui, so the
 app's profile / trigger / settings / import / export dialogs are quick to build
-and consistent. It is grounded in what already ships: the modal plumbing exists,
-what is missing is the form controls, a composition helper, and a few ergonomics.
+and consistent. It's grounded in what already ships: the modal plumbing exists,
+what's missing is the form controls, a composition helper, and a few ergonomics.
 
 ## 0. What already works
 
@@ -13,7 +13,7 @@ what is missing is the form controls, a composition helper, and a few ergonomics
   (`widget.c`). A detached widget subtree (usually a `BD_PANEL`) is shown centered
   over a dimmed backdrop, above the main UI and below a `bd_notice` alert. Input
   routes into it as in a frame; everything outside is swallowed; **Escape closes**.
-- **`bd_notice_open(message, buttons, cb, arg)`** — a modal alert with a stacked
+- **`bd_notice_open(message, buttons, cb, arg)`**: a modal alert with a stacked
   button list and a `(notice, button, arg)` callback. The one-shot prompt case.
 - **The app already builds dialogs by hand** (`src/birdie/main.c`): the connect
   picker (a `BD_TABLE` + button row) and the add/edit-profile form (labels +
@@ -21,7 +21,7 @@ what is missing is the form controls, a composition helper, and a few ergonomics
   `bd_modal_open`.
 
 So the modal layer is solid. The friction is that every dialog is assembled by
-hand, and the form controls real dialogs need do not exist yet.
+hand, and the form controls real dialogs need don't exist yet.
 
 ## 1. Gaps
 
@@ -29,7 +29,7 @@ hand, and the form controls real dialogs need do not exist yet.
 |-----|--------|
 | No combo / checkbox / radio / spinner widgets | Blocks the trigger editor, settings, export column-filter, and import-collision dialogs (see `TODO.md`, `doc/profiles.md`). |
 | No dialog-composition helper | Each dialog hand-wires title + content + button row + padding; `main.c` repeats this. |
-| No default button (Enter) or initial focus in the modal layer | Only Escape is handled; the opener must focus a field manually; Enter does not confirm. |
+| No default button (Enter) or initial focus in the modal layer | Only Escape is handled; the opener must focus a field manually; Enter doesn't confirm. |
 | No standard result convention | Each dialog invents its own OK/Cancel callbacks and value-gathering. |
 
 ## 2. Decisions
@@ -40,7 +40,7 @@ hand, and the form controls real dialogs need do not exist yet.
 | Create-call shape | **Descriptor structs** (`bd_checkbox_desc`, `bd_combo_desc`, ...) with `on_*` change callbacks and `_get`/`_set`, matching the 0.9 value-widget convention. Do them **in the 0.9 window** so the API breaks land together. |
 | Combo / chooser popups | Reuse the existing popup path (the editor's autocomplete popup and `BD_LIST` already do overlay + keyboard nav); a combo is a labeled button that opens a `BD_LIST` popup. |
 | Dialog helper weight | **Lightweight helpers + conventions**, not a monolithic dialog class. A `bd_dialog` shell that owns title + content slot + button row, plus a labeled-field-row helper. Callers still add their own controls. |
-| Layout constraint | Every content container needs an explicit `PREF_H`/`PREF_W` or `GROW`; the layout never measures contents. Bake this into the field-row helper so callers do not trip on it. |
+| Layout constraint | Every content container needs an explicit `PREF_H`/`PREF_W` or `GROW`; the layout never measures contents. Bake this into the field-row helper so callers don't trip on it. |
 
 ## 3. Build order
 
@@ -58,7 +58,7 @@ to a per-profile `triggers.csv`, kept separate from the hand-written
 `triggers.lua`, and the edit-profile dialog carries an encoding selector wired to
 an inbound-byte transcode. All follow-ups are done.
 
-### Phase 0 — modal ergonomics (small, in core `widget.c`) — DONE
+### Phase 0: modal ergonomics (small, in core `widget.c`) - DONE
 
 Extend the modal layer, not replace it:
 
@@ -66,19 +66,19 @@ Extend the modal layer, not replace it:
 - **Initial focus.** Focus `focus` if given, else the first focusable descendant, so the user can type immediately.
 - No change to dimming / centering / routing.
 
-### Phase 1 — form controls (the blocking gap; extension widgets) — DONE
+### Phase 1: form controls (the blocking gap; extension widgets) - DONE
 
 Shipped as `bd_widget_form.{c,h}` (checkbox, radio, spinner) and
 `bd_widget_combo.{c,h}` (the drop-down, separate because it opens a popup):
 
-1. **`BD_CHECKBOX`** — a distinct box+tick widget (not a restyled toggle: a
+1. **`BD_CHECKBOX`** - a distinct box+tick widget (not a restyled toggle: a
    toggle reads as a switch, a form wants a checkbox). Toggles on click / Space.
-2. **Radio group** — one widget owning the mutually-exclusive set (so it is a
-   single Tab stop); click or arrow-key to move the selection.
-3. **`BD_COMBO` / drop-down** — a closed box with a chevron that opens a floating
-   list through the new shared overlay primitive (`bd_overlay_*`, see below), so
-   the list floats above siblings and above a dialog the combo sits in.
-4. **Numeric spinner / stepper** — an integer field with up/down steppers,
+2. **Radio group** - a single widget owning the mutually-exclusive set (one
+   Tab stop). Click or use arrow keys to move the selection.
+3. **`BD_COMBO` / drop-down** - a closed box with a chevron that opens a floating
+   list through the new shared overlay primitive (`bd_overlay_*`, see below). The
+   list floats above siblings and above any dialog the combo sits in.
+4. **Numeric spinner / stepper** - an integer field with up/down steppers,
    min/max/step, arrow-key steps, and digit entry.
 
 Each ships with a `bd_*_desc` create, `_get`/`_set`, an `on_change` callback,
@@ -92,7 +92,7 @@ above every frame / modal / notice and given first crack at input (a press
 outside or an unconsumed Escape dismisses it). This is the convergence target
 noted in Scope below; the editor autocomplete can move onto it later.
 
-### Phase 2 — dialog composition helper — DONE
+### Phase 2: dialog composition helper - DONE
 
 Shipped as `bd_dialog.{c,h}`, a thin shell over `bd_modal`:
 
@@ -101,11 +101,11 @@ Shipped as `bd_dialog.{c,h}`, a thin shell over `bd_modal`:
 - `bd_dialog_button(dlg, label, role, cb, arg)` where `role`
   (`BD_DIALOG_DEFAULT` / `BD_DIALOG_CANCEL` / `BD_DIALOG_NORMAL`) wires Enter to
   the default button and Escape to the cancel button. A cancel button also
-  closes on click; the default does not (its callback validates, then closes).
-- `bd_dialog_field(dlg, label)` — a labeled row with the required `PREF_H`
-  already set; the caller creates the control INTO the returned row with
+  closes on click; the default doesn't (its callback validates, then closes).
+- `bd_dialog_field(dlg, label)`: a labeled row with the required `PREF_H`
+  already set. The caller creates the control INTO the returned row with
   `BD_GROW_I`. It returns the row rather than taking a pre-built control because
-  the toolkit does not reparent.
+  the toolkit doesn't reparent.
 - `bd_dialog_content(dlg)` hands back the content column for arbitrary widgets.
 - `bd_dialog_open` / `bd_dialog_close` wrap the modal calls (open focuses the
   first field); `bd_dialog_free` destroys the subtree and the handle.
@@ -114,28 +114,28 @@ Convenience, not a new layout engine: callers still add arbitrary widgets to the
 content container. Covered in `test_gui` (Enter/Escape wiring, click roles,
 first-field focus) and demoed by the gallery's "Dialog..." button.
 
-### Phase 3 — composite chooser dialogs
+### Phase 3: composite chooser dialogs
 
 Built from the above, no new backend capability:
 
-- [x] **File chooser** — an app dialog (filesystem enumeration keeps the toolkit
-  host-neutral): a current-directory label, a `BD_LIST` of entries (directories
-  first, marked with a trailing `/`; `..` to go up), and a name field, over
+- [x] **File chooser**: an app dialog (filesystem enumeration keeps the toolkit
+  host-neutral). A current-directory label, a `BD_LIST` of entries (directories
+  first, marked with a trailing `/`; `..` to go up), and a name field over
   `dirent`/`realpath`. `open_file_chooser(cb)` hands the joined path to a
-  callback, so it is reusable. Wired as File > Import profiles..., which browses
+  callback, so it's reusable. Wired as File > Import profiles..., which browses
   to a CSV and runs it through the importer (collision dialog included). Opened
   as a standalone flow, not stacked over the connect dialog (one modal at a
   time). The `on_connect` script path could reuse it later.
-- [x] **Color chooser** — shipped as a reusable `BD_COLORPICK` widget
-  (`bd_widget_colorpick.*`): a saturation/value square, a hue bar, a live swatch,
+- [x] **Color chooser**: shipped as a reusable `BD_COLORPICK` widget
+  (`bd_widget_colorpick.*`). A saturation/value square, a hue bar, a live swatch,
   and a preset row, drawn as flat-cell gradients (no shader, backend-neutral),
   with a packed 0xRRGGBBAA get/set + on-change callback. Demoed in the gallery
   and wired into the app as an Edit > Colour picker... dialog that shows the
   picked colour's hex and its `38;2;R;G;B` `#highlight` SGR string to copy into a
-  highlight trigger. (The toolkit allows one modal at a time, so it is a
+  highlight trigger. (The toolkit allows one modal at a time, so it's a
   standalone dialog rather than stacked over the trigger editor.)
 
-### Phase 4 — wire the app dialogs (`src/birdie/`) — IN PROGRESS
+### Phase 4: wire the app dialogs (`src/birdie/`) - IN PROGRESS
 
 - [x] Rework the existing **connect** and **edit-profile** dialogs onto the
   shell (`main.c`). The connect picker now composes its table + manage/import
@@ -144,7 +144,7 @@ Built from the above, no new backend capability:
   `BD_CHECKBOX` replacing the toggle) with Save (default) / Cancel. Both gain
   Enter-confirms / Escape-cancels and first-field focus for free, and the
   hand-rolled panel/label/button boilerplate is gone (-30 lines net).
-- [x] **Settings** — an app-wide preferences dialog (Edit > Settings...): terminal
+- [x] **Settings**: an app-wide preferences dialog (Edit > Settings...). Terminal
   grid size (Columns/Rows spinners, applied over NAWS via `bd_session_set_winsize`)
   and a colour-scheme combo (Default / Green phosphor / Amber, applied via
   `bd_terminal_set_palette`), persisted to a new `<data_dir>/settings.csv`
@@ -184,7 +184,7 @@ Built from the above, no new backend capability:
   name clashes, and if any exist opens the dialog; the chosen policy is applied
   by a public-API merge (no CSV re-parsing, no clobbering hand data). The merge
   (all three policies) is covered in `test_client`.
-- **Import-collision** — a radio group (skip / rename / overwrite).
+- **Import-collision**: a radio group (skip / rename / overwrite).
 
 ## 4. Testing
 
