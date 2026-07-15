@@ -3129,6 +3129,43 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- bd_dialog: group + field_in + scrollable (P3) ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_dialog *dlg = bd_dialog_create("Test", 300, 220);
+	bd_id dcontent = bd_dialog_content(dlg);
+	check("dialog content container is valid", dcontent != BD_NONE);
+	bd_id grp = bd_dialog_group(dlg, "Section");
+	int gh0 = bd_get_i(grp, BD_PREF_H_I);
+	bd_dialog_field_in(dlg, grp, "A");
+	bd_dialog_field_in(dlg, grp, "B");
+	int gh2 = bd_get_i(grp, BD_PREF_H_I);
+	check("dialog group grows as fields are added into it", gh2 > gh0);
+	bd_dialog_open(dlg);
+	bd_gui_layout(500, 500);
+	bd_gui_render();
+	check("grouped dialog renders without crashing", 1);
+	bd_dialog_close(dlg);
+	bd_dialog_free(dlg);
+
+	/* scrollable redirects the target away from the plain content column */
+	bd_dialog *sdlg = bd_dialog_create("Scroll", 220, 140);
+	bd_id sc0 = bd_dialog_content(sdlg);
+	bd_dialog_scrollable(sdlg);
+	bd_id sc1 = bd_dialog_content(sdlg);
+	check("scrollable redirects the dialog form target",
+	    sc1 != BD_NONE && sc1 != sc0);
+	for (int i = 0; i < 15; i++)
+	    bd_dialog_field(sdlg, "row");
+	bd_dialog_open(sdlg);
+	bd_gui_layout(500, 500);
+	bd_gui_render();
+	check("scrollable dialog renders without crashing", 1);
+	bd_dialog_close(sdlg);
+	bd_dialog_free(sdlg);
+	}
+	bd_gui_cleanup();
+
 	/* ---- editor autocomplete: auto-popup, filter, navigate, accept ---- */
 	bd_gui_init(&stub, NULL);
 	{

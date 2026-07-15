@@ -7,7 +7,7 @@ form is taller than its panel). Both build on the extension API
 (`widget_ext.h`) and match the existing form-control conventions
 (`bd_widget_form.*`, `bd_dialog.*`).
 
-Status: P0-P2 built (group box, the BD_WC_CLIP_CHILDREN core flag, and the scroll-view). P3 (dialog integration) remains.
+Status: built (P0-P3). Group box, the BD_WC_CLIP_CHILDREN core flag, the scroll-view, and the bd_dialog integration (bd_dialog_group / bd_dialog_field_in / bd_dialog_scrollable, with the app Settings dialog reworked onto grouped, scrollable fields).
 
 ## Motivation
 

@@ -1500,15 +1500,22 @@ init(void)
 	bd_dialog_button(edit_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(edit_dlg, "Save", BD_DIALOG_DEFAULT, on_edit_save, NULL);
 
-	/* the app-wide settings form (terminal grid + colour scheme) */
-	settings_dlg = bd_dialog_create("Settings", 340, 200);
-	set_cols = bd_spinner_create(bd_dialog_field(settings_dlg, "Columns"),
+	/* the app-wide settings form: grouped sections (P3), scrollable so it can
+	 * grow past the panel. See doc/gui/forms-containers.md. */
+	settings_dlg = bd_dialog_create("Settings", 340, 280);
+	bd_dialog_scrollable(settings_dlg);
+	bd_id set_g_term = bd_dialog_group(settings_dlg, "Terminal");
+	set_cols = bd_spinner_create(
+		bd_dialog_field_in(settings_dlg, set_g_term, "Columns"),
 		&(bd_spinner_desc){ .min = 20, .max = 500, .value = settings.cols },
 		BD_PREF_W_I, 90, BD_END);
-	set_rows = bd_spinner_create(bd_dialog_field(settings_dlg, "Rows"),
+	set_rows = bd_spinner_create(
+		bd_dialog_field_in(settings_dlg, set_g_term, "Rows"),
 		&(bd_spinner_desc){ .min = 5, .max = 200, .value = settings.rows },
 		BD_PREF_W_I, 90, BD_END);
-	set_scheme = bd_combo_create(bd_dialog_field(settings_dlg, "Colors"),
+	bd_id set_g_appear = bd_dialog_group(settings_dlg, "Appearance");
+	set_scheme = bd_combo_create(
+		bd_dialog_field_in(settings_dlg, set_g_appear, "Colors"),
 		&(bd_combo_desc){ .items = scheme_labels, .count = N_SCHEMES,
 		.selected = settings.scheme }, BD_GROW_I, 1, BD_END);
 	bd_dialog_button(settings_dlg, "Cancel", BD_DIALOG_CANCEL, NULL, NULL);

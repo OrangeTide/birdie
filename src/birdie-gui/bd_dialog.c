@@ -6,6 +6,9 @@
  */
 
 #include "bd_dialog.h"
+#include "bd_widget_groupbox.h"
+#include "bd_widget_scrollview.h"
+#include "bd_draw.h"
 #include <stdlib.h>
 
 #define DLG_PAD     12    /* panel inset */
@@ -17,9 +20,17 @@
 #define BTN_W       84    /* button width */
 #define MAX_BTN      8
 
+/* Group-box internal metrics, mirrored from bd_widget_groupbox.c so a group's
+ * PREF_H can be grown as fields are added (the layout engine never measures a
+ * subtree). GB_PAD/GB_GAP must track that file. */
+#define GB_PAD       8
+#define GB_GAP       4
+
 struct bd_dialog {
     bd_id panel;      /* the top-level modal panel */
     bd_id content;    /* column container the caller fills */
+    bd_id target;     /* where fields/groups are added (content, or a scroll
+                       * content column once bd_dialog_scrollable is called) */
     bd_id btnrow;     /* right-aligned button row */
     int   nbtn;
     int   default_idx, cancel_idx;
@@ -86,6 +97,7 @@ bd_dialog_create(const char *title, int w, int h)
     /* content grows to fill, pushing the button row to the bottom edge */
     d->content = bd_create(d->panel, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_COL,
         BD_GROW_I, 1, BD_GAP_I, DLG_GAP, BD_BG_C, th->panel, BD_END);
+    d->target = d->content;
     /* button row: a leading spacer right-aligns the buttons */
     d->btnrow = bd_create(d->panel, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
         BD_PREF_H_I, BTNROW_H, BD_GAP_I, DLG_GAP, BD_BG_C, th->panel, BD_END);
@@ -102,20 +114,53 @@ bd_dialog_panel(bd_dialog *d)
 bd_id
 bd_dialog_content(bd_dialog *d)
 {
-    return d ? d->content : BD_NONE;
+    return d ? d->target : BD_NONE;
+}
+
+void
+bd_dialog_scrollable(bd_dialog *d)
+{
+    if (!d)
+        return;
+    bd_id sv = bd_scrollview_create(d->content, NULL, BD_GROW_I, 1, BD_END);
+    d->target = bd_scrollview_content(sv);
+    bd_set(d->target, BD_GAP_I, DLG_GAP, BD_END);
+}
+
+bd_id
+bd_dialog_field_in(bd_dialog *d, bd_id container, const char *label)
+{
+    if (!d || container == BD_NONE)
+        return BD_NONE;
+    const bd_theme *th = bd_gui_theme();
+    bd_id row = bd_create(container, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+        BD_PREF_H_I, FIELD_H, BD_GAP_I, DLG_GAP, BD_BG_C, th->panel, BD_END);
+    bd_create(row, BD_LABEL, BD_LABEL_S, label ? label : "",
+        BD_PREF_W_I, LABEL_W, BD_FG_C, th->text, BD_END);
+    /* a group (or any sized container that is not the top-level form column)
+     * must grow to hold the row, since the layout never measures its content */
+    if (container != d->target)
+        bd_set(container, BD_PREF_H_I,
+            bd_get_i(container, BD_PREF_H_I) + FIELD_H + GB_GAP, BD_END);
+    return row;
 }
 
 bd_id
 bd_dialog_field(bd_dialog *d, const char *label)
 {
+    return d ? bd_dialog_field_in(d, d->target, label) : BD_NONE;
+}
+
+bd_id
+bd_dialog_group(bd_dialog *d, const char *title)
+{
     if (!d)
         return BD_NONE;
-    const bd_theme *th = bd_gui_theme();
-    bd_id row = bd_create(d->content, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
-        BD_PREF_H_I, FIELD_H, BD_GAP_I, DLG_GAP, BD_BG_C, th->panel, BD_END);
-    bd_create(row, BD_LABEL, BD_LABEL_S, label ? label : "",
-        BD_PREF_W_I, LABEL_W, BD_FG_C, th->text, BD_END);
-    return row;
+    bd_id g = bd_groupbox_create(d->target,
+        &(bd_groupbox_desc){ .title = title }, BD_END);
+    /* base height: the group's own padding plus its reserved caption band */
+    bd_set(g, BD_PREF_H_I, 2 * GB_PAD + (int)bd_draw_line_height(), BD_END);
+    return g;
 }
 
 bd_id

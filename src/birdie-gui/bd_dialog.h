@@ -15,6 +15,12 @@
  * layout needs already set, so forms read top-to-bottom without the pref-size
  * gotcha). See doc/gui/dialogs.md.
  *
+ * For bigger forms two more helpers compose the form-support widgets:
+ * bd_dialog_group() drops a titled group box (bd_groupbox) into the form so
+ * fields can be boxed into sections, and bd_dialog_scrollable() wraps the form
+ * in a scroll-view (bd_scrollview) so it can outgrow the panel. See
+ * doc/gui/forms-containers.md.
+ *
  * The control cannot be reparented after creation, so bd_dialog_field() returns
  * the row for the caller to create the control INTO (with BD_GROW_I), rather
  * than taking an already-built control.
@@ -43,9 +49,24 @@ bd_dialog *bd_dialog_create(const char *title, int w, int h);
 bd_id bd_dialog_panel(bd_dialog *d);     /* the modal panel (e.g. for focus) */
 bd_id bd_dialog_content(bd_dialog *d);   /* the column to add widgets into */
 
-/* A labeled field row inside the content column. Create the control into the
- * returned row with BD_GROW_I so it fills the space beside the label. */
+/* A labeled field row inside the form. Create the control into the returned row
+ * with BD_GROW_I so it fills the space beside the label. */
 bd_id bd_dialog_field(bd_dialog *d, const char *label);
+
+/* Add a titled group box (bd_groupbox) to the form and return it, so following
+ * fields can be boxed into it. Add fields into a group with bd_dialog_field_in;
+ * the group grows to hold them. Nest groups if you like. */
+bd_id bd_dialog_group(bd_dialog *d, const char *title);
+
+/* A labeled field row inside a specific `container` (e.g. a group from
+ * bd_dialog_group), rather than the top-level form. Same row shape as
+ * bd_dialog_field. */
+bd_id bd_dialog_field_in(bd_dialog *d, bd_id container, const char *label);
+
+/* Make the form scrollable: subsequent fields and groups go into a scroll-view
+ * that scrolls when the form outgrows the panel, keeping the title and button
+ * row fixed. Call once, before adding fields. */
+void  bd_dialog_scrollable(bd_dialog *d);
 
 /* Add a button to the (right-aligned) button row. `role` is a bd_dialog_role.
  * Add Cancel before the default for the conventional left-to-right order. */
