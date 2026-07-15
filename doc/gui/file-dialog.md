@@ -39,7 +39,7 @@ We keep the model/UI split. We diverge where the reference is limiting:
 | File view widget | **`BD_TABLE`**, with sortable Name / Size / Modified columns. Closest to a native detail view and to the reference's column sort; the table is already sortable. |
 | Favorites / recents | **OS recents only.** No birdie-managed bookmark store. The places sidebar surfaces OS known folders, volumes, and the OS recently-used list. On accept, the file is registered with the OS recent-documents facility so it appears next time (and in native dialogs). |
 | Platform coupling | A narrow vtable inside `bd_fs`: scandir, stat, known folders, volume enumeration, path normalize, recents source. POSIX and Win32 implementations; stubs for macOS/Android/iOS. |
-| Native dialogs | Not used by default. The request is a consistent birdie-gui look. A per-platform escape hatch to a true native dialog is deferred and off by default. |
+| Native dialogs | Not used. The request is a consistent birdie-gui look, so the chooser is always birdie-drawn. Routing to a true OS dialog is a non-goal. |
 | Where it lives | `src/birdie-gui/bd_fs.{c,h}` and `bd_filedlg.{c,h}`. Both depend only on `birdie_gui` (via `bd_dialog`), stay host-neutral, and ship in the bundle. The Win32 backend is guarded so `make windows-check` cross-compiles it. |
 
 ## 2. Layers
@@ -218,7 +218,6 @@ dialog. The connect dialog's Browse... already relies on this.
   boundary. Compiled + archived by `make windows-check` (not linked or run here).
   Follow-ups: Recent-folder `.lnk`/COM enumeration, and a native Cocoa backend
   for macOS (which otherwise runs the Unix branch with graceful gaps).
-- **P5** (optional) A native-dialog escape hatch per platform.
 
 ## 4. Testing
 
