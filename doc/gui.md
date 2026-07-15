@@ -247,6 +247,15 @@ What is built:
   an action bar, a dock tile) gets a readable hint. The bubble is
   non-interactive (input passes through), the deepest tipped widget under the
   pointer wins, and any press, wheel, key, or drag dismisses it.
+- **Context / popup menu** — `bd_popmenu` (`bd_popmenu.h`), a transient menu
+  floated top-most through the overlay primitive. A mechanism, not a policy: the
+  toolkit never attaches context menus to widgets; the app calls
+  `bd_popmenu_open(x, y, items, count)` from wherever it decides (a right-click
+  handler, an editor-mode gesture). Items carry a label, an action callback, and
+  `SEPARATOR` / `DISABLED` flags; a pick or Enter runs the action and closes, an
+  outside click or Escape dismisses. This keeps a passthrough canvas or GLES game
+  view (which owns every click) in control: it may raise a context menu only in a
+  special editor mode, on its own terms.
 - **Reduced motion** — a toolkit-wide flag widgets read (`bd_reduced_motion()`)
   to skip animation while still drawing the final state: the cursor stops
   blinking and the toggle thumb snaps instead of sliding. Policy is

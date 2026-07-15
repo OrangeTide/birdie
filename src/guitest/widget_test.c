@@ -36,6 +36,7 @@
 #include "bd_widget_tree.h"
 #include "bd_widget_split.h"
 #include "bd_widget_groupbox.h"
+#include "bd_popmenu.h"
 #include "bd_widget_scrollview.h"
 #include "bd_widget_chart.h"
 #include "bd_backend_gles.h"
@@ -489,13 +490,40 @@ inv_activate(bd_id w, int slot, uint64_t key, void *ctx)
 	    inv_bag[slot].name ? inv_bag[slot].name : "?");
 	report(b);
 }
+/* the slot a context menu was opened over; the menu actions read it */
+static int inv_ctx_slot = -1;
+static void
+inv_menu_use(void *u)
+{
+	(void)u;
+	char b[64];
+	snprintf(b, sizeof b, "inventory: use slot %d (%s)", inv_ctx_slot,
+	    (inv_ctx_slot >= 0 && inv_bag[inv_ctx_slot].name)
+	        ? inv_bag[inv_ctx_slot].name : "?");
+	report(b);
+}
+static void
+inv_menu_drop(void *u)
+{
+	(void)u;
+	if (inv_ctx_slot >= 0 && inv_ctx_slot < 48)
+		inv_bag[inv_ctx_slot] = (struct game_item){ 0 };  /* empty the slot */
+	report("inventory: dropped");
+}
 static void
 inv_context(bd_id w, int slot, uint64_t key, int sx, int sy, void *ctx)
 {
-	(void)w; (void)key; (void)sx; (void)sy; (void)ctx;
-	char b[64];
-	snprintf(b, sizeof b, "inventory: right-click slot %d", slot);
-	report(b);
+	(void)w; (void)key; (void)ctx;
+	inv_ctx_slot = slot;
+	unsigned dis = (slot < 0 || slot >= 48 || !inv_bag[slot].name)
+	                 ? BD_POPMENU_DISABLED : 0;
+	bd_popmenu_item items[] = {
+		{ "Use",    inv_menu_use,  NULL, dis },
+		{ "Drop",   inv_menu_drop, NULL, dis },
+		{ NULL,     NULL,          NULL, BD_POPMENU_SEPARATOR },
+		{ "Cancel", NULL,          NULL, 0 },
+	};
+	bd_popmenu_open(sx, sy, items, 4);
 }
 static void
 inv_move(bd_id w, int from, int to, void *ctx)

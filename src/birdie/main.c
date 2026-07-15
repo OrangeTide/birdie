@@ -7,6 +7,7 @@
 #include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
 #include "bd_filedlg.h"
+#include "bd_popmenu.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -888,6 +889,29 @@ mudlist_activate(bd_id w, int row, void *ctx)
 	connect_profile(p);
 }
 
+/* Right-click on a dialog row: a context menu of the row actions. The actions
+ * reuse the button handlers, which read the table's current row, so the menu
+ * selects the clicked row first. */
+static void mudlist_menu_connect(void *u) { (void)u; on_dialog_connect(BD_NONE, NULL); }
+static void mudlist_menu_edit(void *u)    { (void)u; on_edit(BD_NONE, NULL); }
+static void mudlist_menu_delete(void *u)  { (void)u; on_delete(BD_NONE, NULL); }
+static void
+mudlist_context(bd_id w, int row, int sx, int sy, void *ctx)
+{
+	(void)w;
+	(void)ctx;
+	if (row < 0)
+		return;
+	bd_table_select(mudlist, row, 0);
+	bd_popmenu_item items[] = {
+		{ "Connect", mudlist_menu_connect, NULL, 0 },
+		{ "Edit...", mudlist_menu_edit,    NULL, 0 },
+		{ NULL,      NULL,                 NULL, BD_POPMENU_SEPARATOR },
+		{ "Delete",  mudlist_menu_delete,  NULL, 0 },
+	};
+	bd_popmenu_open(sx, sy, items, 4);
+}
+
 static void
 on_disconnect(bd_id id, void *arg)
 {
@@ -1455,7 +1479,8 @@ init(void)
 	};
 	mudlist = bd_table_create(cbody, mcols, 3,
 		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
-		&(bd_table_cb){ .activate = mudlist_activate },
+		&(bd_table_cb){ .activate = mudlist_activate,
+		.context = mudlist_context },
 		BD_GROW_I, 1, BD_END);
 	/* manage row: add / edit / delete profiles */
 	bd_id mbtn = bd_create(cbody, BD_PANEL,

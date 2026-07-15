@@ -17,6 +17,7 @@
 #include "bd_widget_combo.h"
 #include "bd_widget_colorpick.h"
 #include "bd_dialog.h"
+#include "bd_popmenu.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_widget_sketch.h"
@@ -464,6 +465,12 @@ static uint64_t icon_act_key;
 static int icon_act_n;
 static void icon_act_cb(bd_id w, uint64_t key, void *u)
 { (void)w; (void)u; icon_act_key = key; icon_act_n++; }
+
+/* ---- popmenu (context menu) recorded actions ---- */
+static int pm_a, pm_b, pm_c;
+static void pm_act_a(void *u) { (void)u; pm_a++; }
+static void pm_act_b(void *u) { (void)u; pm_b++; }
+static void pm_act_c(void *u) { (void)u; pm_c++; }
 
 int
 main(void)
@@ -3440,6 +3447,63 @@ main(void)
 	base = n_drawverts;
 	bd_gui_render();
 	check("clearing BD_TIP_S removes the tooltip", n_drawverts - base == away);
+	}
+	bd_gui_cleanup();
+
+
+	/* ---- popmenu (context / popup menu) ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_FIXED, BD_END);
+	bd_gui_layout(500, 500);
+	bd_gui_render();   /* establishes the draw window size for on-screen clamp */
+
+	int rh = (int)bd_draw_line_height() + 6;   /* ROW_PAD, mirrored */
+	int mx = 50, my = 50;
+	int y_row0 = my + 1 + rh / 2;               /* selectable */
+	int y_row3 = my + 1 + 2 * rh + 7 + rh / 2;  /* selectable (after disabled + sep) */
+	bd_popmenu_item items[] = {
+		{ "Aaa",  pm_act_a, NULL, 0 },
+		{ "Bbb",  pm_act_b, NULL, BD_POPMENU_DISABLED },
+		{ NULL,   NULL,     NULL, BD_POPMENU_SEPARATOR },
+		{ "Ccc",  pm_act_c, NULL, 0 },
+	};
+
+	bd_popmenu_open(mx, my, items, 4);
+	check("popmenu opens", bd_popmenu_is_open());
+
+	/* click a selectable row: its action runs and the menu closes */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = mx + 10,
+	    .y = y_row0, .button = BD_MOUSE_LEFT });
+	check("clicking an item runs its action", pm_a == 1);
+	check("choosing an item closes the menu", !bd_popmenu_is_open());
+
+	/* a click on a disabled row does nothing and keeps the menu open */
+	bd_popmenu_open(mx, my, items, 4);
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = mx + 10,
+	    .y = my + 1 + rh + rh / 2, .button = BD_MOUSE_LEFT });
+	check("a disabled row does not fire", pm_b == 0);
+	check("clicking a disabled row keeps the menu open", bd_popmenu_is_open());
+
+	/* a press outside the menu dismisses it */
+	bd_gui_event(&(bd_event){ .type = BD_EV_MOUSE_DOWN, .x = 400, .y = 400,
+	    .button = BD_MOUSE_LEFT });
+	check("a click outside dismisses the menu", !bd_popmenu_is_open());
+
+	/* keyboard: Down skips the disabled row and separator to the next
+	 * selectable row, Enter chooses it */
+	bd_popmenu_open(mx, my, items, 4);
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_DOWN });
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	check("keyboard nav skips separators/disabled rows", pm_c == 1 && pm_a == 1);
+	check("Enter on a keyboard pick closes the menu", !bd_popmenu_is_open());
+
+	/* Escape dismisses without choosing */
+	bd_popmenu_open(mx, my, items, 4);
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ESCAPE });
+	check("Escape dismisses the menu", !bd_popmenu_is_open());
+
+	(void)y_row3;
 	}
 	bd_gui_cleanup();
 

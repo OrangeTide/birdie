@@ -183,6 +183,35 @@ void  bd_notice_close(bd_id notice);
 void  bd_modal_open(bd_id dialog);   void bd_modal_close(bd_id dialog);   bd_id bd_modal_active(void);
 ```
 
+### Context / popup menu
+
+`bd_popmenu` (`bd_popmenu.h`) is a transient popup menu floated top-most through
+the overlay primitive. It is a mechanism, not a policy: the toolkit never
+attaches context menus to widgets. The app decides when and where to open one
+(a right-click handler, an editor-mode gesture, a toolbar button). A passthrough
+canvas or GLES game view that owns every click opens it entirely on its own
+terms, e.g. only in an in-game editor mode.
+
+```c
+enum { BD_POPMENU_SEPARATOR = 1u<<0, BD_POPMENU_DISABLED = 1u<<1 };
+typedef struct bd_popmenu_item {
+    const char *label;                /* borrowed */
+    void      (*action)(void *user);  /* run when chosen; NULL for none */
+    void       *user;
+    unsigned    flags;                /* BD_POPMENU_* */
+} bd_popmenu_item;
+
+/* open at (x,y), clamped on screen; the item array is copied, strings/user borrowed */
+void bd_popmenu_open(int x, int y, const bd_popmenu_item *items, int count);
+void bd_popmenu_close(void);
+int  bd_popmenu_is_open(void);
+```
+
+A click or Enter runs the chosen item's action and closes; a click outside or
+Escape dismisses; a click on a separator or disabled row keeps it open. The
+`BD_TABLE`, inventory, and explorer widgets report a right-click through their
+`context` callback (with screen coords) for the app to open one from.
+
 ## Window manager (in-surface)
 
 On a single-surface backend (`bd_backend.multi_window == 0`) the toolkit runs
