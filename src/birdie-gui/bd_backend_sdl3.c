@@ -171,8 +171,13 @@ bd_backend_sdl3_open(const char *title, int w, int h)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
+	/* Create the window hidden. A freshly mapped GL window shows whatever
+	 * uninitialized VRAM backs its framebuffer until the first swap, which
+	 * flashes a "ghost" of previously freed video memory. We clear and swap
+	 * once below, then show it, so the first thing on screen is our clear
+	 * color rather than stale memory. */
 	S.win = SDL_CreateWindow(title ? title : "birdie-gui", w, h,
-	    SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+	    SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
 	if (!S.win) {
 		fprintf(stderr, "sdl3: SDL_CreateWindow failed: %s\n",
 		    SDL_GetError());
@@ -188,7 +193,7 @@ bd_backend_sdl3_open(const char *title, int w, int h)
 		return NULL;
 	}
 	SDL_GL_MakeCurrent(S.win, S.ctx);
-	SDL_GL_SetSwapInterval(1);   /* vsync */
+	SDL_GL_SetSwapInterval(0);   /* no vsync yet: don't stall the priming swap */
 
 	/* Load GL function pointers from SDL_GL_GetProcAddress. This is required
 	 * for Windows (where opengl32.dll exports only GL 1.1, so runtime loading
@@ -204,6 +209,20 @@ bd_backend_sdl3_open(const char *title, int w, int h)
 		S.win = NULL;
 		return NULL;
 	}
+
+	/* Paint a known-good frame into the framebuffer before the window is
+	 * mapped, so no uninitialized VRAM is ever presented. Clear and swap
+	 * twice to cover both buffers of a double-buffered context. Vsync is off
+	 * here, so these present immediately and add no delay before the host's
+	 * first real frame. */
+	bd_gles_viewport(0, 0, w, h);
+	bd_gles_clear(0.0f, 0.0f, 0.0f, 1.0f);
+	SDL_GL_SwapWindow(S.win);
+	bd_gles_clear(0.0f, 0.0f, 0.0f, 1.0f);
+	SDL_GL_SwapWindow(S.win);
+	SDL_ShowWindow(S.win);
+
+	SDL_GL_SetSwapInterval(1);   /* vsync for the real render frames */
 
 	return S.win;
 }
