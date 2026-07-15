@@ -39,6 +39,7 @@ tabs=(
 	"5|Paint & Layout: sketch pad + anchoring|GALLERY_AUTODRAW=1|2"
 	"6|Desktop: MDI, BD_ICON launchers, minimize-to-icon||2"
 	"7|Splits: nested resizable sash panes||2"
+	"8|Forms: group box + scroll-view||2"
 )
 
 args=()
