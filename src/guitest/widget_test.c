@@ -34,6 +34,7 @@
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
+#include "bd_widget_split.h"
 #include "bd_widget_chart.h"
 #include "bd_backend_gles.h"
 #include "bd_backend_gles_core.h"
@@ -1037,6 +1038,33 @@ build_ui(void)
 		BD_PREF_W_I, 52, BD_END);
 	bd_create(setrow, BD_LABEL, BD_LABEL_S, "GLES wallpaper", BD_GROW_I, 1,
 		BD_FG_C, 0xB8C0C8FFu, BD_BG_C, 0u, BD_END);
+
+	/* -- Splits: a resizable sash container, nested (BD_SPLIT) -- */
+	bd_id splitpane = bd_tabview_add_pane(tabs, "Splits");
+	bd_set(splitpane, BD_PAD_I, 6, BD_END);
+	bd_id hsplit = bd_split_create(splitpane, BD_SPLIT_HORIZONTAL,
+		BD_GROW_I, 1, BD_END);
+	bd_split_set_ratio(hsplit, 0.32f);
+	/* left pane: a list; drag the vertical sash to resize it */
+	bd_id lp = bd_split_pane(hsplit, 0);
+	bd_create(lp, BD_LABEL, BD_LABEL_S, "Drag the sash. Splits nest.",
+		BD_PREF_H_I, 18, BD_END);
+	bd_id ll = bd_create(lp, BD_LIST, BD_GROW_I, 1, BD_END);
+	bd_list_set_items(ll,
+		"alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta");
+	/* right pane: a vertical split (terminal over editor) shows nesting */
+	bd_id vsplit = bd_split_create(bd_split_pane(hsplit, 1),
+		BD_SPLIT_VERTICAL, BD_GROW_I, 1, BD_END);
+	bd_id tp = bd_split_pane(vsplit, 0);
+	bd_id vt2 = bd_terminal_create(tp, BD_GROW_I, 1, BD_END);
+	bd_terminal_write(vt2,
+		"\033[1mNested vertical split\033[0m\r\n"
+		"Each pane holds any widget subtree.\r\n"
+		"Drag the horizontal sash below.\r\n", -1);
+	bd_id bp = bd_split_pane(vsplit, 1);
+	bd_create(bp, BD_LABEL, BD_LABEL_S, "Bottom pane (an editor):",
+		BD_PREF_H_I, 18, BD_END);
+	bd_editor_create(bp, BD_GROW_I, 1, BD_END);
 
 	/* ---- button bar with a horizontal slider ---- */
 	bd_id bar = bd_create(frame, BD_PANEL,

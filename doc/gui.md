@@ -207,6 +207,12 @@ What is built:
   type-ahead) and the twisty toggles; nodes keyed by an app `uint64_t`. First
   of the Smalltalk-IDE primitives from `doc/gui/smalltalk-ide.md`.
 - **Multiple native windows** — on the GLES backend (see the v0.3 section).
+- **Split widget** (extension) — `bd_widget_split`, a nestable binary split:
+  two panes and a draggable sash, horizontal or vertical. The ratio drives the
+  panes through the core flex grow weights, so a resize preserves it and the
+  drag clamps to a per-pane minimum. The sash is a private extension widget, so
+  a press on pane content still reaches it. Second of the Smalltalk-IDE
+  primitives from `doc/gui/smalltalk-ide.md`.
 - **Keyboard focus** — click- and Tab/Shift-Tab traversal; `bd_focused()`
   reads it and `bd_focus(id)` sets it (e.g. focus an input line the app just
   opened, so the user types without clicking it first).

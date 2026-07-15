@@ -322,6 +322,27 @@ void     bd_tree_set_expanded(bd_id, uint64_t node, int open);   int bd_tree_is_
 void     bd_tree_set_indent(bd_id, int px);
 ```
 
+### Split (`bd_widget_split.h`)
+
+A nestable binary split: two panes (a `BD_PANEL` each) separated by a draggable
+sash, laid out side by side (`BD_SPLIT_HORIZONTAL`) or stacked
+(`BD_SPLIT_VERTICAL`). The panes divide the space by the split ratio (the first
+pane's fraction of the extent minus the sash), enforced through the core flex
+engine's grow weights, so a resize preserves the ratio. Dragging the sash
+adjusts it, clamped to a per-pane minimum. The sash is a private extension
+widget, not part of the split's own class, so a press on pane content still
+reaches that content (only a press on the sash starts a drag). Splits nest: a
+pane may hold another split.
+
+```c
+enum { BD_SPLIT_HORIZONTAL = 1, BD_SPLIT_VERTICAL };
+bd_id bd_split_create(bd_id parent, int orient, ...);
+bd_id bd_split_pane(bd_id split, int index);   /* 0 = first, 1 = second */
+float bd_split_ratio(bd_id split);             void bd_split_set_ratio(bd_id split, float);
+void  bd_split_set_min_size(bd_id split, int px);   void bd_split_set_sash_size(bd_id split, int px);
+void  bd_split_on_change(bd_id split, bd_callback_fn, void *data);  /* fired on a drag */
+```
+
 ### Icon (`bd_widget_icon.h`)
 
 The shared icon "cell" the dock, action bar, and inventory render and drag

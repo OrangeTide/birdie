@@ -181,7 +181,7 @@ Fixed arrangements over a shared model, packaged so a host instantiates one call
 
 ## Build order and cross-references
 
-1. `BD_SPLIT` — unblocks every tool; also broadly useful outside the IDE.
+1. `BD_SPLIT` — **built** (`bd_widget_split`). Unblocks every tool; also broadly useful outside the IDE.
 2. `BD_TREE` — **built** (`bd_widget_tree`). The Hierarchy Browser and the
    project tree (TODO: "tree browser for projects") share it.
 3. `BD_RADIO` / segmented control — small, needed by the browser.

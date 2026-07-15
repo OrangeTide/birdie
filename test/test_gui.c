@@ -29,6 +29,7 @@
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
+#include "bd_widget_split.h"
 #include "bd_widget_chart.h"
 #include "bd_widget_icon.h"
 #include "bd_asset.h"
@@ -37,6 +38,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 /* ---- table model: deliberately unsorted, with string!=numeric port order ---- */
@@ -430,6 +432,10 @@ static int tr_sel_n, tr_act_n, tr_exp_n, tr_exp_open;
 static void tr_on_select(bd_id w, uint64_t k, void *u)   { (void)w; (void)u; tr_sel_key = k; tr_sel_n++; }
 static void tr_on_activate(bd_id w, uint64_t k, void *u) { (void)w; (void)u; tr_act_key = k; tr_act_n++; }
 static void tr_on_expand(bd_id w, uint64_t k, int o, void *u) { (void)w; (void)u; tr_exp_key = k; tr_exp_open = o; tr_exp_n++; }
+static int sp_change_n;
+static void sp_on_change(bd_id w, void *d) { (void)w; (void)d; sp_change_n++; }
+static int sp_btn_n;
+static void sp_btn(bd_id w, void *d) { (void)w; (void)d; sp_btn_n++; }
 
 /* ---- an autocomplete provider over a fixed vocabulary ---- */
 static const char *ac_vocab[] = { "connect", "connection", "connected",
@@ -2963,6 +2969,86 @@ main(void)
 	/* Left again collapses the expanded parent */
 	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_LEFT });
 	check("tree Left collapses an expanded node", !bd_tree_is_expanded(tr, 2));
+	}
+	bd_gui_cleanup();
+
+	/* ---- BD_SPLIT: ratio, panes, sash drag, min clamp, child clicks ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id sroot = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL,
+	    BD_PAD_I, 0, BD_END);
+	bd_id sp = bd_split_create(sroot, BD_SPLIT_HORIZONTAL, BD_GROW_I, 1, BD_END);
+	bd_split_on_change(sp, sp_on_change, NULL);
+	bd_id pa = bd_split_pane(sp, 0);
+	bd_id pb = bd_split_pane(sp, 1);
+	check("split panes are distinct valid ids",
+	    pa != BD_NONE && pb != BD_NONE && pa != pb);
+	check("split default ratio is 0.5",
+	    fabsf(bd_split_ratio(sp) - 0.5f) < 0.01f);
+
+	/* a button in the first pane: hit_extension must NOT let the split
+	 * swallow the press (the whole reason the sash is a separate widget) */
+	int bcx, bcy, bw2, bh2;
+	bd_id btn = bd_create(pa, BD_BUTTON, BD_LABEL_S, "ok",
+	    BD_ON_CLICK_F, sp_btn, BD_END);
+	bd_create(pb, BD_LABEL, BD_LABEL_S, "right", BD_END);
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+	check("split renders without crashing", 1);
+
+	/* an even ratio splits the width roughly evenly */
+	int ax, ay, aw, ah, bx, by, bw, bh;
+	bd_widget_rect(pa, &ax, &ay, &aw, &ah);
+	bd_widget_rect(pb, &bx, &by, &bw, &bh);
+	check("even ratio splits the width about evenly", abs(aw - bw) <= 8);
+
+	bd_widget_rect(btn, &bcx, &bcy, &bw2, &bh2);
+	bd_event pd = mouse(BD_EV_MOUSE_DOWN, bcx + bw2 / 2, bcy + bh2 / 2);
+	bd_event pu = mouse(BD_EV_MOUSE_UP,   bcx + bw2 / 2, bcy + bh2 / 2);
+	bd_gui_event(&pd); bd_gui_event(&pu);
+	check("a button inside a pane still receives clicks", sp_btn_n == 1);
+
+	bd_split_set_ratio(sp, 0.25f);
+	check("set_ratio is reflected",
+	    fabsf(bd_split_ratio(sp) - 0.25f) < 0.01f);
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+	bd_widget_rect(pa, &ax, &ay, &aw, &ah);
+	bd_widget_rect(pb, &bx, &by, &bw, &bh);
+	check("a smaller ratio makes the first pane narrower", aw < bw);
+
+	/* drag the sash (the split's middle child) toward the right edge */
+	bd_id sash = bd_next_sibling(bd_first_child(sp));
+	int hx, hy, hw, hh;
+	bd_widget_rect(sash, &hx, &hy, &hw, &hh);
+	sp_change_n = 0;
+	bd_event dd = mouse(BD_EV_MOUSE_DOWN, hx + hw / 2, hy + hh / 2);
+	bd_event dm = mouse(BD_EV_MOUSE_MOVE, 300, hy + hh / 2);
+	bd_event du = mouse(BD_EV_MOUSE_UP,   300, hy + hh / 2);
+	bd_gui_event(&dd); bd_gui_event(&dm); bd_gui_event(&du);
+	check("sash drag grew the first pane and fired on_change",
+	    sp_change_n > 0 && bd_split_ratio(sp) > 0.5f);
+
+	/* a large minimum clamps the drag away from the far edge */
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+	bd_widget_rect(sash, &hx, &hy, &hw, &hh);
+	bd_split_set_min_size(sp, 150);
+	bd_event md = mouse(BD_EV_MOUSE_DOWN, hx + hw / 2, hy + hh / 2);
+	bd_event mm = mouse(BD_EV_MOUSE_MOVE, 0, hy + hh / 2);
+	bd_event mu = mouse(BD_EV_MOUSE_UP,   0, hy + hh / 2);
+	bd_gui_event(&md); bd_gui_event(&mm); bd_gui_event(&mu);
+	check("a large minimum clamps the sash off the edge",
+	    bd_split_ratio(sp) > 0.3f && bd_split_ratio(sp) < 0.45f);
+
+	/* splits nest: put a vertical split inside the second pane */
+	bd_id vsp = bd_split_create(pb, BD_SPLIT_VERTICAL, BD_GROW_I, 1, BD_END);
+	check("a nested vertical split is valid",
+	    vsp != BD_NONE && bd_split_pane(vsp, 0) != BD_NONE &&
+	    bd_split_pane(vsp, 1) != BD_NONE);
+	bd_gui_layout(400, 300);
+	bd_gui_render();
+	check("a nested split renders without crashing", 1);
 	}
 	bd_gui_cleanup();
 
