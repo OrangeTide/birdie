@@ -55,6 +55,7 @@ Build system is [modular-make](https://github.com/OrangeTide/modular-make). Each
 - `scripts/update-ludica.sh` — re-vendor ludica from upstream git
 - `scripts/update-gnumakefile.sh` — fetch GNUmakefile from modular-make
 - `scripts/update-khronos.sh` — re-vendor the Khronos GLES3 headers from the registries
+- `scripts/gallery-montage.sh` — regenerate `doc/images/birdie-gui-gallery.png` by capturing each widget-gallery tab (needs an X display + the built gallery)
 - `doc/` — design documents (network, terminal, GUI, triggers, etc.)
 - `concept.md` — original requirements and open design questions
 
