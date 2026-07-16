@@ -5,8 +5,7 @@
 Two related features sit on the same foundation in `bd_widget_editor`:
 
 1. Find/replace highlighting (built).
-2. Runtime-configurable syntax highlighting (this note explores it before we
-   commit to a design).
+2. Runtime-configurable syntax highlighting (built; `bd_syntax.{c,h}`).
 
 Both need the editor to override colour, weight, and background over arbitrary
 byte ranges, and both must coexist. That shared substrate is a layered style-run
@@ -76,7 +75,7 @@ shift with the text, but new or removed matches are not reflected until the next
 `bd_editor_find`. A find UI re-calls `bd_editor_find` on each keystroke in its
 field, which is cheap at this editor's scale.
 
-## Runtime syntax highlighting: exploration
+## Runtime syntax highlighting (implemented)
 
 ### The reference (compact-pascal playground)
 
@@ -123,7 +122,7 @@ Notable properties, and their fit here:
 - **JSON config, fetched at load, keyed by file extension.** The config *shape*
   (state machine) is the valuable part; JSON specifically is not required.
 
-### Proposed C design
+### C design (as built; see `bd_syntax.h` for the exact API)
 
 Split the work in two, mirroring what find/replace already established:
 
@@ -171,36 +170,71 @@ Split the work in two, mirroring what find/replace already established:
    buffer, and adds one SYNTAX-layer run per span. Find highlights, app styling,
    and transient marks are untouched because they live on other layers.
 
-### The config-source question (the thing to decide)
+### The config source (decided)
 
-The engine is data-driven either way. What differs is where a `bd_syntax_lang`
-comes from. "We don't have to use JSON" is the open point, so the realistic
-options:
+The engine is data-driven; the decision was where a `bd_syntax_lang` comes from.
+Rather than a single source, the shipped design does three things: it **parses a
+definition from an in-memory text buffer** (`bd_syntax_parse`, so a language can
+come from a compiled-in string, a file the app reads, or anywhere), it **compiles
+in useful defaults** (`bd_syntax_builtin("lua")` / `("abc")`, lazily parsed and
+cached), and it offers an **override + autodetect** API so an app can force a
+language or let the extension pick one:
 
-- **Compiled-in C tables.** Languages are `static const bd_syntax_lang`
-  literals in C. Zero new dependency, fully data-driven, and languages are still
-  swappable at runtime by pointer. It is "runtime configurable" in the sense
-  that the widget re-highlights whenever you hand it a different definition, but
-  not editable from a data file without a rebuild.
-- **A small text loader, no JSON.** A flat, human-editable format (the project
-  already parses CSV and uses CSV for its own config) that builds a
-  `bd_syntax_lang` at runtime. Gains file-editable languages shareable like the
-  MUD list, at the cost of a loader and a format to design.
-- **JSON via a tiny vendored parser.** Matches the reference one-to-one and
-  makes the compact-pascal `.json` files usable as-is, at the cost of a new
-  third-party dependency in a toolkit that currently has only stb.
-- **Lua-defined languages.** The app already vendors Lua for its scripting VM,
-  so a language could be a Lua table. Powerful and runtime-loadable, but it
-  couples the toolkit's highlighting to Lua, which the GUI bundle otherwise does
-  not depend on. Reasonable for the birdie app, wrong for the shippable toolkit.
+```c
+bd_syntax_lang *bd_syntax_parse(const char *text, int len);   /* from memory */
+const bd_syntax_lang *bd_syntax_builtin(const char *name);    /* "lua","abc" */
+const bd_syntax_lang *bd_syntax_for_name(const char *file);   /* by extension */
+void bd_syntax_register(const char *name, const char *const *exts,
+                        const bd_syntax_lang *);              /* extend detect */
+void bd_editor_set_syntax(bd_id, const bd_syntax_lang *);     /* override/off */
+```
 
-Recommendation: build the engine plus the editor hook now, feeding it
-**compiled-in C tables**, with a first language chosen from real need (Lua, for
-the trigger/script editor, is the concrete win; ABC notation is the other
-in-tree editor). Keep the engine's input a plain `bd_syntax_lang` so a text or
-JSON loader can be added later without touching the engine or the editor. This
-delivers runtime-swappable highlighting immediately and defers the config-format
-commitment until there is a real need to edit languages from a file.
+JSON was deliberately not adopted: it would add a third-party parser to a toolkit
+that vendors only stb. A Lua-defined language was rejected for the shippable
+toolkit for the same coupling reason (the app could still register one). The
+text format is flat and line-oriented, parsed from memory with no file I/O in
+the toolkit:
+
+```
+name lua
+start idle
+# style <name> <#RRGGBB|#RRGGBBAA|-> [bold] [italic] [underline] [bg:#RRGGBB]
+style default -
+style keyword #E0A030 bold
+style comment #6A9955 italic
+# state <name> [style <s>] [default <state>] [noeat]
+#   rule <charclass> <next> [recolor[N]] [noeat] [buffer]
+#   str  <literal>   <next> [recolor] [noeat]
+#   keyword <style> <word>...
+state idle style default default idle
+  rule a-zA-Z_ ident buffer
+  rule 0-9 number recolor
+  str -- comment recolor
+state ident style default default idle noeat
+  rule a-zA-Z0-9_ ident
+  keyword keyword function local end if then else return
+```
+
+`rule` matches one byte against a character class (`a-zA-Z0-9_`, ranges and
+literals, `\n \t` escapes); `str` matches a fixed multi-byte literal (so `--`,
+`[[`, `<!--` are one transition). `recolor[N]` restyles the last N bytes (a
+`str` recolours its whole literal) with the target state's style, colouring the
+opening delimiter as comment/string. `noeat` re-processes the byte in the next
+state; a state marked `noeat` re-processes the terminator through its `default`
+and, if it has a `keyword` map, looks the buffered word up on the way out.
+`buffer` marks where a keyword word starts. State persists across newlines, so an
+unterminated comment or string simply continues.
+
+### Editor integration
+
+The editor holds a `const bd_syntax_lang *` and a dirty flag set by every buffer
+edit. At the top of render, if dirty, it clears its SYNTAX layer, runs the engine
+over the whole buffer once, and adds one SYNTAX-layer run per span, then clears
+the flag. So highlighting is at most one re-tokenize per frame regardless of how
+many keystrokes landed, and find highlights, app styling, and marks are never
+touched. `bd_editor_set_syntax(id, lang)` installs or clears (NULL) the language;
+an app typically calls `bd_syntax_for_name(filename)` and passes the result.
+
 
 ### Performance
 

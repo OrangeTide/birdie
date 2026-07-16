@@ -19,6 +19,7 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_vt.h`        | `BD_TERMINAL` (libvt-backed terminal)                            |
 | `bd_widget_explorer.h`  | icon/grid browser (Explorer / Finder style)                     |
 | `bd_widget_editor.h`    | rich-text, row-oriented editor                                  |
+| `bd_syntax.h`           | runtime-configurable syntax highlighter (state machine)         |
 | `bd_widget_table.h`     | sortable multi-column table                                     |
 | `bd_widget_tree.h`      | indented expand/collapse hierarchy list                         |
 | `bd_widget_icon.h`      | shared icon cell + standalone icon (app launcher / desktop icon) |
@@ -338,6 +339,31 @@ int   bd_editor_find_count(bd_id); int bd_editor_find_current(bd_id);
 void  bd_editor_find_clear(bd_id);
 int   bd_editor_replace(bd_id, const char *repl);      /* current match */
 int   bd_editor_replace_all(bd_id, const char *repl);  /* -> replaced */
+/* syntax highlighting: install a bd_syntax language; NULL = off */
+void  bd_editor_set_syntax(bd_id, const bd_syntax_lang *);
+const bd_syntax_lang *bd_editor_syntax(bd_id);
+```
+
+### Syntax highlighting (`bd_syntax.h`)
+
+A runtime-configurable highlighter: a language is a state machine (named states,
+each with ordered character-class or literal rules and an optional keyword map)
+that the tokenizer walks byte by byte, carrying state across lines so multi-line
+comments and strings work. It emits `(start, end, flags, fg, bg)` spans and owns
+no widget. Parse a definition from an in-memory text buffer, take a compiled-in
+default (`lua`, `abc`), or autodetect by extension; install one on an editor with
+`bd_editor_set_syntax`. The text format is documented in
+`doc/gui/editor-highlight.md`.
+
+```c
+bd_syntax_lang *bd_syntax_parse(const char *text, int len);   /* NULL on error */
+void            bd_syntax_free(bd_syntax_lang *);
+const bd_syntax_lang *bd_syntax_builtin(const char *name);    /* "lua" | "abc" */
+const bd_syntax_lang *bd_syntax_for_name(const char *filename);   /* by ext */
+void bd_syntax_register(const char *name, const char *const *exts,
+                        const bd_syntax_lang *);
+int  bd_syntax_run(const bd_syntax_lang *, const char *buf, int len,
+                   bd_syntax_span *out, int max);             /* -> span count */
 ```
 
 ### Table (`bd_widget_table.h`)

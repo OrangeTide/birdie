@@ -23,6 +23,7 @@
 #include "bd_dialog.h"
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
+#include "bd_syntax.h"
 #include "bd_widget_sketch.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
@@ -480,6 +481,15 @@ on_new_window(bd_id id, void *arg)
 	/* find highlight: every "c2" gets an amber wash (the current match
 	 * brighter), composed over the app styling above without erasing it */
 	bd_editor_find(med, "c2", 0);
+	/* ABC syntax highlighting, composed under the app styles + find above */
+	bd_editor_set_syntax(med, bd_syntax_builtin("abc"));
+
+	/* a second editor with Lua syntax: keywords, string, number, comment */
+	bd_id led = bd_editor_create(body, BD_PREF_H_I, 84, BD_END);
+	bd_editor_set_text(led,
+		"-- heal trigger\nfunction on_prompt(hp)\n"
+		"  if hp < 20 then send(\"quaff heal\") end\nend");
+	bd_editor_set_syntax(led, bd_syntax_builtin("lua"));
 
 	bd_create(body, BD_LABEL, BD_LABEL_S, "Recent (BD_LIST):",
 		BD_PREF_H_I, 16, BD_END);

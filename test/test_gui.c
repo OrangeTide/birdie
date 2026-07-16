@@ -30,6 +30,7 @@
 #include "bd_widget_meter.h"
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
+#include "bd_syntax.h"
 #include "bd_widget_split.h"
 #include "bd_widget_groupbox.h"
 #include "bd_widget_scrollview.h"
@@ -1714,6 +1715,64 @@ main(void)
 	check("replace_all swaps every match + clears find",
 	    rall == 2 && strcmp(rb, "XX bb ZZ cc ZZ") == 0 &&
 	    bd_editor_find_count(ed) == 0);
+
+	/* ---- bd_syntax tokenizer ---- */
+	{
+	const bd_syntax_lang *lua = bd_syntax_builtin("lua");
+	check("builtin lua language loads", lua != NULL);
+	bd_syntax_span sp[32];
+	const char *src = "local x = 42 -- hi";
+	int ns = bd_syntax_run(lua, src, (int)strlen(src), sp, 32);
+	check("lua tokenizes keyword + number + comment", ns == 3);
+	check("lua keyword span is bold at the start",
+	    sp[0].start == 0 && sp[0].end == 5 && (sp[0].flags & BD_SYN_BOLD));
+	check("lua number span covers 42",
+	    sp[1].start == 10 && sp[1].end == 12);
+	check("lua comment span runs to end + is italic",
+	    sp[2].start == 13 && sp[2].end == 18 && (sp[2].flags & BD_SYN_ITALIC));
+
+	/* multi-line state: an unterminated string carries across a newline */
+	const char *ml = "s = \"open\nnext";
+	int nm = bd_syntax_run(lua, ml, (int)strlen(ml), sp, 32);
+	check("lua highlights an open string", nm >= 1 && sp[0].start == 4);
+
+	check("for_name maps .lua to the lua language",
+	    bd_syntax_for_name("scripts/foo.lua") == lua);
+	check("for_name returns NULL for an unknown extension",
+	    bd_syntax_for_name("foo.zzz") == NULL);
+
+	/* parse a tiny custom language from memory */
+	bd_syntax_lang *mine = bd_syntax_parse(
+	    "name t\nstart s\nstyle k #FF0000 bold\n"
+	    "state s style k default s\n  rule a-z s\n", -1);
+	check("parse-from-memory builds a language", mine != NULL);
+	int nc = bd_syntax_run(mine, "abc", 3, sp, 32);
+	check("custom language colours its class",
+	    nc == 1 && sp[0].start == 0 && sp[0].end == 3 &&
+	    sp[0].fg == 0xFF0000FFu);
+	bd_syntax_free(mine);
+	check("bd_syntax_run tolerates a NULL language",
+	    bd_syntax_run(NULL, "x", 1, sp, 32) == 0);
+	}
+
+	/* ---- editor <-> syntax integration ---- */
+	bd_syntax_lang *bglang = bd_syntax_parse(
+	    "name t\nstart s\nstyle h bg:#334455\n"
+	    "state s style h default s\n  rule a-z s\n", -1);
+	check("integration language parses", bglang != NULL);
+	bd_editor_set_locked(ed, 1);          /* no blinking caret in the counts */
+	bd_editor_set_text(ed, "abcdef");
+	long sbase = n_drawvtx; bd_gui_render(); long s_plain = n_drawvtx - sbase;
+	bd_editor_set_syntax(ed, bglang);
+	check("editor syntax getter round-trips", bd_editor_syntax(ed) == bglang);
+	sbase = n_drawvtx; bd_gui_render(); long s_hi = n_drawvtx - sbase;
+	check("syntax highlight adds draw output", s_hi > s_plain);
+	bd_editor_set_syntax(ed, NULL);
+	check("syntax off clears the getter", bd_editor_syntax(ed) == NULL);
+	sbase = n_drawvtx; bd_gui_render(); long s_off = n_drawvtx - sbase;
+	check("syntax off removes the highlight output", s_off < s_hi);
+	bd_editor_set_locked(ed, 0);
+	bd_syntax_free(bglang);
 	bd_gui_cleanup();
 
 	/* ---- BD_LIST scrolling/selectable list ---- */

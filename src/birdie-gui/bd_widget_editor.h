@@ -2,6 +2,7 @@
 #define BD_WIDGET_EDITOR_H
 
 #include "widget.h"
+#include "bd_syntax.h"
 #include <stdint.h>
 
 /*
@@ -98,6 +99,15 @@ void bd_editor_style_span(bd_id id, int start, int end, bd_rich_style s);
 void bd_editor_highlight_row(bd_id id, int row, bd_rich_style s);
 void bd_editor_highlight_span(bd_id id, int row, int col0, int col1,
                               bd_rich_style s);
+
+/* ---- syntax highlighting ----
+ *
+ * Install a bd_syntax language and the editor re-highlights itself on every
+ * edit, emitting the token colours on a dedicated style layer that does not
+ * disturb app styling or a find highlight. Pass NULL to turn it off. Use
+ * bd_syntax_builtin / bd_syntax_for_name (bd_syntax.h) to get a language. */
+void bd_editor_set_syntax(bd_id id, const bd_syntax_lang *lang);
+const bd_syntax_lang *bd_editor_syntax(bd_id id);
 
 /* ---- find / replace highlight ----
  *

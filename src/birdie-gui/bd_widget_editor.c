@@ -1,4 +1,5 @@
 #include "bd_widget_editor.h"
+#include "bd_syntax.h"
 #include "widget_ext.h"
 #include "bd_draw.h"
 #include <stdarg.h>
@@ -60,6 +61,12 @@ struct editor {
 	int   *find_starts;     /* byte offset of each match */
 	int    find_startcap;
 
+	/* syntax highlighting */
+	const bd_syntax_lang *syntax;
+	int    syntax_dirty;    /* text changed since the last highlight */
+	bd_syntax_span *sp;     /* reusable span scratch */
+	int    spcap;
+
 	/* autocomplete */
 	bd_completer_fn ac_fn;
 	void  *ac_user;
@@ -73,6 +80,8 @@ struct editor {
 };
 
 static int editor_type;
+
+static void e_syntax_apply(struct editor *e);
 
 /* ------------------------------------------------------------------ */
 /* utf-8                                                              */
@@ -166,6 +175,7 @@ e_splice(struct editor *e, int off, int dellen, const char *ins, int inslen)
 
 	e->cursor = e_shift(e->cursor, off, dellen, delta);
 	if (e->cursor > e->len) e->cursor = e->len;
+	e->syntax_dirty = 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -359,6 +369,7 @@ editor_destroy(bd_id id, void *state)
 	free(e->runs);
 	free(e->find_needle);
 	free(e->find_starts);
+	free(e->sp);
 	e->buf = NULL;
 	e->runs = NULL;
 	e->find_needle = NULL;
@@ -409,6 +420,7 @@ static void
 editor_render(bd_id id, void *state)
 {
 	struct editor *e = state;
+	if (e->syntax_dirty) { e_syntax_apply(e); e->syntax_dirty = 0; }
 	const bd_theme *th = bd_gui_theme();
 	const bd_backend *be = bd_backend_get();
 	int focused = (bd_focused() == id);
@@ -992,6 +1004,30 @@ e_find_reveal(struct editor *e)
 	e->sel_anchor = -1;
 }
 
+/* Regenerate the SYNTAX layer from the installed language. Clears just that
+ * layer, so find highlights, app styling, and marks are untouched. */
+static void
+e_syntax_apply(struct editor *e)
+{
+	e_clear_layer(e, E_LAYER_SYNTAX);
+	if (!e->syntax || e->len <= 0)
+		return;
+	if (e->spcap < e->len) {              /* at most one span per byte */
+		int c = e->spcap ? e->spcap * 2 : 256;
+		while (c < e->len) c *= 2;
+		bd_syntax_span *ns = realloc(e->sp, (size_t)c * sizeof *ns);
+		if (!ns)
+			return;
+		e->sp = ns;
+		e->spcap = c;
+	}
+	int n = bd_syntax_run(e->syntax, e->buf, e->len, e->sp, e->spcap);
+	for (int i = 0; i < n; i++) {
+		bd_rich_style st = { e->sp[i].flags, e->sp[i].fg, e->sp[i].bg };
+		e_add_run(e, e->sp[i].start, e->sp[i].end, E_LAYER_SYNTAX, st);
+	}
+}
+
 /* ------------------------------------------------------------------ */
 /* public API                                                         */
 /* ------------------------------------------------------------------ */
@@ -1329,4 +1365,20 @@ bd_editor_replace_all(bd_id id, const char *repl)
 		e_splice(e, e->find_starts[i], nlen, repl, rlen);
 	bd_editor_find_clear(id);
 	return n;
+}
+
+void
+bd_editor_set_syntax(bd_id id, const bd_syntax_lang *lang)
+{
+	struct editor *e = editor_of(id);
+	if (!e) return;
+	e->syntax = lang;
+	e->syntax_dirty = 1;
+}
+
+const bd_syntax_lang *
+bd_editor_syntax(bd_id id)
+{
+	struct editor *e = editor_of(id);
+	return e ? e->syntax : NULL;
 }

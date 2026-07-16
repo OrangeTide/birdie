@@ -44,6 +44,7 @@ birdie_gui_SRCS = \
 	bd_popmenu.c \
 	bd_widget_explorer.c \
 	bd_widget_editor.c \
+	bd_syntax.c \
 	bd_widget_sketch.c \
 	bd_widget_icon.c \
 	bd_widget_table.c \
