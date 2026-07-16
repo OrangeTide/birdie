@@ -369,11 +369,14 @@ static void gtbl_row_style(void *c, int r, bd_table_row_style *out)
 /* ---- a small tree model (Session sidebar: worlds grouped by category) ---- */
 static const struct wnode {
 	uint64_t key; const char *label; uint64_t parent; int folder;
+	const char *detail;   /* right-aligned dim badge (unread count) */
 } wnodes[] = {
-	{ 1, "Favorites", 0, 1 }, { 2, "Fantasy", 0, 1 }, { 3, "Sci-Fi", 0, 1 },
-	{ 10, "Aardwolf", 1, 0 }, { 11, "BatMUD", 1, 0 },
-	{ 20, "Discworld", 2, 0 }, { 21, "Threshold", 2, 0 }, { 22, "Lensmoor", 2, 0 },
-	{ 30, "Genesis", 3, 0 }, { 31, "Federation", 3, 0 },
+	{ 1, "Favorites", 0, 1, "2" }, { 2, "Fantasy", 0, 1, "5" },
+	{ 3, "Sci-Fi", 0, 1, NULL },
+	{ 10, "Aardwolf", 1, 0, "2" }, { 11, "BatMUD", 1, 0, NULL },
+	{ 20, "Discworld", 2, 0, "5" }, { 21, "Threshold", 2, 0, NULL },
+	{ 22, "Lensmoor", 2, 0, NULL },
+	{ 30, "Genesis", 3, 0, NULL }, { 31, "Federation", 3, 0, NULL },
 };
 #define WNODE_N ((int)(sizeof wnodes / sizeof wnodes[0]))
 static int
@@ -386,6 +389,7 @@ static void
 w_get(void *c, uint64_t key, bd_tree_item *out)
 { (void)c; for (int i = 0; i < WNODE_N; i++) if (wnodes[i].key == key) {
 	out->label = wnodes[i].label; out->has_children = wnodes[i].folder;
+	out->detail = wnodes[i].detail;
 	out->enabled = 1; out->user = (void *)&wnodes[i]; return; } }
 static void
 w_activate(bd_id w, uint64_t key, void *user)

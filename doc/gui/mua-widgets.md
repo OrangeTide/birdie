@@ -53,7 +53,7 @@ a refinement), Missing (no toolkit support).
 | --- | --- | --- | --- |
 | Three-pane layout | nestable resizable panes | `BD_SPLIT` | Have |
 | Mailboxes tree | expand/collapse, per-node folder icon, keyboard nav | `BD_TREE` (icons, twisties, type-ahead) | Have |
-| ...with unread counts | a right-aligned count or badge per node | fold into the label ("Inbox (3)") | Partial |
+| ...with unread counts | a right-aligned count or badge per node | `BD_TREE` `bd_tree_item.detail` | Have |
 | Message list | multi-column, sortable, multi-select, scroll, keyboard | `BD_TABLE` | Have |
 | ...status/priority/attach glyphs | per-cell icon, not text | `BD_TABLE` model `icon()` hook | Have |
 | ...unread bold / color label | per-row text style and background tint | `BD_TABLE` model `row_style()` hook | Have |
@@ -106,7 +106,11 @@ Both are new optional fields on `bd_table_model` (or a paired struct), so they
 cost nothing for existing callers. The 0.9 breaking-change window is open, so
 this can land cleanly. This is the single enhancement that unblocks the MUA.
 
-### 2. Tree secondary text or count badge (minor)
+### 2. Tree secondary text or count badge (IMPLEMENTED)
+
+Resolved: `bd_tree_item` gained an optional `detail` string drawn right-aligned
+and dimmed, separate from the folder name, so an unread count no longer has to
+be baked into the label. The rest of this section records the original analysis.
 
 An unread count reads best right-aligned and dimmed, separate from the folder
 name. Today the app must bake it into the label. A `bd_tree_item.detail`

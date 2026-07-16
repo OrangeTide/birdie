@@ -126,6 +126,7 @@ check(const char *what, int ok)
 
 /* ---- recording stub backend (GPU interface) ---- */
 static int n_shader, n_drawverts, n_maketex, n_scissor;
+static long n_drawvtx;   /* total vertices submitted (detects text-only growth) */
 static unsigned next_texid = 1;   /* distinct id per texture, like a real backend */
 
 static int    be_width(void)  { return 800; }
@@ -145,7 +146,7 @@ static void be_uni_2(bd_shader s,const char *n,float x,float y){ (void)s;(void)n
 static void be_uni_3(bd_shader s,const char *n,float x,float y,float z){ (void)s;(void)n;(void)x;(void)y;(void)z; }
 static void be_uni_4(bd_shader s,const char *n,float x,float y,float z,float w){ (void)s;(void)n;(void)x;(void)y;(void)z;(void)w; }
 static void be_uni_m(bd_shader s,const char *n,const float m[16]){ (void)s;(void)n;(void)m; }
-static void be_draw_verts(const bd_vertex *v, int n){ (void)v; (void)n; n_drawverts++; }
+static void be_draw_verts(const bd_vertex *v, int n){ (void)v; n_drawverts++; n_drawvtx += n; }
 
 static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
 static bd_texture be_load_tex_mem(const unsigned char *d, int n){ (void)d; (void)n; return (bd_texture){next_texid++}; }
@@ -442,8 +443,9 @@ static int tn_child_count(void *c, uint64_t p)
 { (void)c; int n = 0; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].parent == p) n++; return n; }
 static uint64_t tn_child(void *c, uint64_t p, int idx)
 { (void)c; int k = 0; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].parent == p && k++ == idx) return tnodes[i].key; return 0; }
+static int tn_detail;
 static void tn_get(void *c, uint64_t key, bd_tree_item *out)
-{ (void)c; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].key == key) { out->label = tnodes[i].label; out->has_children = tnodes[i].folder; out->enabled = 1; out->user = (void *)&tnodes[i]; return; } }
+{ (void)c; for (int i = 0; i < TNODE_N; i++) if (tnodes[i].key == key) { out->label = tnodes[i].label; out->has_children = tnodes[i].folder; out->enabled = 1; out->user = (void *)&tnodes[i]; if (tn_detail && tnodes[i].folder) out->detail = "3"; return; } }
 static uint64_t tr_sel_key, tr_act_key, tr_exp_key;
 static int tr_sel_n, tr_act_n, tr_exp_n, tr_exp_open;
 static void tr_on_select(bd_id w, uint64_t k, void *u)   { (void)w; (void)u; tr_sel_key = k; tr_sel_n++; }
@@ -3111,6 +3113,18 @@ main(void)
 	bd_gui_layout(300, 260);
 	bd_gui_render();
 	check("tree renders expanded without crashing", 1);
+
+	/* detail badges: the dim right-aligned count adds draw output */
+	tn_detail = 0;
+	long tdbase = n_drawvtx;
+	bd_gui_render();
+	long tdplain = n_drawvtx - tdbase;
+	tn_detail = 1;
+	tdbase = n_drawvtx;
+	bd_gui_render();
+	long tddet = n_drawvtx - tdbase;
+	check("tree detail badges add draw output", tddet > tdplain);
+	tn_detail = 0;
 
 	bd_tree_select(tr, 4);
 	check("tree set_selected reflected", bd_tree_selected(tr) == 4);

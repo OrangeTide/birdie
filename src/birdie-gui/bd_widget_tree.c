@@ -24,6 +24,7 @@
 #define PAD_X       4      /* left inset before the first level */
 #define TWISTY_W   14      /* width reserved for a twisty column */
 #define ICON_GAP    4
+#define DETAIL_PAD  6      /* right inset for the detail/badge text */
 #define DBLCLICK_S  0.4
 
 struct row {
@@ -315,6 +316,15 @@ tree_render(bd_id id, void *state)
 		if (it.label && it.label[0]) {
 			uint32_t tc = it.enabled ? th->text : th->border;
 			bd_draw_text(it.label, (float)lx, (float)(ry + text_top), tc);
+		}
+		/* right-aligned, dimmed secondary text (an unread count, a size) */
+		if (it.detail && it.detail[0]) {
+			int dw = (int)bd_draw_text_width(it.detail);
+			int dx = bx + bw - DETAIL_PAD - dw;
+			if (dx < lx + ICON_GAP)
+				dx = lx + ICON_GAP;
+			bd_draw_text(it.detail, (float)dx, (float)(ry + text_top),
+			    th->border);
 		}
 	}
 	bd_draw_flush();

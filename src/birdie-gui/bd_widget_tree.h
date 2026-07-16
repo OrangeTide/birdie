@@ -28,6 +28,7 @@
  * (the label is borrowed and copied nowhere). */
 typedef struct bd_tree_item {
 	const char *label;        /* row text */
+	const char *detail;       /* optional right-aligned dim text (a count/size); NULL = none */
 	bd_texture  icon;         /* optional; id 0 = no icon */
 	int         has_children; /* draw a twisty (a folder, even if empty now) */
 	int         enabled;      /* 0 = dimmed, not activatable */

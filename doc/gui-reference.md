@@ -347,11 +347,13 @@ demand (a file/project tree, a class hierarchy). Node identity is an app-chosen
 level). The widget owns scrolling, selection, keyboard nav (up/down, left/right
 collapse-expand, type-ahead), and the expand state (seed it with
 `bd_tree_set_expanded`); an optional `expand` callback lets the app lazily fill
-children the first time a node opens.
+children the first time a node opens. Each node may carry an optional `detail`
+string drawn right-aligned and dimmed (an unread count, a size), separate from
+the label.
 
 ```c
 /* model: child_count(ctx, parent) + child(ctx, parent, i) -> key + get(ctx, node, *item) */
-/* item: label, icon, has_children, enabled, user   cb: select / activate / expand */
+/* item: label, detail, icon, has_children, enabled, user  cb: select / activate / expand */
 bd_id    bd_tree_create(bd_id parent, const bd_tree_model *, const bd_tree_cb *, ...);
 void     bd_tree_refresh(bd_id);
 uint64_t bd_tree_selected(bd_id);        void bd_tree_select(bd_id, uint64_t node);
