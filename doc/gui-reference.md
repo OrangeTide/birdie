@@ -288,13 +288,16 @@ void  bd_terminal_set_palette(bd_id, const bd_palette *pal); /* 16-color ANSI pa
 ### Explorer (`bd_widget_explorer.h`)
 
 Icon/grid browser driven by a caller-supplied `bd_explorer_model` (count/get/
-set_pos callbacks); keys are `uint64_t`.
+set_pos callbacks); keys are `uint64_t`. Three view modes: icons (free-arranged),
+list, and details (rows under a sticky column header, columns from `model.cell`).
 
 ```c
 bd_id bd_explorer_create(bd_id parent, const bd_explorer_model *model, const bd_explorer_cb *cb, ...);
 void  bd_explorer_refresh(bd_id);
 int   bd_explorer_selection(bd_id, uint64_t *keys, int max);   void bd_explorer_select(bd_id, uint64_t key, int add);
 void  bd_explorer_set_icon_size(bd_id, int px);               void bd_explorer_begin_rename(bd_id, uint64_t key);
+void  bd_explorer_set_view(bd_id, int view);   /* BD_EXPLORER_ICONS|LIST|DETAILS */   int bd_explorer_view(bd_id);
+void  bd_explorer_set_columns(bd_id, const bd_explorer_column *cols, int ncol); /* details columns */
 ```
 
 ### Editor (`bd_widget_editor.h`)
@@ -433,7 +436,7 @@ void  bd_icon_on_drop(bd_id, bd_icon_drop_fn, void *user);           /* makes it
 
 ### Inventory (`bd_widget_inventory.h`)
 
-Fixed grid of icon cells; drag-and-drop and context menu via callbacks.
+Icon, list, or details view; drag-and-drop and context menu via callbacks.
 
 ```c
 bd_id bd_inventory_create(bd_id parent, int cols, int rows, const bd_inventory_model *, const bd_inventory_cb *, ...);

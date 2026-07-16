@@ -278,6 +278,16 @@ static struct srv { uint64_t key; char name[24]; int x, y; } servers[] = {
 };
 static int srv_count(void *ctx){ (void)ctx; return (int)(sizeof servers / sizeof *servers); }
 static void
+srv_cell(void *ctx, uint64_t key, int col, char *buf, int cap)
+{
+	(void)ctx;
+	static const char *kinds[] = { "DikuMUD", "LPMud", "MOO", "Custom" };
+	if (col == 1)
+		snprintf(buf, (size_t)cap, "%s", kinds[key % 4]);
+	else if (col == 2)
+		snprintf(buf, (size_t)cap, "%d", (int)(key * 37 % 400));
+}
+static void
 srv_get(void *ctx, int i, bd_explorer_item *out)
 {
 	(void)ctx;
@@ -388,6 +398,10 @@ mud_complete(bd_id ed, const char *prefix, bd_completion *out, int max, void *us
 /* Open a second native window: a small dialog with its own widgets, proving
  * windows render and take input independently. */
 static int dialog_n;
+static bd_id g_srv_ex;
+static void srv_view_icons(bd_id b, void *u)  { (void)b; (void)u; bd_explorer_set_view(g_srv_ex, BD_EXPLORER_ICONS); }
+static void srv_view_list(bd_id b, void *u)   { (void)b; (void)u; bd_explorer_set_view(g_srv_ex, BD_EXPLORER_LIST); }
+static void srv_view_details(bd_id b, void *u){ (void)b; (void)u; bd_explorer_set_view(g_srv_ex, BD_EXPLORER_DETAILS); }
 
 static void
 on_new_window(bd_id id, void *arg)
@@ -408,9 +422,22 @@ on_new_window(bd_id id, void *arg)
 		BD_PREF_H_I, 18, BD_END);
 	bd_id ex = bd_explorer_create(body,
 		&(bd_explorer_model){ .count = srv_count, .get = srv_get,
-			.set_pos = srv_set_pos, .set_name = srv_set_name },
+			.set_pos = srv_set_pos, .set_name = srv_set_name,
+			.cell = srv_cell },
 		&(bd_explorer_cb){ .activate = srv_activate },
 		BD_GROW_I, 1, BD_END);
+	g_srv_ex = ex;
+	static const bd_explorer_column scols[] = {
+		{ "Name", 0 }, { "Kind", 90 }, { "Users", 56 } };
+	bd_explorer_set_columns(ex, scols, 3);
+	bd_id vrow = bd_create(body, BD_PANEL, BD_LAYOUT_I, BD_LAYOUT_ROW,
+		BD_PREF_H_I, 26, BD_GAP_I, 4, BD_END);
+	bd_create(vrow, BD_BUTTON, BD_LABEL_S, "Icons", BD_GROW_I, 1,
+		BD_ON_CLICK_F, srv_view_icons, BD_END);
+	bd_create(vrow, BD_BUTTON, BD_LABEL_S, "List", BD_GROW_I, 1,
+		BD_ON_CLICK_F, srv_view_list, BD_END);
+	bd_create(vrow, BD_BUTTON, BD_LABEL_S, "Details", BD_GROW_I, 1,
+		BD_ON_CLICK_F, srv_view_details, BD_END);
 	if (getenv("GALLERY_AUTORENAME"))   /* open the rename editor for a shot */
 		bd_explorer_begin_rename(ex, 1);
 

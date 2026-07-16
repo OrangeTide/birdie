@@ -16,8 +16,9 @@
  * so selection and saved positions survive a refresh when indices shift.
  *
  * Status: selection (single / Ctrl-toggle / Shift-range), drag-move,
- * rubber-band, keyboard navigation, and in-place rename work; list/details
- * view modes are still to come (see bd_widget_explorer.c).
+ * rubber-band, keyboard navigation, in-place rename, and icon/list/details
+ * view modes (bd_explorer_set_view; details columns via bd_explorer_set_columns
+ * + model.cell) all work.
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
@@ -41,6 +42,9 @@ typedef struct bd_explorer_model {
 	void (*get)(void *ctx, int index, bd_explorer_item *out);
 	void (*set_pos)(void *ctx, uint64_t key, int x, int y);
 	void (*set_name)(void *ctx, uint64_t key, const char *name);
+	/* Details-view text for column `col` (>= 1; column 0 is the name column,
+	 * drawn from item.label + icon). Optional. */
+	void (*cell)(void *ctx, uint64_t key, int col, char *buf, int cap);
 	void *ctx;
 } bd_explorer_model;
 
@@ -73,6 +77,28 @@ int bd_explorer_selection(bd_id id, uint64_t *keys, int max);
 /* Select `key`. add=0 replaces the selection with just this key; add=1 adds to
  * the current selection. */
 void bd_explorer_select(bd_id id, uint64_t key, int add);
+
+
+/* View modes. ICONS (default) is the free-arrangeable icon grid; LIST is a
+ * compact grid of small-icon + label cells; DETAILS is one row per item with a
+ * sticky column header (see bd_explorer_set_columns). LIST and DETAILS ignore
+ * saved item positions and are laid out in model order. */
+enum { BD_EXPLORER_ICONS = 0, BD_EXPLORER_LIST, BD_EXPLORER_DETAILS };
+
+void bd_explorer_set_view(bd_id id, int view);   /* BD_EXPLORER_* */
+int  bd_explorer_view(bd_id id);
+
+/* A details-view column. `width` is in pixels; the first column (the name
+ * column, index 0) stretches to fill any leftover width. */
+typedef struct bd_explorer_column {
+	const char *title;
+	int         width;
+} bd_explorer_column;
+
+/* Set the details-view columns (copied; titles borrowed). Column 0 is the name
+ * column (icon + item.label); columns 1.. are filled by model.cell. Passing
+ * ncol <= 0 clears them, leaving a single full-width name column. */
+void bd_explorer_set_columns(bd_id id, const bd_explorer_column *cols, int ncol);
 
 /* Set the icon edge length in pixels (cell size scales with it). */
 void bd_explorer_set_icon_size(bd_id id, int px);

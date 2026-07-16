@@ -273,8 +273,8 @@ What is built:
 
 The v0.3 input roadmap (multi-window, explorer, rich text, the full v1.0
 widget set, clipboard, key-up/repeat, IME, multitouch, pen) is complete on the
-GLES backend. Deferred polish is tracked in the roadmap section: explorer
-list/details view and the Win32 / Wayland / macOS backends.
+GLES backend. Deferred polish is tracked in the roadmap section: the Win32 / Wayland / macOS
+backends.
 
 ## v1.0 widget set
 
@@ -885,8 +885,11 @@ the range, Ctrl-A select all, Enter activate; a focus ring marks the cursor),
 and **in-place rename** (F2 or `bd_explorer_begin_rename()` opens a small
 UTF-8 line editor over the label; Enter commits via `model.set_name`, Escape
 cancels, clicking away commits). The scrolling content is **scissor-clipped**
-to the panel interior. Still to come: list/details view modes. Exhibited in
-the widget gallery's "New Window" dialog (drag to arrange, F2 to rename).
+to the panel interior. Three view modes: icon grid (free-arrangeable), a compact
+list, and details (one row per item under a sticky column header, columns filled
+by an optional `model.cell` hook and set with `bd_explorer_set_columns`); switch
+with `bd_explorer_set_view`. Exhibited in the widget gallery's "Dialog" pop-up
+(Icons/List/Details buttons; drag to arrange, F2 to rename).
 
 Keyboard focus: the toolkit routes key events to a focused extension widget
 and gives a widget keyboard focus when it is clicked (the same path that
@@ -967,7 +970,7 @@ MUD-list format, prefs for a DAW), keyed by the stable key.
 
 **Scope.** First cut: icon grid, single/multi-select (rubber-band +
 Ctrl/Shift), drag-move, double-click activate, right-click context,
-enabled/disabled, wheel scroll, refresh. Later: list/details view modes,
+enabled/disabled, wheel scroll, refresh, and icon/list/details view modes. Later:
 in-place rename (needs the real `BD_TEXT_FIELD` widget), type-to-find, drag-drop
 between explorers, a `BD_SCROLLBAR`, per-icon accessibility roles. Sensible
 build order is mouse-only core first, then rename, keyboard nav, and a richer

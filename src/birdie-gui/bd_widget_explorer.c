@@ -22,12 +22,14 @@
  *
  * TODO (the interaction still to fill in):
  *   - label truncation / ellipsis
- *   - list/details view modes
+ *   - (done) icon/list/details view modes
  *
  * Made by a machine. PUBLIC DOMAIN (CC0-1.0)
  */
 
 #define CELL_PAD     8       /* padding inside a cell, px */
+#define LIST_CELL_W  168     /* list-view cell width, px */
+#define ROW_VPAD     3       /* vertical padding in a list/details row */
 #define DBLCLICK_S   0.40    /* max gap between clicks of a double-click */
 
 struct explorer {
@@ -37,6 +39,10 @@ struct explorer {
 	int      icon_size;      /* icon edge length, px */
 	int      scroll_y;       /* content scroll offset, px */
 	int      content_h;      /* last laid-out content height, px */
+
+	int      view;           /* BD_EXPLORER_* view mode */
+	bd_explorer_column *cols;/* details columns (owned); cols[0] = name col */
+	int      ncol;
 
 	uint64_t *sel;           /* selected keys */
 	int       sel_n, sel_cap;
@@ -172,19 +178,62 @@ key_at(const struct explorer *e, int index)
 /* geometry                                                           */
 /* ------------------------------------------------------------------ */
 
-static int cell_w(const struct explorer *e) { return e->icon_size + 2 * CELL_PAD; }
+/* Small icon edge used by the list and details views (kept compact). */
+static int
+sm_icon(const struct explorer *e)
+{
+	int s = e->icon_size / 2;
+	if (s < 16) s = 16;
+	if (s > 20) s = 20;
+	return s;
+}
+
+/* Row height for the list / details views. */
+static int
+row_h(const struct explorer *e)
+{
+	int ih = sm_icon(e), lh = (int)bd_draw_line_height();
+	return (ih > lh ? ih : lh) + 2 * ROW_VPAD;
+}
+
+/* Height of the sticky column header (details view only). */
+static int
+header_h(const struct explorer *e)
+{
+	return e->view == BD_EXPLORER_DETAILS
+	    ? (int)bd_draw_line_height() + 2 * ROW_VPAD : 0;
+}
+
+static int
+cell_w(bd_id id, const struct explorer *e)
+{
+	if (e->view == BD_EXPLORER_LIST)
+		return LIST_CELL_W;
+	if (e->view == BD_EXPLORER_DETAILS) {
+		int x, y, w, h;
+		bd_widget_rect(id, &x, &y, &w, &h);
+		int cw = w - 2 * CELL_PAD;
+		return cw > 80 ? cw : 80;
+	}
+	return e->icon_size + 2 * CELL_PAD;
+}
+
 static int
 cell_h(const struct explorer *e)
 {
-	return e->icon_size + 2 * CELL_PAD + (int)bd_draw_line_height();
+	if (e->view == BD_EXPLORER_ICONS)
+		return e->icon_size + 2 * CELL_PAD + (int)bd_draw_line_height();
+	return row_h(e);
 }
 
 static int
 columns(bd_id id, const struct explorer *e)
 {
+	if (e->view == BD_EXPLORER_DETAILS)
+		return 1;
 	int x, y, w, h;
 	bd_widget_rect(id, &x, &y, &w, &h);
-	int cols = (w - 2 * CELL_PAD) / cell_w(e);
+	int cols = (w - 2 * CELL_PAD) / cell_w(id, e);
 	return cols < 1 ? 1 : cols;
 }
 
@@ -207,13 +256,13 @@ static void
 item_content_pos(bd_id id, const struct explorer *e,
     const bd_explorer_item *item, int *slot, int *cx, int *cy)
 {
-	if (item->x >= 0 && item->y >= 0) {
+	if (e->view == BD_EXPLORER_ICONS && item->x >= 0 && item->y >= 0) {
 		*cx = item->x;
 		*cy = item->y;
 	} else {
 		int cols = columns(id, e);
-		*cx = CELL_PAD + (*slot % cols) * cell_w(e);
-		*cy = CELL_PAD + (*slot / cols) * cell_h(e);
+		*cx = CELL_PAD + (*slot % cols) * cell_w(id, e);
+		*cy = header_h(e) + CELL_PAD + (*slot / cols) * cell_h(e);
 		(*slot)++;
 	}
 }
@@ -243,7 +292,7 @@ item_rect(bd_id id, const struct explorer *e, const bd_explorer_item *item,
 
 	*rx = x + cx;
 	*ry = y + cy - e->scroll_y;
-	*rw = cell_w(e);
+	*rw = cell_w(id, e);
 	*rh = cell_h(e);
 }
 
@@ -622,6 +671,9 @@ explorer_destroy(bd_id id, void *state)
 	e->sel_n = e->sel_cap = 0;
 	drag_free(e);
 	band_free(e);
+	free(e->cols);
+	e->cols = NULL;
+	e->ncol = 0;
 }
 
 static void
@@ -632,7 +684,7 @@ explorer_layout(bd_id id, void *state, int w, int h)
 	int n = e->model.count ? e->model.count(e->model.ctx) : 0;
 	int cols = columns(id, e);
 	int rows = (n + cols - 1) / cols;
-	e->content_h = CELL_PAD + rows * cell_h(e);
+	e->content_h = header_h(e) + CELL_PAD + rows * cell_h(e);
 	/* clamp scroll to content (TODO: account for saved free positions) */
 	int x, y, vw, vh;
 	bd_widget_rect(id, &x, &y, &vw, &vh);
@@ -643,6 +695,101 @@ explorer_layout(bd_id id, void *state, int w, int h)
 		e->scroll_y = max_scroll;
 	if (e->scroll_y < 0)
 		e->scroll_y = 0;
+}
+
+/* Draw one item's icon + label(s) inside its cell, per the active view. */
+static void
+draw_cell(struct explorer *e, const bd_explorer_item *it,
+    int rx, int ry, int rw, int rh, const bd_theme *th)
+{
+	uint32_t tint = it->enabled ? 0xFFFFFFFFu : 0xFFFFFF80u;
+	uint32_t fg = it->enabled ? th->text : th->border;
+
+	if (e->view == BD_EXPLORER_ICONS) {
+		int is = e->icon_size;
+		int ix = rx + (rw - is) / 2, iy = ry + CELL_PAD;
+		if (it->icon.id)
+			bd_draw_sprite(it->icon, ix, iy, is, is, 0, 0, 1, 1, tint);
+		else {
+			bd_draw_rect(ix, iy, is, is, th->widget);
+			bd_draw_rect_lines(ix, iy, is, is, th->border);
+		}
+		if (it->label) {
+			float tw = bd_draw_text_width(it->label);
+			float tx = rx + (rw - tw) / 2.0f;
+			if (tx < rx)
+				tx = rx;                     /* TODO: ellipsize */
+			bd_draw_text(it->label, tx, iy + is + 2, fg);
+		}
+		return;
+	}
+
+	/* list / details: small icon on the left, label to its right */
+	int is = sm_icon(e);
+	int iy = ry + (rh - is) / 2;
+	int ix = rx + CELL_PAD;
+	if (it->icon.id)
+		bd_draw_sprite(it->icon, ix, iy, is, is, 0, 0, 1, 1, tint);
+	else {
+		bd_draw_rect(ix, iy, is, is, th->widget);
+		bd_draw_rect_lines(ix, iy, is, is, th->border);
+	}
+	float ty = ry + (rh - (int)bd_draw_line_height()) / 2.0f;
+	int tx = ix + is + 6;
+	if (it->label)
+		bd_draw_text(it->label, (float)tx, ty, fg);
+
+	if (e->view != BD_EXPLORER_DETAILS || e->ncol <= 0)
+		return;
+
+	/* details: the app-defined columns, right of the name column */
+	int extra = 0;
+	for (int c = 1; c < e->ncol; c++)
+		extra += e->cols[c].width;
+	int name_w = rw - extra;
+	if (name_w < 60)
+		name_w = 60;
+	int colx = rx + name_w;
+	for (int c = 1; c < e->ncol; c++) {
+		char buf[128];
+		buf[0] = '\0';
+		if (e->model.cell)
+			e->model.cell(e->model.ctx, it->key, c, buf, sizeof buf);
+		if (buf[0])
+			bd_draw_text(buf, (float)(colx + 4), ty, fg);
+		colx += e->cols[c].width;
+	}
+}
+
+/* Sticky column header (details view only), drawn on top of the content. */
+static void
+draw_header(struct explorer *e, int x, int y, int w, const bd_theme *th)
+{
+	if (e->view != BD_EXPLORER_DETAILS)
+		return;
+	int hh = header_h(e);
+	bd_draw_rect(x + 1, y + 1, w - 2, hh, th->widget);
+	bd_draw_rect_lines(x + 1, y + 1, w - 2, hh, th->border);
+	float ty = y + 1 + (hh - (int)bd_draw_line_height()) / 2.0f;
+	if (e->ncol <= 0) {
+		bd_draw_text("Name", (float)(x + CELL_PAD), ty, th->text_hi);
+		return;
+	}
+	int extra = 0;
+	for (int c = 1; c < e->ncol; c++)
+		extra += e->cols[c].width;
+	int name_w = (w - 2 * CELL_PAD) - extra;
+	if (name_w < 60)
+		name_w = 60;
+	if (e->cols[0].title)
+		bd_draw_text(e->cols[0].title, (float)(x + CELL_PAD), ty, th->text_hi);
+	int colx = x + CELL_PAD + name_w;
+	for (int c = 1; c < e->ncol; c++) {
+		if (e->cols[c].title)
+			bd_draw_text(e->cols[c].title, (float)(colx + 4), ty,
+			    th->text_hi);
+		colx += e->cols[c].width;
+	}
 }
 
 static void
@@ -679,27 +826,7 @@ explorer_render(bd_id id, void *state)
 		if (it.key == e->cursor)         /* keyboard-nav focus ring */
 			bd_draw_rect_lines(rx, ry, rw, rh, th->focus);
 
-		int ix = rx + (rw - e->icon_size) / 2;
-		int iy = ry + CELL_PAD;
-		uint32_t tint = it.enabled ? 0xFFFFFFFFu : 0xFFFFFF80u; /* dim if disabled */
-		if (it.icon.id)
-			bd_draw_sprite(it.icon, ix, iy, e->icon_size, e->icon_size,
-			    0, 0, 1, 1, tint);
-		else {
-			/* placeholder icon */
-			bd_draw_rect(ix, iy, e->icon_size, e->icon_size, th->widget);
-			bd_draw_rect_lines(ix, iy, e->icon_size, e->icon_size, th->border);
-		}
-
-		if (it.label) {
-			float tw = bd_draw_text_width(it.label);
-			float tx = rx + (rw - tw) / 2.0f;
-			if (tx < rx)
-				tx = rx;                     /* TODO: ellipsize */
-			float ty = iy + e->icon_size + 2;
-			uint32_t fg = it.enabled ? th->text : th->border;
-			bd_draw_text(it.label, tx, ty, fg);
-		}
+		draw_cell(e, &it, rx, ry, rw, rh, th);
 	}
 
 	/* rubber-band overlay */
@@ -715,20 +842,30 @@ explorer_render(bd_id id, void *state)
 	if (e->editing) {
 		int rx, ry, rw, rh;
 		if (rect_of_key(id, e, e->edit_key, &rx, &ry, &rw, &rh)) {
-			int by = ry + CELL_PAD + e->icon_size;
 			int bh = (int)bd_draw_line_height() + 4;
-			bd_draw_rect(rx, by, rw, bh, th->press);
-			bd_draw_rect_lines(rx, by, rw, bh, th->focus);
-			bd_draw_text(e->edit_buf, rx + 2, by + 2, th->text_hi);
+			int bx, by, bw;
+			if (e->view == BD_EXPLORER_ICONS) {
+				bx = rx; by = ry + CELL_PAD + e->icon_size; bw = rw;
+			} else {
+				int off = CELL_PAD + sm_icon(e) + 4;
+				bx = rx + off; by = ry + (rh - bh) / 2;
+				bw = rw - off - CELL_PAD;
+			}
+			bd_draw_rect(bx, by, bw, bh, th->press);
+			bd_draw_rect_lines(bx, by, bw, bh, th->focus);
+			bd_draw_text(e->edit_buf, bx + 2, by + 2, th->text_hi);
 
 			char save = e->edit_buf[e->edit_cursor];
 			e->edit_buf[e->edit_cursor] = '\0';
 			float cw = bd_draw_text_width(e->edit_buf);
 			e->edit_buf[e->edit_cursor] = save;
-			bd_draw_rect(rx + 2 + (int)cw, by + 2, 1,
+			bd_draw_rect(bx + 2 + (int)cw, by + 2, 1,
 			    (int)bd_draw_line_height(), th->text_hi);
 		}
 	}
+
+	/* sticky details header, on top of the scrolled content */
+	draw_header(e, x, y, w, th);
 
 	/* commit the clipped content and lift the scissor */
 	bd_draw_flush();
@@ -1034,6 +1171,49 @@ bd_explorer_select(bd_id id, uint64_t key, int add)
 		sel_clear(e);
 	sel_add(e, key);
 	sel_changed(id, e);
+}
+
+
+void
+bd_explorer_set_view(bd_id id, int view)
+{
+	if (bd_widget_type(id) != explorer_type)
+		return;
+	if (view < BD_EXPLORER_ICONS || view > BD_EXPLORER_DETAILS)
+		return;
+	struct explorer *e = bd_widget_state(id);
+	if (e) {
+		e->view = view;
+		e->scroll_y = 0;
+	}
+}
+
+int
+bd_explorer_view(bd_id id)
+{
+	if (bd_widget_type(id) != explorer_type)
+		return BD_EXPLORER_ICONS;
+	return ((struct explorer *)bd_widget_state(id))->view;
+}
+
+void
+bd_explorer_set_columns(bd_id id, const bd_explorer_column *cols, int ncol)
+{
+	if (bd_widget_type(id) != explorer_type)
+		return;
+	struct explorer *e = bd_widget_state(id);
+	if (!e)
+		return;
+	free(e->cols);
+	e->cols = NULL;
+	e->ncol = 0;
+	if (cols && ncol > 0) {
+		e->cols = malloc((size_t)ncol * sizeof(*e->cols));
+		if (e->cols) {
+			memcpy(e->cols, cols, (size_t)ncol * sizeof(*e->cols));
+			e->ncol = ncol;
+		}
+	}
 }
 
 void

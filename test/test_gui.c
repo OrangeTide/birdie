@@ -304,6 +304,14 @@ exp_moved(bd_id w, uint64_t key, int x, int y, void *ctx)
 	(void)w; (void)ctx;
 	exp_moved_n++; exp_moved_key = key; exp_moved_x = x; exp_moved_y = y;
 }
+static int exp_cell_calls;
+static void
+exp_cell(void *ctx, uint64_t key, int col, char *buf, int cap)
+{
+	(void)ctx; (void)key;
+	exp_cell_calls++;
+	snprintf(buf, (size_t)cap, "c%d", col);
+}
 static int exp_selchg_n;
 static void exp_selchg(bd_id w, void *ctx){ (void)w; (void)ctx; exp_selchg_n++; }
 static int exp_act_n; static uint64_t exp_act_key;
@@ -1372,6 +1380,57 @@ main(void)
 	n_scissor = 0;
 	bd_gui_render();   /* exercises the band/selection/clip render path */
 	check("explorer clips its content with scissor", n_scissor > 0);
+	bd_gui_cleanup();
+
+	/* ---- explorer: list / details view modes ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	for (int i = 0; i < 3; i++) { exp_items[i].x = -1; exp_items[i].y = -1; }
+	bd_explorer_model vm = { .count = exp_count, .get = exp_get, .cell = exp_cell };
+	bd_id vf = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id vx = bd_explorer_create(vf, &vm, NULL, BD_GROW_I, 1, BD_END);
+	bd_explorer_set_icon_size(vx, 48);
+	bd_gui_layout(800, 600);
+	int vxx, vxy, vxw, vxh;
+	bd_widget_rect(vx, &vxx, &vxy, &vxw, &vxh);
+	uint64_t k;
+
+	check("explorer defaults to icon view",
+	    bd_explorer_view(vx) == BD_EXPLORER_ICONS);
+
+	/* geometry mirrored from the widget: sm_icon(48)=20, ROW_VPAD=3, CELL_PAD=8 */
+	int lh = (int)bd_draw_line_height();
+	int ih = 20;
+	int rh = (ih > lh ? ih : lh) + 6;
+	int hh = lh + 6;
+
+	/* list view: 168px cells row-major; items 0,1 at content x=8,176, y=8 */
+	bd_explorer_set_view(vx, BD_EXPLORER_LIST);
+	check("view set round-trips", bd_explorer_view(vx) == BD_EXPLORER_LIST);
+	bd_gui_layout(800, 600);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=vxx+30, .y=vxy+8+rh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=vxx+30, .y=vxy+8+rh/2 });
+	check("list-view click selects the first item",
+	    bd_explorer_selection(vx, &k, 1) == 1 && k == 100);
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=vxx+190, .y=vxy+8+rh/2 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=vxx+190, .y=vxy+8+rh/2 });
+	check("list-view second cell selects item 1",
+	    bd_explorer_selection(vx, &k, 1) == 1 && k == 101);
+
+	/* details view: one row per item under a sticky header + a data column */
+	bd_explorer_column dcols[] = { { "Name", 0 }, { "Kind", 90 } };
+	bd_explorer_set_columns(vx, dcols, 2);
+	bd_explorer_set_view(vx, BD_EXPLORER_DETAILS);
+	bd_gui_layout(800, 600);
+	exp_cell_calls = 0;
+	bd_gui_render();
+	check("details view queries the app column cells", exp_cell_calls >= 3);
+	int r2y = vxy + hh + 8 + 2 * rh + rh / 2;   /* centre of row 2 */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=vxx+30, .y=r2y });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=vxx+30, .y=r2y });
+	check("details-view click selects the row's item",
+	    bd_explorer_selection(vx, &k, 1) == 1 && k == 102);
+	}
 	bd_gui_cleanup();
 
 	/* ---- Tab focus traversal across widget kinds ---- */
