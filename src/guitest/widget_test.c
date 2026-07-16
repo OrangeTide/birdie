@@ -477,6 +477,9 @@ on_new_window(bd_id id, void *arg)
 	/* the "playing" row: bold dark text on amber */
 	bd_editor_highlight_row(med, 3,
 		(bd_rich_style){ BD_RT_BOLD, 0x202020FFu, 0xFFD54AFFu });
+	/* find highlight: every "c2" gets an amber wash (the current match
+	 * brighter), composed over the app styling above without erasing it */
+	bd_editor_find(med, "c2", 0);
 
 	bd_create(body, BD_LABEL, BD_LABEL_S, "Recent (BD_LIST):",
 		BD_PREF_H_I, 16, BD_END);

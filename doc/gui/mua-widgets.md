@@ -69,7 +69,7 @@ a refinement), Missing (no toolkit support).
 | Check/send progress | a progress bar | `bd_progress` | Have |
 | Address book | a table plus a detail form | `BD_TABLE` + `bd_dialog` | Have |
 | Filters / rules editor | a list plus an edit form | same pattern as the built trigger editor | Have |
-| Find in message | a field plus in-text highlight and scroll-to | `BD_TEXT_FIELD` + editor `style_span` | Partial |
+| Find in message | a field plus in-text highlight and scroll-to | `BD_TEXT_FIELD` + `bd_editor_find` | Have |
 | Several compose windows | multiple top-level windows | multi-window backend (GLES) | Have |
 | Drag an attachment in | cross-widget drag and drop | the DnD payload path | Have |
 
@@ -117,7 +117,11 @@ name. Today the app must bake it into the label. A `bd_tree_item.detail`
 string (drawn right-aligned) would be a small, general improvement. Not a
 blocker: "Inbox (3)" in the label works now.
 
-### 3. In-message find (minor)
+### 3. In-message find (IMPLEMENTED)
+
+Resolved: `bd_editor_find` highlights every match on its own style layer, marks
+and scrolls the current one into view, and `find_next`/`find_prev` cycle it;
+`bd_editor_replace`/`_replace_all` edit through it. The original note follows.
 
 The editor already supports transient highlight via `style_span`, so an app can
 color matches itself, but there is no built-in find that scrolls the first

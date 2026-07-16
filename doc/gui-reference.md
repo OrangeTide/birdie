@@ -306,6 +306,13 @@ Row-oriented rich-text with per-span styles, an optional submit hook, and an
 autocomplete popup (install a completer; a floating list of text+detail
 suggestions appears under the caret as you type, Up/Down + Enter to accept).
 
+Style runs are layered (syntax / app / find / mark) and composed attribute by
+attribute, so a find highlight tints the background without erasing the colour
+under it. `bd_editor_find` highlights every match, cycles the current one, and
+scrolls it into view; `bd_editor_replace` / `_replace_all` edit through it. See
+`doc/gui/editor-highlight.md` for the styling model and the syntax-highlighter
+design.
+
 ```c
 bd_id bd_editor_create(bd_id parent, ...);
 void  bd_editor_set_text(bd_id, const char *);    int bd_editor_text(bd_id, char *out, int cap);
@@ -323,6 +330,14 @@ void  bd_editor_clear_styles(bd_id);
 void  bd_editor_style_span(bd_id, int start, int end, bd_rich_style);
 void  bd_editor_highlight_row(bd_id, int row, bd_rich_style);
 void  bd_editor_highlight_span(bd_id, int row, int col0, int col1, bd_rich_style);
+/* find / replace: highlight matches, cycle current, edit through it */
+enum { BD_FIND_ICASE = 1 << 0, BD_FIND_WORD = 1 << 1 };
+int   bd_editor_find(bd_id, const char *needle, unsigned flags);  /* -> count */
+int   bd_editor_find_next(bd_id);  int bd_editor_find_prev(bd_id);
+int   bd_editor_find_count(bd_id); int bd_editor_find_current(bd_id);
+void  bd_editor_find_clear(bd_id);
+int   bd_editor_replace(bd_id, const char *repl);      /* current match */
+int   bd_editor_replace_all(bd_id, const char *repl);  /* -> replaced */
 ```
 
 ### Table (`bd_widget_table.h`)

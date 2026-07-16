@@ -99,4 +99,30 @@ void bd_editor_highlight_row(bd_id id, int row, bd_rich_style s);
 void bd_editor_highlight_span(bd_id id, int row, int col0, int col1,
                               bd_rich_style s);
 
+/* ---- find / replace highlight ----
+ *
+ * bd_editor_find highlights every occurrence of `needle` and makes the first
+ * match at or after the caret the "current" one (drawn in a stronger colour),
+ * scrolling it into view. find_next / find_prev cycle the current match,
+ * wrapping around. The highlight lives on its own style layer, so it neither
+ * disturbs app styling (style_span / highlight_*) nor a syntax pass, and it
+ * survives edits (offsets shift with the text). Re-call bd_editor_find to
+ * refresh after the text changes; find_clear removes it. Matching is
+ * byte-literal, with optional ASCII case-insensitivity and whole-word bounds.
+ * Returns the match count (0 clears the highlight). */
+enum {
+	BD_FIND_ICASE = 1 << 0,   /* ASCII case-insensitive */
+	BD_FIND_WORD  = 1 << 1,   /* whole words only ([A-Za-z0-9_]-bounded) */
+};
+int  bd_editor_find(bd_id id, const char *needle, unsigned flags);
+int  bd_editor_find_next(bd_id id);      /* -> current match index, or -1 */
+int  bd_editor_find_prev(bd_id id);
+int  bd_editor_find_count(bd_id id);     /* number of matches */
+int  bd_editor_find_current(bd_id id);   /* current match index, or -1 */
+void bd_editor_find_clear(bd_id id);
+/* Replace the current match with `repl`, then re-find; -> new current index. */
+int  bd_editor_replace(bd_id id, const char *repl);
+/* Replace every match with `repl`; -> number replaced (find is cleared). */
+int  bd_editor_replace_all(bd_id id, const char *repl);
+
 #endif

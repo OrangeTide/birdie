@@ -1673,6 +1673,47 @@ main(void)
 	bd_editor_text(ed, rb, sizeof rb);
 	check("enter_submits with no hook inserts a newline",
 	    strcmp(rb, "\nhi") == 0);
+
+	/* ---- find / replace highlighting ---- */
+	bd_editor_set_text(ed, "aa bb aa cc AA aa");
+	int fn = bd_editor_find(ed, "aa", 0);
+	check("find counts case-sensitive matches", fn == 3);
+	check("find selects the first match", bd_editor_find_current(ed) == 0);
+
+	long fvbase = n_drawvtx;
+	bd_gui_render();
+	long f_hi = n_drawvtx - fvbase;
+	bd_editor_find_clear(ed);
+	check("find_clear drops the highlight", bd_editor_find_count(ed) == 0);
+	fvbase = n_drawvtx;
+	bd_gui_render();
+	long f_plain = n_drawvtx - fvbase;
+	check("find matches add highlight draw output", f_hi > f_plain);
+
+	bd_editor_find(ed, "aa", 0);
+	check("find_next cycles forward", bd_editor_find_next(ed) == 1);
+	check("find_next reaches the last", bd_editor_find_next(ed) == 2);
+	check("find_next wraps to the first", bd_editor_find_next(ed) == 0);
+	check("find_prev wraps to the last", bd_editor_find_prev(ed) == 2);
+
+	int fi = bd_editor_find(ed, "aa", BD_FIND_ICASE);
+	check("case-insensitive find matches AA too", fi == 4);
+
+	bd_editor_set_text(ed, "cat category cat");
+	int fw = bd_editor_find(ed, "cat", BD_FIND_WORD);
+	check("whole-word find skips substrings", fw == 2);
+
+	bd_editor_set_text(ed, "aa bb aa cc aa");
+	bd_editor_find(ed, "aa", 0);
+	bd_editor_replace(ed, "XX");
+	bd_editor_text(ed, rb, sizeof rb);
+	check("replace swaps the current match + re-finds",
+	    strcmp(rb, "XX bb aa cc aa") == 0 && bd_editor_find_count(ed) == 2);
+	int rall = bd_editor_replace_all(ed, "ZZ");
+	bd_editor_text(ed, rb, sizeof rb);
+	check("replace_all swaps every match + clears find",
+	    rall == 2 && strcmp(rb, "XX bb ZZ cc ZZ") == 0 &&
+	    bd_editor_find_count(ed) == 0);
 	bd_gui_cleanup();
 
 	/* ---- BD_LIST scrolling/selectable list ---- */
