@@ -1786,6 +1786,83 @@ main(void)
 	    strcmp(bd_get_s(cml, BD_LABEL_S), "a\nb") == 0);
 	bd_gui_cleanup();
 
+	/* ---- BD_TEXT_AREA cross-line selection ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id f = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ta = bd_create(f, BD_TEXT_AREA, BD_GROW_I, 1, BD_PAD_I, 4, BD_END);
+	bd_set(ta, BD_LABEL_S, "abc\ndef\nghi", BD_END);
+	bd_gui_layout(400, 300);
+	int tx, ty, tw2, th2;
+	bd_widget_rect(ta, &tx, &ty, &tw2, &th2);
+
+	/* focus, put the caret at the start, extend down a line with Shift, copy */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	be_clip_set("");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN, .mods=BD_MOD_SHIFT });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("BD_TEXT_AREA Shift+Down selects across a line",
+	    strcmp(be_clip, "abc\n") == 0);
+
+	/* drag from the start to well past the end selects the whole buffer */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=tx+6, .y=ty+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=tx+9000, .y=ty+9000 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=tx+9000, .y=ty+9000 });
+	be_clip_set("");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("BD_TEXT_AREA drag selects across lines",
+	    strcmp(be_clip, "abc\ndef\nghi") == 0);
+
+	/* Shift+Down with no shift released collapses the selection on a plain move */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN, .mods=BD_MOD_SHIFT });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_LEFT });   /* clears */
+	be_clip_set("keep");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("a plain arrow clears the multi-line selection",
+	    strcmp(be_clip, "keep") == 0);
+	}
+	bd_gui_cleanup();
+
+	/* ---- editor cross-line selection ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id f = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id ed = bd_editor_create(f, BD_GROW_I, 1, BD_END);
+	bd_editor_set_text(ed, "abc\ndef\nghi");
+	bd_gui_layout(400, 300);
+	int ex, ey, ew, eh;
+	bd_widget_rect(ed, &ex, &ey, &ew, &eh);
+
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=ex+6, .y=ey+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=ex+6, .y=ey+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_HOME });
+	be_clip_set("");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key=BD_KEY_DOWN, .mods=BD_MOD_SHIFT });
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("editor Shift+Down selects across a line",
+	    strcmp(be_clip, "abc\n") == 0);
+
+	/* drag to well past the end selects the whole buffer */
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_DOWN, .button=BD_MOUSE_LEFT, .x=ex+6, .y=ey+6 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_MOVE, .x=ex+9000, .y=ey+9000 });
+	bd_gui_event(&(bd_event){ .type=BD_EV_MOUSE_UP,   .button=BD_MOUSE_LEFT, .x=ex+9000, .y=ey+9000 });
+	be_clip_set("");
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='C', .mods=BD_MOD_CTRL });
+	check("editor drag selects across lines",
+	    strcmp(be_clip, "abc\ndef\nghi") == 0);
+
+	/* cut removes the selection and copies it */
+	bd_gui_event(&(bd_event){ .type=BD_EV_KEY_DOWN, .key='X', .mods=BD_MOD_CTRL });
+	char etxt[64];
+	bd_editor_text(ed, etxt, sizeof etxt);
+	check("editor Ctrl-X cuts the cross-line selection",
+	    strcmp(be_clip, "abc\ndef\nghi") == 0 && etxt[0] == '\0');
+	}
+	bd_gui_cleanup();
+
 	/* ---- key-up + repeat delivered to a focused extension ---- */
 	bd_gui_init(&stub, NULL);
 	int krt = bd_register_widget_class(&keyrec_class);

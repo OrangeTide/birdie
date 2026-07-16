@@ -1958,12 +1958,29 @@ render_widget(bd_id id)
 		bd_draw_flush();
 		be->scissor(ix, iy, iw, ih);
 
+		/* selection span (sorted); a per-line rect is drawn behind the text */
+		int has_sel = focused && w->sel_anchor >= 0 &&
+		    w->sel_anchor != w->cursor;
+		int s0 = w->sel_anchor < w->cursor ? w->sel_anchor : w->cursor;
+		int s1 = w->sel_anchor < w->cursor ? w->cursor : w->sel_anchor;
+
 		char tmp[1024];
 		int li = 0, pos = 0;
 		for (;;) {
 			int le = ml_line_end(w->text_buf, w->text_len, pos);
 			int line_top = iy + li * lh - (int)w->scroll_y;
 			if (line_top + lh >= iy && line_top <= iy + ih) {
+				if (has_sel && s0 <= le && s1 >= pos) {
+					int a = s0 > pos ? s0 : pos;
+					int b = s1 < le ? s1 : le;
+					float xa = ml_span_px(w->text_buf, pos, a);
+					float xb = ml_span_px(w->text_buf, pos, b);
+					int hx = ix + (int)(xa - w->scroll_x);
+					int hw = (int)(xb - xa);
+					if (s1 > le)
+						hw += 6;   /* selected newline stub */
+					fill_rect(hx, line_top, hw, lh, theme.select);
+				}
 				int n = le - pos;
 				if (n >= (int)sizeof(tmp))
 					n = (int)sizeof(tmp) - 1;
@@ -2636,10 +2653,10 @@ input_insert_text(struct widget *w, const char *s, int single_line)
 	cursor_blink = (float)bd_time();
 }
 
-static void
-input_click(bd_id id, int mx)
+/* Byte offset nearest the pixel x within a single-line field. */
+static int
+input_offset(struct widget *w, int mx)
 {
-	struct widget *w = &pool[id];
 	float text_x = (float)(w->x + w->pad) - w->scroll_x;
 	int best = 0;
 	float best_d = (float)mx - text_x;
@@ -2657,7 +2674,14 @@ input_click(bd_id id, int mx)
 		}
 		pos = next;
 	}
-	w->cursor = best;
+	return best;
+}
+
+static void
+input_click(bd_id id, int mx)
+{
+	struct widget *w = &pool[id];
+	w->cursor = input_offset(w, mx);
 	w->sel_anchor = -1;
 	cursor_blink = (float)bd_time();
 }
@@ -2810,6 +2834,7 @@ multiline_key(bd_id id, int key, unsigned mods)
 {
 	struct widget *w = &pool[id];
 	int ls = ml_line_start(w->text_buf, w->cursor);
+	int old_cursor = w->cursor;
 
 	switch (key) {
 	case BD_KEY_HOME:
@@ -2846,16 +2871,21 @@ multiline_key(bd_id id, int key, unsigned mods)
 	default:
 		return input_key(id, key, mods);
 	}
-	w->sel_anchor = -1;
+	/* Shift extends the selection across lines; a plain move clears it. */
+	if (mods & BD_MOD_SHIFT) {
+		if (w->sel_anchor < 0)
+			w->sel_anchor = old_cursor;
+	} else {
+		w->sel_anchor = -1;
+	}
 	cursor_blink = (float)bd_time();
 	return 1;
 }
 
-/* Place the caret at the clicked line and column. */
-static void
-multiline_click(bd_id id, int mx, int my)
+/* Byte offset at the clicked line and column in a multi-line field. */
+static int
+multiline_offset(struct widget *w, int mx, int my)
 {
-	struct widget *w = &pool[id];
 	int pad = w->pad;
 	int ix = w->x + pad, iy = w->y + pad;
 	int lh = ml_line_h();
@@ -2873,8 +2903,30 @@ multiline_click(bd_id id, int mx, int my)
 	}
 	int le = ml_line_end(w->text_buf, w->text_len, pos);
 	float target = (float)(mx - ix) + w->scroll_x;
-	w->cursor = ml_col_at_px(w->text_buf, pos, le, target);
+	return ml_col_at_px(w->text_buf, pos, le, target);
+}
+
+/* Place the caret at the clicked line and column. */
+static void
+multiline_click(bd_id id, int mx, int my)
+{
+	struct widget *w = &pool[id];
+	w->cursor = multiline_offset(w, mx, my);
 	w->sel_anchor = -1;
+	cursor_blink = (float)bd_time();
+}
+
+/* Extend a text selection by dragging: anchor at the press caret on the first
+ * move, then track the caret. */
+static void
+text_drag(bd_id id, int mx, int my)
+{
+	struct widget *w = &pool[id];
+	if (w->sel_anchor < 0)
+		w->sel_anchor = w->cursor;
+	w->cursor = (w->type == BD_TEXT_AREA)
+	    ? multiline_offset(w, mx, my)
+	    : input_offset(w, mx);
 	cursor_blink = (float)bd_time();
 }
 
@@ -4893,6 +4945,8 @@ bd_gui_event(const bd_event *ev)
 				if (sb->on_click)
 					sb->on_click(pointer_capture,
 					    sb->on_click_data);
+			} else if (is_text_field(pool[pointer_capture].type)) {
+				text_drag(pointer_capture, ev->x, ev->y);
 			} else {
 				ext_event(pointer_capture, ev);
 			}
@@ -4949,11 +5003,19 @@ bd_gui_event(const bd_event *ev)
 
 			if (hit != BD_NONE &&
 			    is_text_field(pool[hit].type)) {
+				int prev_anchor = pool[hit].sel_anchor;
+				int shift = ev->mods & BD_MOD_SHIFT;
 				focus_id = hit;
 				if (pool[hit].type == BD_TEXT_AREA)
 					multiline_click(hit, mx, my);
 				else
 					input_click(hit, mx);
+				/* shift-click extends from the old anchor; a plain
+				 * press leaves it cleared (the click reset it) and
+				 * a drag anchors lazily on the first move */
+				if (shift && prev_anchor >= 0)
+					pool[hit].sel_anchor = prev_anchor;
+				pointer_capture = hit;
 				return 1;
 			}
 
@@ -5022,7 +5084,7 @@ bd_gui_event(const bd_event *ev)
 		if (pointer_capture != BD_NONE) {
 			if (pool[pointer_capture].type == BD_SCROLLBAR)
 				pool[pointer_capture].pressed = 0;
-			else
+			else if (!is_text_field(pool[pointer_capture].type))
 				ext_event(pointer_capture, ev);
 			/* cross-widget drop: hand an active payload to the widget the
 			 * release landed on, if it is a different extension widget;

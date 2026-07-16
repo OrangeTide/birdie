@@ -274,8 +274,7 @@ What is built:
 The v0.3 input roadmap (multi-window, explorer, rich text, the full v1.0
 widget set, clipboard, key-up/repeat, IME, multitouch, pen) is complete on the
 GLES backend. Deferred polish is tracked in the roadmap section: explorer
-list/details view, cross-line selection in the multiline/editor widgets, and
-the Win32 / Wayland / macOS backends.
+list/details view and the Win32 / Wayland / macOS backends.
 
 ## v1.0 widget set
 
@@ -1018,8 +1017,9 @@ Up/Down (preserving caret x), Enter-inserts-newline, vertical scroll, and
 scissor-clipped multi-line rendering; click positions the caret by line/column.
 Initial text via `BD_LABEL_S`, read back with `bd_get_s(id, BD_LABEL_S)`, set
 with `bd_set`. Both will pick up the IME preedit/commit path above when it
-lands; cross-line selection in `BD_TEXT_AREA` is still to do, and it is the
-base the rich-text editor widget composes over.
+lands. Cross-line stream selection is implemented: a drag or Shift+arrows
+extends the caret across lines, the highlight spans rows, and Ctrl-C/X copy/cut
+the range (the rich-text editor composes the same model).
 
 ### Editor widget (rich-text, row-oriented) — implemented
 
@@ -1093,8 +1093,9 @@ strikeout, **true bold and italic** (separate baked faces, see Rendering),
 super/subscript (baseline shift); it renders in a **fixed-width face by
 default** (`bd_editor_set_monospace`). Style runs are byte ranges that shift across
 edits; an app re-emits them after big changes (a syntax highlighter) or sets
-them on a locked buffer (ABC playback). Deferred: cross-line selection, and
-Tab-inserts-a-tab (Tab currently traverses focus).
+them on a locked buffer (ABC playback). Cross-line stream selection is
+implemented (drag, Shift+arrows, Ctrl-C/X). Deferred: Tab-inserts-a-tab (Tab
+currently traverses focus).
 
 ### Clipboard — implemented
 

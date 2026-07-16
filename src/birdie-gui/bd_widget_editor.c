@@ -26,6 +26,7 @@ struct editor {
 	char  *buf;
 	int    len, cap;
 	int    cursor;
+	int    sel_anchor;      /* selection anchor byte offset, -1 = none */
 	float  scroll_x;
 	int    scroll_y;
 	int    locked;
@@ -306,6 +307,7 @@ editor_init(bd_id id, void *state)
 {
 	struct editor *e = state;
 	e->mono = 1;            /* a code/music editor wants fixed-width by default */
+	e->sel_anchor = -1;
 	e->ac_min = 2;          /* auto-complete after this many word chars */
 	bd_set(id, BD_PREF_W_I, 280, BD_PREF_H_I, 140, BD_PAD_I, 4, BD_END);
 }
@@ -394,12 +396,29 @@ editor_render(bd_id id, void *state)
 	bd_draw_flush();
 	be->scissor(ix, iy, iw, ih);
 
+	/* selection span (sorted); a per-line rect is drawn behind the text */
+	int has_sel = focused && e->sel_anchor >= 0 && e->sel_anchor != e->cursor;
+	int s0 = e->sel_anchor < e->cursor ? e->sel_anchor : e->cursor;
+	int s1 = e->sel_anchor < e->cursor ? e->cursor : e->sel_anchor;
+
 	int li = 0, pos = 0;
 	for (;;) {
 		int le = e_row_end(e, pos);
 		int top = iy + li * lh - e->scroll_y;
-		if (top + lh >= iy && top <= iy + ih)
+		if (top + lh >= iy && top <= iy + ih) {
+			if (has_sel && s0 <= le && s1 >= pos) {
+				int a = s0 > pos ? s0 : pos;
+				int b = s1 < le ? s1 : le;
+				float xa = e_span_px(e, pos, a);
+				float xb = e_span_px(e, pos, b);
+				int hx = ix + (int)(xa - e->scroll_x);
+				int hw = (int)(xb - xa);
+				if (s1 > le) hw += 6;   /* selected newline stub */
+				bd_draw_rect((float)hx, (float)top, (float)hw,
+				    (float)lh, th->select);
+			}
 			editor_draw_line(e, pos, le, (float)ix - e->scroll_x, top, th);
+		}
 		if (le >= e->len) break;
 		pos = le + 1;
 		li++;
@@ -562,6 +581,63 @@ ac_accept(struct editor *e)
 	ac_close(e);
 }
 
+/* Sorted selection range [*a,*b); 0 when there is no (non-empty) selection. */
+static int
+ed_sel_range(struct editor *e, int *a, int *b)
+{
+	if (e->sel_anchor < 0 || e->sel_anchor == e->cursor)
+		return 0;
+	*a = e->sel_anchor < e->cursor ? e->sel_anchor : e->cursor;
+	*b = e->sel_anchor < e->cursor ? e->cursor : e->sel_anchor;
+	return 1;
+}
+
+/* Delete the selection (if any), leaving the caret at its start. */
+static void
+ed_del_sel(struct editor *e)
+{
+	int a, b;
+	if (e->locked || !ed_sel_range(e, &a, &b))
+		return;
+	e_splice(e, a, b - a, NULL, 0);
+	e->cursor = a;
+	e->sel_anchor = -1;
+}
+
+/* Copy the selection (if any) to the system clipboard. */
+static void
+ed_copy_sel(struct editor *e)
+{
+	int a, b;
+	const bd_backend *be = bd_backend_get();
+	if (!be || !be->clipboard_set || !ed_sel_range(e, &a, &b))
+		return;
+	char *tmp = malloc((size_t)(b - a) + 1);
+	if (!tmp)
+		return;
+	memcpy(tmp, e->buf + a, (size_t)(b - a));
+	tmp[b - a] = '\0';
+	be->clipboard_set(tmp);
+	free(tmp);
+}
+
+/* Byte offset at the pixel point (px,py), mapping through scroll and line. */
+static int
+editor_offset_at(struct editor *e, bd_id id, int px, int py)
+{
+	int x, y, w, h;
+	bd_widget_rect(id, &x, &y, &w, &h);
+	int pad = bd_get_i(id, BD_PAD_I);
+	int ix = x + pad, iy = y + pad;
+	int lh = e_line_h(e);
+	int line = (py - iy + e->scroll_y) / (lh > 0 ? lh : 1);
+	if (line < 0)
+		line = 0;
+	int pos = e_row_start(e, line);
+	int le = e_row_end(e, pos);
+	return e_col_at_px(e, pos, le, (float)(px - ix) + e->scroll_x);
+}
+
 static int
 editor_event(bd_id id, void *state, const bd_event *ev)
 {
@@ -576,24 +652,28 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 
 	case BD_EV_MOUSE_DOWN: {
 		if (ev->button != BD_MOUSE_LEFT) return 1;
-		int x, y, w, h;
-		bd_widget_rect(id, &x, &y, &w, &h);
-		int pad = bd_get_i(id, BD_PAD_I);
-		int ix = x + pad, iy = y + pad;
-		int line = (ev->y - iy + e->scroll_y) / (lh > 0 ? lh : 1);
-		if (line < 0) line = 0;
-		int pos = e_row_start(e, line);
-		int le = e_row_end(e, pos);
-		e->cursor = e_col_at_px(e, pos, le,
-		    (float)(ev->x - ix) + e->scroll_x);
+		int prev = e->sel_anchor;
+		e->cursor = editor_offset_at(e, id, ev->x, ev->y);
+		/* shift-click extends from the old anchor; a plain press
+		 * clears the selection, a drag anchors lazily on the first move */
+		if ((ev->mods & BD_MOD_SHIFT) && prev >= 0)
+			e->sel_anchor = prev;
+		else
+			e->sel_anchor = -1;
 		return 1;
 	}
 	case BD_EV_MOUSE_MOVE:
+		/* drag-select: anchor at the press caret on the first move */
+		if (e->sel_anchor < 0)
+			e->sel_anchor = e->cursor;
+		e->cursor = editor_offset_at(e, id, ev->x, ev->y);
+		return 1;
 	case BD_EV_MOUSE_UP:
-		return 1;   /* consume capture; selection drag is TODO */
+		return 1;
 
 	case BD_EV_CHAR:
 		if (ev->codepoint >= 32) {
+			ed_del_sel(e);   /* typing replaces a selection */
 			editor_insert(e, ev->codepoint);
 			/* a word char (re-)queries; anything else dismisses */
 			if (e->ac_fn && ev->codepoint < 128 &&
@@ -645,6 +725,8 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 
 	/* key handling */
 	int ls = e_line_start(e, e->cursor);
+	int old_cursor = e->cursor;
+	int shift = ev->mods & BD_MOD_SHIFT;
 	switch (ev->key) {
 	case BD_KEY_LEFT:
 		e->cursor = e_prev(e->buf, e->cursor);
@@ -680,16 +762,32 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		int submit = e->enter_submits ? (mod == 0) : (ev->mods & BD_MOD_CTRL);
 		if (submit && e->on_submit)
 			e->on_submit(id, e->on_submit_data);
-		else
-			editor_insert(e, '\n');   /* editor_insert honors the lock */
+		else {
+			ed_del_sel(e);            /* replace any selection */
+			editor_insert(e, '\n'); /* editor_insert honors the lock */
+		}
 		break;
 	}
+	case 'C':       /* Ctrl-C: copy selection */
+		if (ev->mods & BD_MOD_CTRL) {
+			ed_copy_sel(e);
+			return 1;
+		}
+		return 0;
+	case 'X':       /* Ctrl-X: cut selection */
+		if (ev->mods & BD_MOD_CTRL) {
+			ed_copy_sel(e);
+			ed_del_sel(e);
+			return 1;
+		}
+		return 0;
 	case 'V':       /* Ctrl-V: paste at the cursor */
 		if (ev->mods & BD_MOD_CTRL) {
 			const bd_backend *be = bd_backend_get();
 			const char *t = (!e->locked && be->clipboard_get)
 			    ? be->clipboard_get() : NULL;
 			if (t) {
+				ed_del_sel(e);   /* replace any selection */
 				int n = (int)strlen(t);
 				e_splice(e, e->cursor, 0, t, n);
 				e->cursor += n;
@@ -698,7 +796,9 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		}
 		return 0;
 	case BD_KEY_BACKSPACE:
-		if (!e->locked && e->cursor > 0) {
+		if (e->sel_anchor >= 0 && e->sel_anchor != e->cursor) {
+			ed_del_sel(e);
+		} else if (!e->locked && e->cursor > 0) {
 			int p = e_prev(e->buf, e->cursor);
 			e_splice(e, p, e->cursor - p, NULL, 0);  /* cursor -> p */
 		}
@@ -706,7 +806,9 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 			ac_query(id, e);
 		break;
 	case BD_KEY_DELETE:
-		if (!e->locked && e->cursor < e->len) {
+		if (e->sel_anchor >= 0 && e->sel_anchor != e->cursor) {
+			ed_del_sel(e);
+		} else if (!e->locked && e->cursor < e->len) {
 			int nx = e_next(e->buf, e->len, e->cursor);
 			e_splice(e, e->cursor, nx - e->cursor, NULL, 0);
 		}
@@ -715,6 +817,21 @@ editor_event(bd_id id, void *state, const bd_event *ev)
 		return 0;   /* let the toolkit drop focus */
 	default:
 		return 0;
+	}
+	/* selection: Shift extends across a caret move; a plain move clears it.
+	 * Editing keys manage their own anchor above. */
+	switch (ev->key) {
+	case BD_KEY_LEFT: case BD_KEY_RIGHT: case BD_KEY_UP:
+	case BD_KEY_DOWN: case BD_KEY_HOME: case BD_KEY_END:
+		if (shift) {
+			if (e->sel_anchor < 0)
+				e->sel_anchor = old_cursor;
+		} else {
+			e->sel_anchor = -1;
+		}
+		break;
+	default:
+		break;
 	}
 	return 1;
 }
