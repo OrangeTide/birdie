@@ -227,13 +227,14 @@ clamp_scroll(bd_id id, struct table *t)
 
 /* Draw text inside a cell, ellipsized to avail and aligned. */
 static void
-draw_cell(const char *s, int cx, int cy, int cw, int align, uint32_t col)
+draw_cell(const char *s, int cx, int cy, int cw, int align, uint32_t col,
+    int style)
 {
 	char buf[512];
 	int avail = cw - 2 * CELL_PAD;
 	if (!s || !*s || avail <= 0)
 		return;
-	float tw = bd_draw_text_width(s);
+	float tw = bd_draw_text_width_styled(s, style);
 	if (tw > avail) {                       /* ellipsize from the right */
 		int n = (int)strlen(s);
 		if (n > (int)sizeof buf - 3)
@@ -243,14 +244,14 @@ draw_cell(const char *s, int cx, int cy, int cw, int align, uint32_t col)
 			buf[n] = '.';
 			buf[n + 1] = '.';
 			buf[n + 2] = '\0';
-			if (bd_draw_text_width(buf) <= avail)
+			if (bd_draw_text_width_styled(buf, style) <= avail)
 				break;
 			n--;
 		}
 		if (n <= 0)
 			return;
 		s = buf;
-		tw = bd_draw_text_width(s);
+		tw = bd_draw_text_width_styled(s, style);
 		align = BD_TABLE_LEFT;
 	}
 	float tx = cx + CELL_PAD;
@@ -258,7 +259,7 @@ draw_cell(const char *s, int cx, int cy, int cw, int align, uint32_t col)
 		tx = cx + cw - CELL_PAD - tw;
 	else if (align == BD_TABLE_CENTER)
 		tx = cx + (cw - tw) / 2.0f;
-	bd_draw_text(s, tx, cy, col);
+	bd_draw_text_styled(s, tx, cy, col, style);
 }
 
 /* Up/down sort triangle near a header cell's right edge. */
@@ -298,7 +299,7 @@ table_render(bd_id id, void *state)
 	for (i = 0; i < t->ncols; i++) {
 		int cwid = t->colw[i];
 		draw_cell(t->cols[i].title ? t->cols[i].title : "",
-		    hx, y + 1 + text_top, cwid, t->cols[i].align, th->text_hi);
+		    hx, y + 1 + text_top, cwid, t->cols[i].align, th->text_hi, 0);
 		if (t->sort_col == i)
 			sort_arrow(hx + cwid - CELL_PAD - 4, y + 1 + hh / 2,
 			    t->sort_desc, th->text_hi);
@@ -321,16 +322,40 @@ table_render(bd_id id, void *state)
 		if (ry >= by + bh)
 			break;
 		int mrow = t->order[v];
+		bd_table_row_style rs = {0};
+		if (t->model.row_style)
+			t->model.row_style(t->model.ctx, mrow, &rs);
 		if (t->sel[mrow])
 			bd_draw_rect(bx, ry, bw, rh, th->select);
+		else if (rs.bg)
+			bd_draw_rect(bx, ry, bw, rh, rs.bg);
 		if (focused && v == t->cursor)
 			bd_draw_rect_lines(bx, ry, bw, rh, th->focus);
+		uint32_t fg = rs.fg ? rs.fg : th->text;
+		int fstyle = rs.bold ? BD_FONT_BOLD : 0;
 		int cx = bx;
 		for (i = 0; i < t->ncols; i++) {
 			const char *s = t->model.cell
 			    ? t->model.cell(t->model.ctx, mrow, i) : NULL;
-			draw_cell(s, cx, ry + text_top, t->colw[i],
-			    t->cols[i].align, th->text);
+			int indent = 0;
+			bd_texture ic = t->model.icon
+			    ? t->model.icon(t->model.ctx, mrow, i) : (bd_texture){0};
+			if (ic.id) {
+				int is = rh - 4;
+				int room = t->colw[i] - 2 * CELL_PAD;
+				if (is > room) is = room;
+				if (is > 0) {
+					int iyp = ry + (rh - is) / 2;
+					int ixp = (!s || !*s)
+					    ? cx + (t->colw[i] - is) / 2  /* icon-only: centre */
+					    : cx + CELL_PAD;
+					bd_draw_sprite(ic, (float)ixp, (float)iyp,
+					    (float)is, (float)is, 0, 0, 1, 1, 0xFFFFFFFFu);
+					if (s && *s) indent = is + 2;
+				}
+			}
+			draw_cell(s, cx + indent, ry + text_top,
+			    t->colw[i] - indent, t->cols[i].align, fg, fstyle);
 			cx += t->colw[i];
 		}
 	}

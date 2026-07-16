@@ -327,6 +327,10 @@ void  bd_editor_highlight_span(bd_id, int row, int col0, int col1, bd_rich_style
 
 ### Table (`bd_widget_table.h`)
 
+Model-driven, sortable, multi-select. Optional model hooks give rich cells: a
+per-cell `icon()` glyph (status/priority/attachment columns) and a per-row
+`row_style()` for bold text, a foreground colour, or a background tint.
+
 ```c
 enum { BD_TABLE_LEFT, BD_TABLE_RIGHT, BD_TABLE_CENTER };     /* column alignment */
 bd_id bd_table_create(bd_id parent, const bd_table_column *cols, int ncols, const bd_table_model *, ...);

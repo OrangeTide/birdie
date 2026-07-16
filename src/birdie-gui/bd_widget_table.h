@@ -34,12 +34,27 @@ typedef struct bd_table_column {
 	int flags;      /* BD_TABLE_COL_* */
 } bd_table_column;
 
+/* Optional per-row visual style, filled by model.row_style. All fields are
+ * optional: draw the row bold, override its text colour, tint its background. A
+ * zero fg means the theme default text colour; a zero bg means no tint. */
+typedef struct bd_table_row_style {
+	int      bold;
+	uint32_t fg;
+	uint32_t bg;
+} bd_table_row_style;
+
 /* Data source. rows() returns the row count; cell() returns the text for a
- * (row, col), valid for the duration of the call (NULL = empty). */
+ * (row, col), valid for the duration of the call (NULL = empty). The optional
+ * icon() and row_style() hooks add rich cells: a small per-cell glyph (for a
+ * status / priority / attachment column) and per-row bold/colour/tint. */
 typedef struct bd_table_model {
 	int (*rows)(void *ctx);
 	const char *(*cell)(void *ctx, int row, int col);
 	void *ctx;
+	/* Optional: a small icon drawn at the left of a cell (texture id 0 = none). */
+	bd_texture (*icon)(void *ctx, int row, int col);
+	/* Optional: per-row bold / colour / background tint. */
+	void (*row_style)(void *ctx, int row, bd_table_row_style *out);
 } bd_table_model;
 
 /* App callbacks; all optional. Row indices are model rows. */

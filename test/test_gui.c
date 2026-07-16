@@ -57,6 +57,12 @@ static int tbl_sel_changed;
 static void tbl_on_sel(bd_id w, void *c) { (void)w; (void)c; tbl_sel_changed++; }
 static int tbl_activated_row = -1;
 static void tbl_on_activate(bd_id w, int row, void *c) { (void)w; (void)c; tbl_activated_row = row; }
+static int tbl_icon_calls, tbl_style_calls, tbl_rich;
+static bd_texture tbl_icon_tex;
+static bd_texture tbl_icon(void *c, int r, int col)
+{ (void)c; (void)r; tbl_icon_calls++; return (tbl_rich && col == 0) ? tbl_icon_tex : (bd_texture){0}; }
+static void tbl_row_style(void *c, int r, bd_table_row_style *out)
+{ (void)c; tbl_style_calls++; if (tbl_rich && r == 0) { out->bold = 1; out->bg = 0x223344FFu; } }
 
 /* ---- inventory grid model + recorded callbacks ---- */
 static struct inv_slot { uint64_t key; const char *label; bd_texture icon;
@@ -2054,7 +2060,7 @@ main(void)
 		{ "Name", 0,  BD_TABLE_LEFT,  0 },
 		{ "Port", 70, BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
 	};
-	bd_table_model tmodel = { tbl_rows, tbl_cell, NULL };
+	bd_table_model tmodel = { .rows = tbl_rows, .cell = tbl_cell };
 	bd_table_cb tcb = { tbl_on_activate, NULL, tbl_on_sel, NULL };
 	bd_id tbl = bd_table_create(tfr, tcols, 2, &tmodel, &tcb, BD_GROW_I, 1, BD_END);
 	bd_gui_layout(800, 600);
@@ -2115,6 +2121,39 @@ main(void)
 	bd_gui_cleanup();
 #undef rowy
 	}
+
+	/* ---- table rich cells: per-cell icons + per-row styling ---- */
+	{
+	bd_gui_init(&stub, NULL);
+	tbl_icon_tex = stub.make_texture(4, 4, NULL);
+	bd_id rfr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_table_column rcols[] = {
+		{ "S",    24, BD_TABLE_CENTER, BD_TABLE_COL_NOSORT },
+		{ "Name",  0, BD_TABLE_LEFT,   0 },
+	};
+	bd_table_model rmodel = { .rows = tbl_rows, .cell = tbl_cell,
+	    .icon = tbl_icon, .row_style = tbl_row_style };
+	bd_id rtbl = bd_table_create(rfr, rcols, 2, &rmodel, NULL, BD_GROW_I, 1, BD_END);
+	bd_gui_layout(400, 300);
+
+	/* plain render: the hooks are still queried, but return nothing to draw */
+	tbl_rich = 0;
+	tbl_icon_calls = tbl_style_calls = 0;
+	int base = n_drawverts;
+	bd_gui_render();
+	int plain = n_drawverts - base;
+	check("table queries the row_style hook", tbl_style_calls >= 3);
+	check("table queries the icon hook", tbl_icon_calls >= 3);
+
+	/* rich render: a status icon per row + a bold, tinted first row */
+	tbl_rich = 1;
+	base = n_drawverts;
+	bd_gui_render();
+	int rich = n_drawverts - base;
+	check("icons and a row tint add draw output", rich > plain);
+	(void)rtbl;
+	}
+	bd_gui_cleanup();
 
 	/* ---- generic modal dialog ---- */
 	{

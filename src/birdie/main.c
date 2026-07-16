@@ -1478,7 +1478,7 @@ init(void)
 		{ "Port", 50,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
 	};
 	mudlist = bd_table_create(cbody, mcols, 3,
-		&(bd_table_model){ mudlist_rows, mudlist_cell, NULL },
+		&(bd_table_model){ .rows = mudlist_rows, .cell = mudlist_cell },
 		&(bd_table_cb){ .activate = mudlist_activate,
 		.context = mudlist_context },
 		BD_GROW_I, 1, BD_END);
@@ -1562,7 +1562,7 @@ init(void)
 		{ "On",      32, BD_TABLE_CENTER, BD_TABLE_COL_NOSORT },
 	};
 	trig_table = bd_table_create(tbody, tcols, 6,
-		&(bd_table_model){ trig_rows_count, trig_cell, NULL }, NULL,
+		&(bd_table_model){ .rows = trig_rows_count, .cell = trig_cell }, NULL,
 		BD_GROW_I, 1, BD_END);
 	bd_create(tbody, BD_BUTTON, BD_LABEL_S, "Remove selected", BD_PREF_H_I, 26,
 		BD_ON_CLICK_F, on_trig_remove, BD_END);

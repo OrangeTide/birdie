@@ -55,8 +55,8 @@ a refinement), Missing (no toolkit support).
 | Mailboxes tree | expand/collapse, per-node folder icon, keyboard nav | `BD_TREE` (icons, twisties, type-ahead) | Have |
 | ...with unread counts | a right-aligned count or badge per node | fold into the label ("Inbox (3)") | Partial |
 | Message list | multi-column, sortable, multi-select, scroll, keyboard | `BD_TABLE` | Have |
-| ...status/priority/attach glyphs | per-cell icon, not text | `BD_TABLE` cells are text-only | Missing |
-| ...unread bold / color label | per-row text style and background tint | `BD_TABLE` has no row styling | Missing |
+| ...status/priority/attach glyphs | per-cell icon, not text | `BD_TABLE` model `icon()` hook | Have |
+| ...unread bold / color label | per-row text style and background tint | `BD_TABLE` model `row_style()` hook | Have |
 | Reading pane | scrollable read-only text, optionally styled | locked `bd_editor` + styled runs (or `BD_TEXT_AREA`) | Have |
 | ...HTML mail | an HTML layout engine | out of scope for a widget toolkit | N/A |
 | Composer header fields | labeled single-line fields, a combo | `BD_TEXT_FIELD`, `BD_COMBO`, `bd_dialog_field` | Have |
@@ -75,7 +75,12 @@ a refinement), Missing (no toolkit support).
 
 ## Gaps, in priority order
 
-### 1. Rich cells in BD_TABLE (the one real gap)
+### 1. Rich cells in BD_TABLE (IMPLEMENTED)
+
+Resolved: `bd_table_model` gained an optional `icon(ctx, row, col)` accessor (a
+per-cell glyph, id 0 = none) and a `row_style(ctx, row, out)` hook (bold,
+foreground colour, background tint). The message list is now composable. The
+rest of this section records the original analysis.
 
 The message list is the defining widget of a mail client, and it is the one
 thing the toolkit cannot render today. `BD_TABLE` is sortable, multi-select,
@@ -144,9 +149,10 @@ Every structural and interactive piece a three-pane mail client needs already
 exists: nested splits, a tree with icons, a sortable multi-select table, a
 rich-text editor with selection and clipboard, dialogs and form controls,
 toolbars, menus, context menus, multiple native windows, drag and drop, and
-tooltips. The one substantive gap is **rich cells in `BD_TABLE` (per-cell icons
-and per-row styling)**. That single, additive enhancement unblocks the message
-list, the defining widget of a mail client. Everything else on the list is
-composition or minor polish.
+tooltips. The one substantive gap was **rich cells in `BD_TABLE` (per-cell
+icons and per-row styling)**, and it is now implemented (`icon()` +
+`row_style()` model hooks). The message list, the defining widget of a mail
+client, is now composable from the existing widgets. Everything else on the
+list is composition or minor polish.
 
 <!-- Made by a machine. PUBLIC DOMAIN (CC0-1.0) -->

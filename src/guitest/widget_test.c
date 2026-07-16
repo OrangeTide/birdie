@@ -345,6 +345,26 @@ gtbl_activate(bd_id w, int row, void *c)
 	snprintf(b, sizeof b, "connect %s", tbl_rows_data[row][0]);
 	report(b);
 }
+/* rich cells: a status glyph on the name column, and per-row styling */
+static bd_texture make_icon(uint32_t rgba);
+static bd_texture gtbl_flag;
+static bd_texture gtbl_icon(void *c, int r, int col)
+{
+	(void)c;
+	if (col != 0)
+		return (bd_texture){0};
+	if (!gtbl_flag.id)
+		gtbl_flag = make_icon(0x66CC66FFu);   /* connected marker */
+	return (r % 3 == 0) ? gtbl_flag : (bd_texture){0};
+}
+static void gtbl_row_style(void *c, int r, bd_table_row_style *out)
+{
+	(void)c;
+	if (r == 0)
+		out->bold = 1;                    /* an "unread"-style row */
+	else if (r % 4 == 1)
+		out->bg = 0x2E3A2EFFu;            /* a subtle colour label */
+}
 
 /* ---- a small tree model (Session sidebar: worlds grouped by category) ---- */
 static const struct wnode {
@@ -715,7 +735,8 @@ build_ui(void)
 		{ "Port", 56,  BD_TABLE_RIGHT, BD_TABLE_COL_NUMERIC },
 	};
 	bd_table_create(session, gcols, 3,
-		&(bd_table_model){ gtbl_rows, gtbl_cell, NULL },
+		&(bd_table_model){ .rows = gtbl_rows, .cell = gtbl_cell,
+			.icon = gtbl_icon, .row_style = gtbl_row_style },
 		&(bd_table_cb){ .activate = gtbl_activate },
 		BD_PREF_H_I, 160, BD_END);
 
