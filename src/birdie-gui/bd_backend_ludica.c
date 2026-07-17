@@ -110,18 +110,19 @@ be_draw_verts(const bd_vertex *verts, int count)
 /* ---- textures ---- */
 
 static bd_texture
-be_load_texture(const char *path)
+be_load_texture(const char *path, bd_filter filter)
 {
-	lud_texture_t t = lud_load_texture(path,
-	    LUD_FILTER_NEAREST, LUD_FILTER_NEAREST);   /* pixel-art PNGs */
+	int lf = filter == BD_FILTER_LINEAR ? LUD_FILTER_LINEAR : LUD_FILTER_NEAREST;
+	lud_texture_t t = lud_load_texture(path, lf, lf);
 	return (bd_texture){t.id};
 }
 
 /* Decode a PNG from memory and upload it, matching be_load_texture's NEAREST
  * filtering. lud_load_texture is path-only, so embedded blobs decode here. */
 static bd_texture
-be_load_texture_mem(const unsigned char *data, int len)
+be_load_texture_mem(const unsigned char *data, int len, bd_filter filter)
 {
+	int lf = filter == BD_FILTER_LINEAR ? LUD_FILTER_LINEAR : LUD_FILTER_NEAREST;
 	int w, h, comp;
 	unsigned char *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
 	if (!pixels) {
@@ -131,8 +132,8 @@ be_load_texture_mem(const unsigned char *data, int len)
 	lud_texture_desc_t desc = {
 		.width = w, .height = h,
 		.format = LUD_PIXFMT_RGBA8,
-		.min_filter = LUD_FILTER_NEAREST,   /* pixel-art PNGs */
-		.mag_filter = LUD_FILTER_NEAREST,
+		.min_filter = lf,
+		.mag_filter = lf,
 		.data = pixels,
 	};
 	lud_texture_t t = lud_make_texture(&desc);
@@ -141,13 +142,14 @@ be_load_texture_mem(const unsigned char *data, int len)
 }
 
 static bd_texture
-be_make_texture(int w, int h, const void *rgba)
+be_make_texture(int w, int h, const void *rgba, bd_filter filter)
 {
+	int lf = filter == BD_FILTER_NEAREST ? LUD_FILTER_NEAREST : LUD_FILTER_LINEAR;
 	lud_texture_desc_t desc = {
 		.width = w, .height = h,
 		.format = LUD_PIXFMT_RGBA8,
-		.min_filter = LUD_FILTER_LINEAR,
-		.mag_filter = LUD_FILTER_LINEAR,
+		.min_filter = lf,
+		.mag_filter = lf,
 		.data = rgba,
 	};
 	lud_texture_t t = lud_make_texture(&desc);

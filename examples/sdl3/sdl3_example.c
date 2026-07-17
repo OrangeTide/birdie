@@ -417,7 +417,7 @@ make_icon(unsigned rgba)
 			p[0] = (c >> 24) & 0xFF; p[1] = (c >> 16) & 0xFF;
 			p[2] = (c >> 8) & 0xFF;  p[3] = c & 0xFF;
 		}
-	return bd_backend_sdl3.make_texture(32, 32, px);
+	return bd_backend_sdl3.make_texture(32, 32, px, BD_FILTER_NEAREST);
 }
 
 static void

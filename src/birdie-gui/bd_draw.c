@@ -282,7 +282,7 @@ bake_font(const bd_font_face *face, float px, int slot, int metrics)
 			rgba[i*4+0] = 255; rgba[i*4+1] = 255;
 			rgba[i*4+2] = 255; rgba[i*4+3] = cov[i];
 		}
-		faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
+		faces[slot].atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba, BD_FILTER_LINEAR);
 		faces[slot].have = (faces[slot].atlas.id != 0);
 		faces[slot].cmap = NULL;          /* contiguous 0x20.. from the bake */
 		faces[slot].nglyphs = FONT_COUNT;
@@ -405,7 +405,7 @@ bake_embedded(struct face *f, float px)
 		pc->yoff2 = 0.0f;
 		baked++;
 	}
-	f->atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba);
+	f->atlas = be->make_texture(ATLAS_DIM, ATLAS_DIM, rgba, BD_FILTER_LINEAR);
 	f->have = (f->atlas.id != 0);
 	f->cmap = cmap;                     /* sorted codepoint -> slot map */
 	f->nglyphs = baked;
@@ -440,7 +440,7 @@ bd_draw_init_fonts(const bd_backend *backend, const bd_font_set *fonts,
 		return 0;
 
 	uint32_t wpix = 0xFFFFFFFFu;
-	white = be->make_texture(1, 1, &wpix);
+	white = be->make_texture(1, 1, &wpix, BD_FILTER_LINEAR);
 	cur_tex = white;
 
 	/* face order matches the BD_FONT_BOLD|ITALIC|MONO style index. Each face
@@ -861,7 +861,7 @@ ensure_pins(void)
 					p[0] = p[1] = p[2] = p[3] = 255;
 				}
 		}
-	pin_tex = be->make_texture(pin_atlas_w, pin_atlas_h, rgba);
+	pin_tex = be->make_texture(pin_atlas_w, pin_atlas_h, rgba, BD_FILTER_LINEAR);
 	free(rgba);
 }
 
@@ -929,7 +929,7 @@ ensure_locks(void)
 				p[0] = p[1] = p[2] = p[3] = 255;
 			}
 	}
-	lock_tex = be->make_texture(lock_atlas_w, lock_atlas_h, rgba);
+	lock_tex = be->make_texture(lock_atlas_w, lock_atlas_h, rgba, BD_FILTER_LINEAR);
 	free(rgba);
 }
 

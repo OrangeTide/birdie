@@ -23,6 +23,14 @@
 /* Opaque resource handles. Values are meaningful only to the backend that
  * produced them; the toolkit just stores and passes them back. */
 typedef struct { unsigned id; } bd_texture;
+
+/* Texture sampling filter: NEAREST keeps pixel art crisp; LINEAR smooths a
+ * scaled image and the glyph atlas. Passed to the texture-creation hooks so
+ * the client picks per texture. */
+typedef enum {
+	BD_FILTER_NEAREST = 0,
+	BD_FILTER_LINEAR  = 1,
+} bd_filter;
 typedef struct { unsigned id; } bd_shader;
 
 /* Interleaved UI vertex: position in pixels, texcoord, RGBA in [0,1]. The one
@@ -183,12 +191,14 @@ typedef struct bd_backend {
 	void (*draw_verts)(const bd_vertex *verts, int count);
 
 	/* textures */
-	bd_texture (*load_texture)(const char *path);
-	/* Decode an image (PNG) from an in-memory buffer, same filtering as
-	 * load_texture. Optional (may be NULL): needed only to serve textures
-	 * registered as embedded data through bd_asset. */
-	bd_texture (*load_texture_mem)(const unsigned char *data, int len);
-	bd_texture (*make_texture)(int w, int h, const void *rgba); /* rgba NULL = blank */
+	bd_texture (*load_texture)(const char *path, bd_filter filter);
+	/* Decode an image (PNG) from an in-memory buffer. Optional (may be NULL):
+	 * needed only to serve textures registered as embedded data through
+	 * bd_asset. */
+	bd_texture (*load_texture_mem)(const unsigned char *data, int len,
+	                               bd_filter filter);
+	/* rgba NULL = blank */
+	bd_texture (*make_texture)(int w, int h, const void *rgba, bd_filter filter);
 	void       (*update_texture)(bd_texture t, int x, int y, int w, int h,
 	                             const void *rgba);
 	void       (*bind_texture)(bd_texture t, int unit);

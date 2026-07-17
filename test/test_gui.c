@@ -150,10 +150,11 @@ static void be_uni_4(bd_shader s,const char *n,float x,float y,float z,float w){
 static void be_uni_m(bd_shader s,const char *n,const float m[16]){ (void)s;(void)n;(void)m; }
 static void be_draw_verts(const bd_vertex *v, int n){ (void)v; n_drawverts++; n_drawvtx += n; }
 
-static bd_texture be_load_tex(const char *p){ (void)p; return (bd_texture){next_texid++}; }
-static bd_texture be_load_tex_mem(const unsigned char *d, int n){ (void)d; (void)n; return (bd_texture){next_texid++}; }
-static bd_texture be_make_tex(int w, int h, const void *px)
-{ (void)w; (void)h; (void)px; n_maketex++; return (bd_texture){next_texid++}; }
+static int last_filter = -1;   /* filter of the most recent texture creation */
+static bd_texture be_load_tex(const char *p, bd_filter f){ (void)p; last_filter = f; return (bd_texture){next_texid++}; }
+static bd_texture be_load_tex_mem(const unsigned char *d, int n, bd_filter f){ (void)d; (void)n; last_filter = f; return (bd_texture){next_texid++}; }
+static bd_texture be_make_tex(int w, int h, const void *px, bd_filter f)
+{ (void)w; (void)h; (void)px; last_filter = f; n_maketex++; return (bd_texture){next_texid++}; }
 static void be_update_tex(bd_texture t,int x,int y,int w,int h,const void *px)
 { (void)t;(void)x;(void)y;(void)w;(void)h;(void)px; }
 static void be_bind_tex(bd_texture t,int u){ (void)t;(void)u; }
@@ -1844,6 +1845,18 @@ main(void)
 	}
 	bd_gui_cleanup();
 
+	/* ---- backend texture filter threading ---- */
+	last_filter = -1;
+	stub.make_texture(2, 2, NULL, BD_FILTER_NEAREST);
+	check("make_texture forwards NEAREST", last_filter == BD_FILTER_NEAREST);
+	stub.make_texture(2, 2, NULL, BD_FILTER_LINEAR);
+	check("make_texture forwards LINEAR", last_filter == BD_FILTER_LINEAR);
+	last_filter = -1;
+	stub.load_texture("x.png", BD_FILTER_NEAREST);
+	check("load_texture forwards the filter", last_filter == BD_FILTER_NEAREST);
+	stub.load_texture_mem((const unsigned char *)"x", 1, BD_FILTER_LINEAR);
+	check("load_texture_mem forwards the filter", last_filter == BD_FILTER_LINEAR);
+
 
 	/* ---- BD_LIST scrolling/selectable list ---- */
 	bd_gui_init(&stub, NULL);
@@ -2297,7 +2310,7 @@ main(void)
 	/* ---- table rich cells: per-cell icons + per-row styling ---- */
 	{
 	bd_gui_init(&stub, NULL);
-	tbl_icon_tex = stub.make_texture(4, 4, NULL);
+	tbl_icon_tex = stub.make_texture(4, 4, NULL, BD_FILTER_LINEAR);
 	bd_id rfr = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
 	bd_table_column rcols[] = {
 		{ "S",    24, BD_TABLE_CENTER, BD_TABLE_COL_NOSORT },
@@ -3738,7 +3751,7 @@ main(void)
 	    BD_PAD_I, 0, BD_END);
 	bd_id cv = bd_managed_canvas_create(desk, BD_GROW_I, 1, BD_END);
 	bd_shader fx = stub.make_shader("v", "f");
-	bd_texture tex = stub.make_texture(4, 4, NULL);
+	bd_texture tex = stub.make_texture(4, 4, NULL, BD_FILTER_LINEAR);
 
 	bd_gui_layout(400, 300);
 	int base = n_drawverts;

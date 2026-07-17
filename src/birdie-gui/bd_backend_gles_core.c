@@ -250,38 +250,41 @@ make_gl_texture(int w, int h, const void *rgba, GLint filter)
 }
 
 bd_texture
-bd_gles_load_texture(const char *path)
+bd_gles_load_texture(const char *path, bd_filter filter)
 {
+	GLint gf = filter == BD_FILTER_LINEAR ? GL_LINEAR : GL_NEAREST;
 	int w, h, comp;
 	unsigned char *pixels = stbi_load(path, &w, &h, &comp, 4);
 	if (!pixels) {
 		fprintf(stderr, "bd_gles: cannot load texture '%s'\n", path);
 		return (bd_texture){0};
 	}
-	GLuint id = make_gl_texture(w, h, pixels, GL_NEAREST); /* pixel-art PNGs */
+	GLuint id = make_gl_texture(w, h, pixels, gf);
 	stbi_image_free(pixels);
 	return (bd_texture){id};
 }
 
 /* Decode a PNG from memory, matching bd_gles_load_texture's NEAREST filtering. */
 bd_texture
-bd_gles_load_texture_mem(const unsigned char *data, int len)
+bd_gles_load_texture_mem(const unsigned char *data, int len, bd_filter filter)
 {
+	GLint gf = filter == BD_FILTER_LINEAR ? GL_LINEAR : GL_NEAREST;
 	int w, h, comp;
 	unsigned char *pixels = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
 	if (!pixels) {
 		fprintf(stderr, "bd_gles: cannot decode embedded texture\n");
 		return (bd_texture){0};
 	}
-	GLuint id = make_gl_texture(w, h, pixels, GL_NEAREST); /* pixel-art PNGs */
+	GLuint id = make_gl_texture(w, h, pixels, gf);
 	stbi_image_free(pixels);
 	return (bd_texture){id};
 }
 
 bd_texture
-bd_gles_make_texture(int w, int h, const void *rgba)
+bd_gles_make_texture(int w, int h, const void *rgba, bd_filter filter)
 {
-	return (bd_texture){make_gl_texture(w, h, rgba, GL_LINEAR)};
+	GLint gf = filter == BD_FILTER_NEAREST ? GL_NEAREST : GL_LINEAR;
+	return (bd_texture){make_gl_texture(w, h, rgba, gf)};
 }
 
 void

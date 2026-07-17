@@ -530,7 +530,7 @@ make_icon(uint32_t rgba)
 			p[0] = (c >> 24) & 0xFF; p[1] = (c >> 16) & 0xFF;
 			p[2] = (c >> 8) & 0xFF;  p[3] = c & 0xFF;
 		}
-	return bd_backend_get()->make_texture(32, 32, px);
+	return bd_backend_get()->make_texture(32, 32, px, BD_FILTER_NEAREST);
 }
 
 static void
@@ -649,7 +649,7 @@ make_wallpaper(void)
 			p[2] = (unsigned char)(fminf(b, 1.0f) * 255.0f);
 			p[3] = 255;
 		}
-	return bd_backend_gles.make_texture(N, N, px);
+	return bd_backend_gles.make_texture(N, N, px, BD_FILTER_NEAREST);
 }
 
 /* The wallpaper effect: a slow drifting ripple, a moving sheen band, and a

@@ -57,10 +57,11 @@ void       bd_gles_uniform_mat4 (bd_shader s, const char *n, const float m[16]);
 void       bd_gles_draw_verts(const bd_vertex *verts, int count);
 
 /* Textures. load_* decode PNG via stb_image with NEAREST filtering (pixel-art
- * assets); make_texture uses LINEAR. */
-bd_texture bd_gles_load_texture(const char *path);
-bd_texture bd_gles_load_texture_mem(const unsigned char *data, int len);
-bd_texture bd_gles_make_texture(int w, int h, const void *rgba);
+ * assets); make_texture defaults to LINEAR. The filter argument overrides. */
+bd_texture bd_gles_load_texture(const char *path, bd_filter filter);
+bd_texture bd_gles_load_texture_mem(const unsigned char *data, int len,
+                                   bd_filter filter);
+bd_texture bd_gles_make_texture(int w, int h, const void *rgba, bd_filter filter);
 void       bd_gles_update_texture(bd_texture t, int x, int y, int w, int h,
                                   const void *rgba);
 void       bd_gles_bind_texture(bd_texture t, int unit);
