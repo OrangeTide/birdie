@@ -129,7 +129,7 @@ all :: $(BD_FONT_OUT)
 # ----------------------------------------------------------------------
 .PHONY : test
 test : dist-check run-test-test_gui run-test-test_client run-test-test_fs \
-       run-test-test_session run-test-test_netloop
+       run-test-test_session run-test-test_netloop run-test-test_mcp
 
 .PHONY : widget-test
 widget-test : $(BD_FONT_OUT)

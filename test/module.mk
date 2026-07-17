@@ -108,3 +108,18 @@ test_netloop_LDLIBS = -pthread -lm
 define test_netloop_TESTCMD
 $(test_netloop_EXEC)
 endef
+
+# test_mcp exercises bd_mcp, the MUD Client Protocol 2.1 core. bd_mcp is a
+# self-contained, callback-driven state machine (no session, net, or UI), so the
+# test compiles it directly and drives the handshake, negotiation, quoting, and
+# the simpleedit round trip with recording callbacks. No external libraries.
+EXECUTABLES  += test_mcp
+TEST_TARGETS += test_mcp
+
+test_mcp_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+test_mcp_SRCS  = test_mcp.c ../src/birdie/bd_mcp.c
+test_mcp_CFLAGS = -I$(test_mcp_DIR)../src/birdie
+
+define test_mcp_TESTCMD
+$(test_mcp_EXEC)
+endef
