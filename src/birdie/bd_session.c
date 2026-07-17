@@ -1287,6 +1287,12 @@ bd_session_load_profile_script(bd_session *s)
 	return rc == 0 ? 1 : -1;
 }
 
+int
+bd_session_profile_path(bd_session *s, const char *fname, char *buf, size_t cap)
+{
+	return profile_file_path(s, fname, buf, cap);
+}
+
 /* Find a user trigger by identity (type + pattern + class). A NULL/"" cls
  * matches an entry whose class is also empty. Returns its index or -1. */
 static int

@@ -8,6 +8,9 @@
 #include "bd_dialog.h"
 #include "bd_filedlg.h"
 #include "bd_popmenu.h"
+#include "bd_widget_editor.h"
+#include "bd_syntax.h"
+#include "bd_findbar.h"
 #include "bd_backend_ludica.h"
 #include "bd_session.h"
 #include "bd_profile.h"
@@ -39,6 +42,12 @@ static bd_id set_cols, set_rows, set_scheme;
 static bd_dialog *triggers_dlg;         /* live trigger editor */
 static bd_id trig_table;                /* list of the session's triggers */
 static bd_id trig_type, trig_pattern, trig_body, trig_class, trig_pri, trig_stop;
+static bd_dialog *script_dlg;           /* profile triggers.lua text editor */
+static bd_id      script_editor;
+static bd_findbar *script_find;
+static bd_id      script_status;
+static int        script_open;
+static char       script_path[600];
 static bd_id import_path;               /* CSV import file-path field */
 
 /* export column-filter dialog */
@@ -1047,8 +1056,15 @@ static int
 on_event(const lud_event_t *ev)
 {
 	bd_event bev;
-	if (bd_event_from_lud(ev, &bev) && bd_gui_event(&bev))
-		return 1;
+	if (bd_event_from_lud(ev, &bev)) {
+		if (script_open && script_find && bev.type == BD_EV_KEY_DOWN &&
+		    (bev.mods & BD_MOD_CTRL) && bev.key == 'F') {
+			bd_findbar_open(script_find);   /* Ctrl-F focuses the find bar */
+			return 1;
+		}
+		if (bd_gui_event(&bev))
+			return 1;
+	}
 	if (ev->type == LUD_EV_KEY_DOWN &&
 	    ev->key.keycode == LUD_KEY_ESCAPE) {
 		lud_quit();
@@ -1365,6 +1381,115 @@ on_trig_pick_color(bd_id id, void *arg)
 	open_color_chooser(trig_body_from_color);
 }
 
+/* ---- profile script editor (edits the profile's hand-written triggers.lua as
+ * raw text, with Lua syntax highlighting and a find bar) ---- */
+
+/* mkdir -p the directory part of `file` (best effort). */
+static void
+script_mkdirs(const char *file)
+{
+	char tmp[600];
+	char *slash;
+	snprintf(tmp, sizeof tmp, "%s", file);
+	slash = strrchr(tmp, '/');
+	if (!slash)
+		return;
+	*slash = '\0';
+	for (char *p = tmp + 1; *p; p++)
+		if (*p == '/') {
+			*p = '\0';
+			mkdir(tmp, 0755);
+			*p = '/';
+		}
+	mkdir(tmp, 0755);
+}
+
+/* Esc in the find field returns focus to the editor. */
+static void
+on_script_find_close(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_focus(script_editor);
+}
+
+static void
+on_script_save(bd_id id, void *arg)
+{
+	FILE *f;
+	char *buf;
+	int len;
+	(void)id;
+	(void)arg;
+	if (!script_path[0])
+		return;
+	len = bd_editor_text(script_editor, NULL, 0);
+	buf = malloc((size_t)len + 1);
+	if (!buf)
+		return;
+	bd_editor_text(script_editor, buf, len + 1);
+	script_mkdirs(script_path);
+	f = fopen(script_path, "wb");
+	if (!f) {
+		free(buf);
+		bd_set(script_status, BD_LABEL_S, "save failed", BD_END);
+		return;
+	}
+	fwrite(buf, 1, (size_t)len, f);
+	fclose(f);
+	free(buf);
+	bd_set(script_status, BD_LABEL_S,
+	    "saved -- Session > Reload script to apply", BD_END);
+}
+
+static void
+on_script_close(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	script_open = 0;      /* the CANCEL button closes the dialog itself */
+}
+
+static void
+on_open_script(bd_id id, void *arg)
+{
+	FILE *f;
+	char *buf = NULL;
+	long sz = 0;
+	(void)id;
+	(void)arg;
+	if (!session || bd_session_profile_path(session, "triggers.lua",
+	    script_path, sizeof script_path) != 0) {
+		bd_terminal_write(terminal,
+		    "\033[31m*** connect to a profile before editing its script"
+		    "\033[0m\r\n", -1);
+		return;
+	}
+	f = fopen(script_path, "rb");
+	if (f) {
+		fseek(f, 0, SEEK_END);
+		sz = ftell(f);
+		fseek(f, 0, SEEK_SET);
+		if (sz > 0) {
+			buf = malloc((size_t)sz + 1);
+			if (buf) {
+				size_t g = fread(buf, 1, (size_t)sz, f);
+				buf[g] = '\0';
+			}
+		}
+		fclose(f);
+	}
+	bd_editor_set_text(script_editor,
+	    buf ? buf : "-- triggers.lua for this profile\n"
+	    "-- register triggers, aliases, and on.* hooks here\n");
+	free(buf);
+	bd_editor_set_syntax(script_editor, bd_syntax_for_name(script_path));
+	bd_set(script_status, BD_LABEL_S, script_path, BD_END);
+	script_open = 1;
+	bd_dialog_open(script_dlg);
+	bd_focus(script_editor);
+}
+
 static void
 on_open_triggers(bd_id id, void *arg)
 {
@@ -1428,6 +1553,8 @@ init(void)
 		BD_ON_CLICK_F, on_disconnect, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Triggers...",
 		BD_ON_CLICK_F, on_open_triggers, BD_END);
+	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Edit script...",
+		BD_ON_CLICK_F, on_open_script, BD_END);
 	bd_create(m_sess, BD_BUTTON, BD_LABEL_S, "Reload Script",
 		BD_ON_CLICK_F, on_reload_script, BD_END);
 
@@ -1597,6 +1724,18 @@ init(void)
 	bd_dialog_button(triggers_dlg, "Close", BD_DIALOG_CANCEL, NULL, NULL);
 	bd_dialog_button(triggers_dlg, "Add", BD_DIALOG_DEFAULT, on_trig_add, NULL);
 
+	/* profile script editor: edit triggers.lua as text (Lua highlight + find) */
+	script_dlg = bd_dialog_create("Edit profile script (triggers.lua)", 660, 470);
+	bd_id scbody = bd_dialog_content(script_dlg);
+	script_editor = bd_editor_create(scbody, BD_GROW_I, 1, BD_END);
+	script_find = bd_findbar_create(scbody, script_editor, 1);
+	if (script_find)
+		bd_findbar_on_close(script_find, on_script_find_close, NULL);
+	script_status = bd_create(scbody, BD_LABEL, BD_LABEL_S, "",
+		BD_PREF_H_I, 16, BD_END);
+	bd_dialog_button(script_dlg, "Close", BD_DIALOG_CANCEL, on_script_close, NULL);
+	bd_dialog_button(script_dlg, "Save", BD_DIALOG_NORMAL, on_script_save, NULL);
+
 	/* the export column-filter form: pick columns (name is always included),
 	 * choose a path, Export writes the CSV */
 	export_dlg = bd_dialog_create("Export profiles", 440, 360);
@@ -1677,6 +1816,7 @@ cleanup(void)
 	bd_dialog_free(color_dlg);
 	/* the file chooser (bd_filedlg) owns and reclaims its own dialog */
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
+	script_dlg = NULL;
 	export_dlg = import_dlg = color_dlg = NULL;
 	bd_gui_cleanup();
 }

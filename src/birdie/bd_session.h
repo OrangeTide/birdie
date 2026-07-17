@@ -107,6 +107,12 @@ void bd_session_set_data_dir(bd_session *s, const char *dir);
  * aliases, and on.* hooks. */
 int bd_session_load_profile_script(bd_session *s);
 
+/* Build the path of a per-profile file (<data_dir>/profiles/<name>/<fname>)
+ * into buf. Returns 0 on success, -1 if there is no data dir or profile name.
+ * Lets the app read or write a profile file (e.g. edit triggers.lua). */
+int bd_session_profile_path(bd_session *s, const char *fname, char *buf,
+                            size_t cap);
+
 /*
  * User triggers: a per-profile trigger set edited through the GUI and persisted
  * to <data_dir>/profiles/<name>/triggers.csv, kept separate from the
