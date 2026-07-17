@@ -128,7 +128,7 @@ all :: $(BD_FONT_OUT)
 #   make widget-test   build the opt-in widget gallery (src/guitest/module.mk).
 # ----------------------------------------------------------------------
 .PHONY : test
-test : run-test-test_gui run-test-test_client run-test-test_fs \
+test : dist-check run-test-test_gui run-test-test_client run-test-test_fs \
        run-test-test_session run-test-test_netloop
 
 .PHONY : widget-test
@@ -224,8 +224,17 @@ DIST_KHRONOS := src/birdie-gui/thirdparty/khronos
 # the terminal library (VT engine + widget) -- bundled so BD_TERMINAL compiles
 DIST_VT     := src/birdie-gui/bd_vt
 
+.PHONY : dist-check
+# Guard: the bundle copy-lists (DIST_SOURCES/DIST_HEADERS) must cover every
+# toolkit source in src/birdie-gui/module.mk, or the shipped bundle will not
+# build. Runs in `make test` and gates `dist`. See scripts/dist-check.sh.
+dist-check :
+	@GUI_MK=$(DIST_SRC)/module.mk GUI_DIR=$(DIST_SRC) \
+	    DIST_SOURCES='$(DIST_SOURCES)' DIST_HEADERS='$(DIST_HEADERS)' \
+	    sh scripts/dist-check.sh
+
 .PHONY : dist
-dist :
+dist : dist-check
 	@rm -rf $(DIST_STAGE) $(DIST_ZIP)
 	@mkdir -p $(DIST_STAGE)/backend-gles $(DIST_STAGE)/bd_vt \
 	    $(DIST_STAGE)/thirdparty/stb $(DIST_STAGE)/GLES3 \
