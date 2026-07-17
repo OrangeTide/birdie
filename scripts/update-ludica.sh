@@ -9,9 +9,10 @@
 #   GITHUB_REPO   GitHub owner/repo (default: OrangeTide/ludica)
 #
 # Fetches a shallow clone of the requested ref and copies the parts birdie
-# needs (src/, tools/, configs/, assets/, VERSION, LICENSE.txt, etc.) into
-# src/thirdparty/ludica/. Samples, docs, editor/IDE metadata, and build
-# outputs are dropped.
+# needs (src/, tools/, VERSION, LICENSE.txt, UPSTREAM, etc.) into
+# src/thirdparty/ludica/. Unused parts are dropped: samples, docs, editor/IDE
+# metadata, build outputs, ludica assets (birdie ships its own fonts), the
+# tiny/ build variant, configs/, ludica's own scripts/ and GNUmakefile.
 
 set -eu
 
@@ -66,7 +67,11 @@ rsync -a \
 	--exclude '*.dep' \
 	--exclude '*~' \
 	--exclude 'compile_commands.json' \
-	--exclude '/assets/textures' \
+	--exclude '/assets' \
+	--exclude '/tiny' \
+	--exclude '/configs' \
+	--exclude '/scripts' \
+	--exclude '/GNUmakefile' \
 	--exclude '/src/imgui' \
 	--exclude '/tests' \
 	--exclude '/.mcp.json' \
