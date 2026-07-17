@@ -23,6 +23,7 @@ sdl3_example_TOOLKIT := \
     ../../src/birdie-gui/bd_backend_sdl3.c ../../src/birdie-gui/bd_backend_gles_core.c \
     ../../src/birdie-gui/bd_widget_value.c \
     ../../src/birdie-gui/bd_widget_explorer.c ../../src/birdie-gui/bd_widget_editor.c \
+    ../../src/birdie-gui/bd_syntax.c \
     ../../src/birdie-gui/bd_widget_icon.c \
     ../../src/birdie-gui/bd_widget_sketch.c ../../src/birdie-gui/bd_widget_table.c \
     ../../src/birdie-gui/bd_widget_inventory.c ../../src/birdie-gui/bd_widget_dock.c \

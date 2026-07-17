@@ -179,6 +179,10 @@ DIST_STB    := src/birdie-gui/thirdparty/stb
 DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
                 bd_asset.h bd_utf8.h bd_color.h bd_backend_gles_core.h bd_gl.h \
                 bd_widget_value.h bd_widget_explorer.h \
+                bd_dialog.h bd_popmenu.h bd_findbar.h bd_fs.h bd_filedlg.h \
+                bd_widget_form.h bd_widget_combo.h bd_widget_colorpick.h \
+                bd_widget_groupbox.h bd_widget_scrollview.h bd_widget_split.h \
+                bd_syntax.h \
                 bd_widget_editor.h bd_widget_sketch.h bd_widget_table.h \
                 bd_widget_tree.h bd_widget_icon.h \
                 bd_widget_inventory.h bd_widget_dock.h bd_widget_actionbar.h \
@@ -190,6 +194,10 @@ DIST_HEADERS := widget.h widget_ext.h bd_backend.h bd_theme.h bd_draw.h \
 # widget ship as the separate birdie_gui_vt library in bd_vt/.
 DIST_SOURCES := widget.c bd_draw.c bd_embed_font.h bd_asset.c bd_utf8.c bd_color.c \
                 bd_widget_value.c \
+                bd_dialog.c bd_popmenu.c bd_findbar.c bd_fs.c bd_filedlg.c \
+                bd_widget_form.c bd_widget_combo.c bd_widget_colorpick.c \
+                bd_widget_groupbox.c bd_widget_scrollview.c bd_widget_split.c \
+                bd_syntax.c \
                 bd_widget_explorer.c bd_widget_editor.c bd_widget_sketch.c \
                 bd_widget_icon.c \
                 bd_widget_table.c bd_widget_tree.c bd_widget_inventory.c bd_widget_dock.c \
