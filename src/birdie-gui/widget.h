@@ -126,7 +126,7 @@ enum {
 
 	BD_ON_CLICK_F = 0x014,
 	BD_ON_CLOSE_F = 0x024,
-	BD_ON_CHANGE_F = 0x034,   /* BD_LIST: fired on single-click selection */
+	BD_ON_CHANGE_F = 0x034,   /* BD_LIST: single-click selection; text field: text edited */
 
 	BD_FG_C       = 0x015,
 	BD_BG_C       = 0x025,

@@ -20,6 +20,7 @@ retained-mode reasoning, roadmap), see [gui.md](gui.md); this file is the
 | `bd_widget_explorer.h`  | icon/grid browser (Explorer / Finder style)                     |
 | `bd_widget_editor.h`    | rich-text, row-oriented editor                                  |
 | `bd_syntax.h`           | runtime-configurable syntax highlighter (state machine)         |
+| `bd_findbar.h`          | find/replace bar bound to an editor                             |
 | `bd_widget_table.h`     | sortable multi-column table                                     |
 | `bd_widget_tree.h`      | indented expand/collapse hierarchy list                         |
 | `bd_widget_icon.h`      | shared icon cell + standalone icon (app launcher / desktop icon) |
@@ -364,6 +365,26 @@ void bd_syntax_register(const char *name, const char *const *exts,
                         const bd_syntax_lang *);
 int  bd_syntax_run(const bd_syntax_lang *, const char *buf, int len,
                    bd_syntax_span *out, int max);             /* -> span count */
+```
+
+### Find bar (`bd_findbar.h`)
+
+A composed find/replace bar bound to a `bd_editor` (a helper like `bd_dialog`, not
+a new widget class): a search field that searches live as you type (Enter = next
+match), a match counter, prev/next/close buttons, and an optional replace row.
+Editing drives `bd_editor_find`, so the highlight composes with syntax and app
+styling. Escape in the field or the close button fires `on_close`. Text fields
+grew the two hooks this needs, both usable anywhere: `BD_ON_CHANGE_F` now fires on
+each edit, and `BD_ON_CLOSE_F` fires on Escape.
+
+```c
+bd_findbar *bd_findbar_create(bd_id parent, bd_id editor, int with_replace);
+void  bd_findbar_free(bd_findbar *);
+void  bd_findbar_open(bd_findbar *);                 /* focus + (re)search */
+void  bd_findbar_set_flags(bd_findbar *, unsigned);  /* BD_FIND_ICASE|WORD */
+void  bd_findbar_set_query(bd_findbar *, const char *needle);  /* seed + search */
+void  bd_findbar_on_close(bd_findbar *, bd_callback_fn, void *user);
+bd_id bd_findbar_widget(const bd_findbar *);   bd_id bd_findbar_editor(const bd_findbar *);
 ```
 
 ### Table (`bd_widget_table.h`)

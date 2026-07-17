@@ -31,6 +31,7 @@
 #include "bd_widget_progress.h"
 #include "bd_widget_tree.h"
 #include "bd_syntax.h"
+#include "bd_findbar.h"
 #include "bd_widget_split.h"
 #include "bd_widget_groupbox.h"
 #include "bd_widget_scrollview.h"
@@ -456,6 +457,10 @@ static int sp_change_n;
 static void sp_on_change(bd_id w, void *d) { (void)w; (void)d; sp_change_n++; }
 static int sp_btn_n;
 static void sp_btn(bd_id w, void *d) { (void)w; (void)d; sp_btn_n++; }
+static int tf_change_n;
+static void tf_on_change(bd_id w, void *d) { (void)w; (void)d; tf_change_n++; }
+static int fb_closed_flag;
+static void fb_on_close(bd_id w, void *d) { (void)w; (void)d; fb_closed_flag = 1; }
 
 /* ---- an autocomplete provider over a fixed vocabulary ---- */
 static const char *ac_vocab[] = { "connect", "connection", "connected",
@@ -1774,6 +1779,71 @@ main(void)
 	bd_editor_set_locked(ed, 0);
 	bd_syntax_free(bglang);
 	bd_gui_cleanup();
+
+	/* ---- text field on_change fires on edit ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id tff = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id tfi = bd_create(tff, BD_TEXT_FIELD, BD_GROW_I, 1,
+	    BD_ON_CHANGE_F, tf_on_change, BD_END);
+	bd_gui_layout(300, 80);
+	bd_focus(tfi);
+	tf_change_n = 0;
+	bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = 'h' });
+	bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = 'i' });
+	check("text field fires on_change per edit", tf_change_n == 2);
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_BACKSPACE });
+	check("backspace fires on_change too", tf_change_n == 3);
+	bd_gui_cleanup();
+	}
+
+	/* ---- find bar (bd_findbar) ---- */
+	bd_gui_init(&stub, NULL);
+	{
+	bd_id ff = bd_create(BD_NONE, BD_FRAME, BD_LAYOUT_I, BD_LAYOUT_COL, BD_END);
+	bd_id fed = bd_editor_create(ff, BD_GROW_I, 1, BD_END);
+	bd_editor_set_text(fed, "aa bb aa cc aa");
+	bd_findbar *fbar = bd_findbar_create(ff, fed, 1);
+	check("findbar creates and binds the editor",
+	    fbar != NULL && bd_findbar_editor(fbar) == fed &&
+	    bd_findbar_widget(fbar) != BD_NONE);
+	bd_gui_layout(420, 200);
+
+	/* open focuses the search field; typing drives a live search */
+	bd_findbar_open(fbar);
+	bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = 'a' });
+	bd_gui_event(&(bd_event){ .type = BD_EV_CHAR, .codepoint = 'a' });
+	check("typing in the find bar searches the editor",
+	    bd_editor_find_count(fed) == 3 && bd_editor_find_current(fed) == 0);
+
+	/* Enter in the field steps to the next match */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ENTER });
+	check("Enter in the find bar advances the match",
+	    bd_editor_find_current(fed) == 1);
+
+	/* the case-insensitive flag re-runs the search */
+	bd_editor_set_text(fed, "aa AA aa");
+	bd_findbar_open(fbar);
+	check("case-sensitive find counts 2", bd_editor_find_count(fed) == 2);
+	bd_findbar_set_flags(fbar, BD_FIND_ICASE);
+	check("icase flag re-runs and counts 3", bd_editor_find_count(fed) == 3);
+
+	/* Escape in the search field dismisses the bar */
+	bd_findbar_on_close(fbar, fb_on_close, NULL);
+	fb_closed_flag = 0;
+	bd_findbar_open(fbar);   /* re-focus the search field */
+	bd_gui_event(&(bd_event){ .type = BD_EV_KEY_DOWN, .key = BD_KEY_ESCAPE });
+	check("Escape in the find bar fires on_close", fb_closed_flag == 1);
+
+	/* set_query seeds the field and searches in one call */
+	bd_editor_set_text(fed, "one two two");
+	bd_findbar_set_query(fbar, "two");
+	check("set_query seeds the search", bd_editor_find_count(fed) == 2);
+
+	bd_findbar_free(fbar);
+	}
+	bd_gui_cleanup();
+
 
 	/* ---- BD_LIST scrolling/selectable list ---- */
 	bd_gui_init(&stub, NULL);

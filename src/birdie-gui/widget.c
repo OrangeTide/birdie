@@ -2587,6 +2587,14 @@ input_delete_selection(struct widget *w)
 	w->sel_anchor = -1;
 }
 
+/* Notify a text field's on_change hook (if any) that its text was edited. */
+static void
+fire_text_change(struct widget *w)
+{
+	if (w->on_change)
+		w->on_change((bd_id)(w - pool), w->on_change_data);
+}
+
 static void
 input_insert_char(bd_id id, unsigned codepoint)
 {
@@ -2609,6 +2617,7 @@ input_insert_char(bd_id id, unsigned codepoint)
 	w->text_buf[w->text_len] = '\0';
 	w->sel_anchor = -1;
 	cursor_blink = (float)bd_time();
+	fire_text_change(w);
 }
 
 /* copy the current selection (if any) to the system clipboard */
@@ -2651,6 +2660,7 @@ input_insert_text(struct widget *w, const char *s, int single_line)
 	w->text_buf[w->text_len] = '\0';
 	w->sel_anchor = -1;
 	cursor_blink = (float)bd_time();
+	fire_text_change(w);
 }
 
 /* Byte offset nearest the pixel x within a single-line field. */
@@ -2744,6 +2754,7 @@ input_key(bd_id id, int key, unsigned mods)
 		}
 		w->sel_anchor = -1;
 		cursor_blink = (float)bd_time();
+		fire_text_change(w);
 		return 1;
 	case BD_KEY_DELETE:
 		if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor) {
@@ -2759,6 +2770,7 @@ input_key(bd_id id, int key, unsigned mods)
 		}
 		w->sel_anchor = -1;
 		cursor_blink = (float)bd_time();
+		fire_text_change(w);
 		return 1;
 
 	case BD_KEY_ENTER:
@@ -2777,6 +2789,8 @@ input_key(bd_id id, int key, unsigned mods)
 		return 1;
 	case BD_KEY_ESCAPE:
 		focus_id = BD_NONE;
+		if (w->on_close)
+			w->on_close(id, w->on_close_data);
 		return 1;
 	case BD_KEY_A:
 		if (ctrl) {
@@ -2798,6 +2812,7 @@ input_key(bd_id id, int key, unsigned mods)
 			if (w->sel_anchor >= 0 && w->sel_anchor != w->cursor)
 				input_delete_selection(w);
 			cursor_blink = (float)bd_time();
+			fire_text_change(w);
 			return 1;
 		}
 		return 0;

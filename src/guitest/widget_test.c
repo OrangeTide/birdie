@@ -24,6 +24,7 @@
 #include "bd_widget_explorer.h"
 #include "bd_widget_editor.h"
 #include "bd_syntax.h"
+#include "bd_findbar.h"
 #include "bd_widget_sketch.h"
 #include "bd_widget_table.h"
 #include "bd_widget_inventory.h"
@@ -490,6 +491,9 @@ on_new_window(bd_id id, void *arg)
 		"-- heal trigger\nfunction on_prompt(hp)\n"
 		"  if hp < 20 then send(\"quaff heal\") end\nend");
 	bd_editor_set_syntax(led, bd_syntax_builtin("lua"));
+	/* a find bar bound to the Lua editor, seeded so the count shows */
+	bd_findbar *lfb = bd_findbar_create(body, led, 1);
+	bd_findbar_set_query(lfb, "hp");
 
 	bd_create(body, BD_LABEL, BD_LABEL_S, "Recent (BD_LIST):",
 		BD_PREF_H_I, 16, BD_END);
