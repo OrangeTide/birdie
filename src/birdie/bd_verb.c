@@ -104,7 +104,7 @@ static void
 parse_class_token(const char *tok, char *cls, size_t ccap, char *chain,
                   size_t chcap, int *state)
 {
-	char buf[256];
+	char buf[128];
 	char *colon, *slash;
 
 	cls[0] = '\0';

@@ -173,7 +173,7 @@ finish_entity(bd_mxp *m)
 			v = strtol(e + 1, &end, 10);
 		unsigned char u[BD_UTF8_MAX];
 		int ul;
-		if (*end == '\0' && v > 0 && v <= BD_UTF8_RUNE_MAX &&
+		if (*end == '\0' && v > 0 && (unsigned long)v <= BD_UTF8_RUNE_MAX &&
 		    (ul = bd_utf8_encode(u, (uint32_t)v)) > 0) {
 			out_put(m, u, (size_t)ul);   /* handles all planes */
 		} else {                        /* malformed/invalid: verbatim */

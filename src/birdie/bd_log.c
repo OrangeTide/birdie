@@ -105,7 +105,19 @@ utc_parts(double t_ms, struct tm *tm, int *ms)
 	*ms = (int)(t_ms - (double)secs * 1000.0);
 	if (*ms < 0)
 		*ms = 0;
+	else if (*ms > 999)
+		*ms = 999;
 	gmtime_r(&secs, tm);
+}
+
+static int
+clamp(int v, int lo, int hi)
+{
+	if (v < lo)
+		return lo;
+	if (v > hi)
+		return hi;
+	return v;
 }
 
 static void
@@ -115,8 +127,9 @@ iso8601(double t_ms, char *out, size_t cap)
 	int ms;
 	utc_parts(t_ms, &tm, &ms);
 	snprintf(out, cap, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-	    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-	    tm.tm_hour, tm.tm_min, tm.tm_sec, ms);
+	    clamp(tm.tm_year + 1900, 0, 9999), clamp(tm.tm_mon + 1, 1, 12),
+	    clamp(tm.tm_mday, 1, 31), clamp(tm.tm_hour, 0, 23),
+	    clamp(tm.tm_min, 0, 59), clamp(tm.tm_sec, 0, 60), ms);
 }
 
 /* ---- formatters ---- */
