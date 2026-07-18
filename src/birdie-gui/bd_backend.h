@@ -67,6 +67,14 @@ enum bd_ev_type {
 	                       over this widget; read the payload with bd_dnd_get().
 	                       Not injected by the host; the toolkit delivers it to an
 	                       extension widget's event() at `x`,`y` on mouse-up. */
+	BD_EV_FILE_DROP,    /* host-injected: files were dropped onto the window from
+	                       another application (OS drag-and-drop). `paths` is the
+	                       NULL-terminated list of absolute paths; `x`,`y` is the
+	                       drop point. The toolkit routes it to the extension
+	                       widget under the point (bubbling to an accepting
+	                       ancestor); an unconsumed drop returns 0 from
+	                       bd_gui_event so the host can act on it. Distinct from
+	                       BD_EV_DROP, which is the internal cross-widget drag. */
 	BD_EV_FOCUS_IN,     /* the window `window` gained OS input focus */
 	BD_EV_FOCUS_OUT,    /* the window `window` lost OS input focus. The toolkit
 	                       tracks these so an app can throttle its render loop
@@ -134,6 +142,8 @@ typedef struct {
 	unsigned codepoint;     /* Unicode codepoint (char) */
 	const char *text;       /* UTF-8 for TEXT_COMMIT / TEXT_PREEDIT; valid for
 	                           the dispatch only */
+	const char *const *paths;/* NULL-terminated absolute file paths
+	                            (BD_EV_FILE_DROP); valid for the dispatch only */
 	int      caret;         /* TEXT_PREEDIT: caret byte offset within `text` */
 	int      window;        /* originating window id (0 = primary). Backends
 	                           without multi_window leave this 0. */

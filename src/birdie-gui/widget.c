@@ -4822,6 +4822,24 @@ bd_gui_event(const bd_event *ev)
 	if (frame == BD_NONE || !pool[frame].alive)
 		return 0;
 
+	/* OS file drop: deliver to the extension widget under the drop point,
+	 * bubbling to the nearest accepting ancestor (mirrors the wheel path). An
+	 * unconsumed drop returns 0 so the host can act on it (e.g. import). */
+	if (ev->type == BD_EV_FILE_DROP) {
+		for (bd_id a = hit_extension(frame, ev->x, ev->y); a != BD_NONE; ) {
+			if (ext_event(a, ev))
+				return 1;
+			bd_id p = pool[a].parent;
+			a = BD_NONE;
+			for (; p != BD_NONE; p = pool[p].parent) {
+				const bd_widget_class *pc = class_of(pool[p].type);
+				if (pc && pc->event) { a = p; break; }
+				if (p == frame) break;
+			}
+		}
+		return 0;
+	}
+
 	if (handle_menu_event(ev, frame))
 		return 1;
 

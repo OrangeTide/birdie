@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>   /* strcasecmp */
 #include <sys/stat.h>
 #include <dirent.h>
 
@@ -1064,10 +1065,51 @@ on_quit(bd_id id, void *arg)
 	lud_quit();
 }
 
+/* OS file drop: a file dragged from the desktop onto the window. Route it into
+ * the toolkit first so a widget can claim it; an unclaimed CSV drop imports
+ * profiles. Only file lists (text/uri-list) are handled; other formats are
+ * ignored. The parsed path array is owned here and freed after dispatch. */
+static int
+on_file_drop(const lud_event_t *ev)
+{
+	if (!ev->drop.format ||
+	    strcmp(ev->drop.format, LUD_CLIPBOARD_URI_LIST) != 0)
+		return 0;
+	char **files = lud_parse_uri_list(ev->drop.data, ev->drop.len);
+	if (!files)
+		return 0;
+
+	bd_event bev = {0};
+	bev.type = BD_EV_FILE_DROP;
+	bev.x = ev->drop.x;
+	bev.y = ev->drop.y;
+	bev.paths = (const char *const *)files;
+	int consumed = bd_gui_event(&bev);
+
+	/* Fallback: import the first CSV no widget claimed. */
+	if (!consumed) {
+		for (int i = 0; files[i]; i++) {
+			const char *dot = strrchr(files[i], '.');
+			if (dot && strcasecmp(dot, ".csv") == 0) {
+				do_import(files[i]);
+				consumed = 1;
+				break;
+			}
+		}
+	}
+
+	for (int i = 0; files[i]; i++)
+		free(files[i]);
+	free(files);
+	return consumed;
+}
+
 static int
 on_event(const lud_event_t *ev)
 {
 	bd_event bev;
+	if (ev->type == LUD_EV_DROP)
+		return on_file_drop(ev);
 	if (bd_event_from_lud(ev, &bev)) {
 		if (script_open && script_find && bev.type == BD_EV_KEY_DOWN &&
 		    (bev.mods & BD_MOD_CTRL) && bev.key == 'F') {
