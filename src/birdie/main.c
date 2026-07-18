@@ -1147,6 +1147,20 @@ on_event(const lud_event_t *ev)
 			bd_findbar_open(mcp_find);
 			return 1;
 		}
+		/* Ctrl-V into the import field: if the clipboard holds a title-schema
+		 * CSV (a MUD list pasted from a gist), import it instead of pasting the
+		 * text as a path. Non-CSV text falls through to the normal field paste. */
+		if (bev.type == BD_EV_KEY_DOWN && (bev.mods & BD_MOD_CTRL) &&
+		    bev.key == 'V' && import_path != BD_NONE &&
+		    bd_focused() == import_path) {
+			char *txt = lud_clipboard_get_text();
+			if (txt) {
+				int n = import_csv_bytes(txt, strlen(txt), 0);
+				free(txt);
+				if (n > 0)
+					return 1;
+			}
+		}
 		if (bd_gui_event(&bev))
 			return 1;
 	}
