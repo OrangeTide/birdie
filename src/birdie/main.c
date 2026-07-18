@@ -773,9 +773,61 @@ merge_profiles(bd_profiles *dst, bd_profiles *src, int policy)
 
 /* ---- import a CSV file, resolving name collisions ---- */
 
-/* Import a local CSV file at `path`: parse into a scratch store, and if any name
- * already exists ask how to resolve it, else merge. Shared by the import field
- * and the file chooser. */
+/* Import parsed CSV bytes into the profile store: parse into a scratch store,
+ * then merge straight in, open the collision dialog, or report a parse error.
+ * `report_empty` decides what happens when the bytes are not a MUD-list CSV (no
+ * `name` column, or empty): a file import reports it, while a text drop passes 0
+ * so the caller can decline and leave the drop unclaimed. Returns the
+ * bd_profiles_import_csv result: <0 parse error, 0 nothing importable, >0 rows
+ * staged or merged. */
+static int
+import_csv_bytes(const char *buf, size_t got, int report_empty)
+{
+	char line[200];
+	int n, coll;
+	bd_profiles *scratch = bd_profiles_new();
+
+	if (!scratch)
+		return -1;
+	n = bd_profiles_import_csv(scratch, buf, got, BD_PROFILE_SAFE_COLUMNS);
+	if (n < 0) {
+		bd_profiles_free(scratch);
+		if (report_empty)
+			bd_terminal_write(terminal,
+			    "\033[31m*** import failed (parse error)\033[0m\r\n", -1);
+		return -1;
+	}
+	if (n == 0 && !report_empty) {  /* not a MUD-list CSV: caller declines */
+		bd_profiles_free(scratch);
+		return 0;
+	}
+
+	coll = count_collisions(profiles, scratch);
+	if (coll == 0) {                        /* no clashes: merge straight in */
+		int added = merge_profiles(profiles, scratch, IMP_OVERWRITE);
+		bd_profiles_free(scratch);
+		save_profiles();
+		bd_table_refresh(mudlist);
+		snprintf(line, sizeof line,
+		    "\033[36m*** imported %d profile%s\033[0m\r\n",
+		    added, added == 1 ? "" : "s");
+		bd_terminal_write(terminal, line, -1);
+		return n;
+	}
+
+	/* clashes exist: hold the parsed rows and ask the user how to resolve */
+	pending_import = scratch;
+	snprintf(imp_msg_buf, sizeof imp_msg_buf,
+	    "%d of %d imported profile%s already exist. Resolve conflicts:",
+	    coll, n, n == 1 ? "" : "s");
+	bd_set(imp_msg, BD_LABEL_S, imp_msg_buf, BD_END);
+	bd_radio_set(imp_policy, IMP_OVERWRITE);
+	bd_dialog_open(import_dlg);
+	return n;
+}
+
+/* Import a local CSV file at `path`: read it, then hand the bytes to
+ * import_csv_bytes. Shared by the import field and the file chooser. */
 static void
 do_import(const char *path)
 {
@@ -784,8 +836,6 @@ do_import(const char *path)
 	long sz;
 	char *buf;
 	size_t got;
-	int n, coll;
-	bd_profiles *scratch;
 
 	if (!path || !path[0]) {
 		bd_terminal_write(terminal,
@@ -815,41 +865,8 @@ do_import(const char *path)
 	fclose(f);
 	buf[got] = '\0';
 
-	scratch = bd_profiles_new();
-	if (!scratch) {
-		free(buf);
-		return;
-	}
-	n = bd_profiles_import_csv(scratch, buf, got, BD_PROFILE_SAFE_COLUMNS);
+	import_csv_bytes(buf, got, 1);
 	free(buf);
-	if (n < 0) {
-		bd_profiles_free(scratch);
-		bd_terminal_write(terminal,
-		    "\033[31m*** import failed (parse error)\033[0m\r\n", -1);
-		return;
-	}
-
-	coll = count_collisions(profiles, scratch);
-	if (coll == 0) {                        /* no clashes: merge straight in */
-		int added = merge_profiles(profiles, scratch, IMP_OVERWRITE);
-		bd_profiles_free(scratch);
-		save_profiles();
-		bd_table_refresh(mudlist);
-		snprintf(line, sizeof line,
-		    "\033[36m*** imported %d profile%s\033[0m\r\n",
-		    added, added == 1 ? "" : "s");
-		bd_terminal_write(terminal, line, -1);
-		return;
-	}
-
-	/* clashes exist: hold the parsed rows and ask the user how to resolve */
-	pending_import = scratch;
-	snprintf(imp_msg_buf, sizeof imp_msg_buf,
-	    "%d of %d imported profile%s already exist. Resolve conflicts:",
-	    coll, n, n == 1 ? "" : "s");
-	bd_set(imp_msg, BD_LABEL_S, imp_msg_buf, BD_END);
-	bd_radio_set(imp_policy, IMP_OVERWRITE);
-	bd_dialog_open(import_dlg);
 }
 
 /* Import button in the connect dialog: import the path typed in the field. */
@@ -1072,8 +1089,17 @@ on_quit(bd_id id, void *arg)
 static int
 on_file_drop(const lud_event_t *ev)
 {
-	if (!ev->drop.format ||
-	    strcmp(ev->drop.format, LUD_CLIPBOARD_URI_LIST) != 0)
+	if (!ev->drop.format)
+		return 0;
+
+	/* CSV text dropped directly (e.g. a MUD list pasted from a gist): import
+	 * it when it parses as our title-schema CSV, else leave it unclaimed.
+	 * (A spreadsheet selection arrives as text/html, a <table>; mapping that
+	 * to the CSV schema is a future feature.) */
+	if (strcmp(ev->drop.format, LUD_CLIPBOARD_TEXT) == 0)
+		return import_csv_bytes(ev->drop.data, ev->drop.len, 0) > 0;
+
+	if (strcmp(ev->drop.format, LUD_CLIPBOARD_URI_LIST) != 0)
 		return 0;
 	char **files = lud_parse_uri_list(ev->drop.data, ev->drop.len);
 	if (!files)
