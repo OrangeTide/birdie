@@ -33,11 +33,14 @@ Each `module.mk` declares targets via `EXECUTABLES`, `LIBRARIES`, and
 - `samples/demo03_text_dialogs/` — Font rendering + dialog box UI
 - `samples/demo04_sprites/` — Sprite rendering demo
 - `samples/demo08_picking/` — 3D color-id picking via offscreen render target (automatable; `--selftest`)
-- `samples/cliptest/` — clipboard copy/paste demo and cross-client round-trip self-test (`--selftest`)
+- `samples/cliptest/` — clipboard copy/paste demo and cross-client round-trip self-test, including large-payload INCR transfers (`--selftest`)
+- `samples/dndtest/` — drag-and-drop (XDND) drop-target demo and self-test; synthesizes a drag source over a second X connection (`--selftest`)
+- `samples/dragtest/` — drag-and-drop (XDND) drag-source demo and self-test; drives a synthetic drop target over a second X connection (`--selftest`)
 - `samples/demo05_audio/` — Multi-channel audio mixer demo
 - `samples/lilpc/` — 286 XT PC emulator with CGA display
 - `samples/tridrop/` — Triangle drop demo
 - `samples/ansiview/` — ANSI art viewer
+- `samples/webclip/` — clipboard + drag-and-drop manual test (cross-platform; primarily for verifying the Emscripten browser paths)
 - `doc/manual/` — Manual (markdown, build with `make` in that directory)
 - `doc/notes/` — R&D notes
 - `doc/game-ideas/` — Game concept notes
@@ -148,11 +151,42 @@ Gamepad axes have a rescaled dead zone (default 0.15), tunable via
 
 Clipboard: `lud_clipboard_get_text()` / `lud_clipboard_set_text()` for
 synchronous UTF-8 text (get returns a malloc'd string the caller frees;
-NULL on empty/timeout). `lud_clipboard_get_async(format, cb, user)` reads
-without blocking and delivers via callback during event processing; one
-request at a time. The `format` argument (e.g. `LUD_CLIPBOARD_TEXT`) leaves
-room for non-text targets later. X11 uses the CLIPBOARD selection; Emscripten
-is a stub (browser clipboard is permission-gated).
+NULL on empty/timeout). `lud_clipboard_get_data()` / `lud_clipboard_set_data(format,
+data, len)` for byte-exact binary (images via `LUD_CLIPBOARD_PNG`, or any MIME
+target). `lud_clipboard_get_files()` / `lud_clipboard_set_files(paths, count)`
+for file lists (`text/uri-list`, handles `file://` percent-encoding).
+`lud_clipboard_set_multi(items, count)` offers several formats at once (e.g.
+image/png + text fallback); reads stay per-format via get_data/get_text.
+`lud_clipboard_set_html(html, plain)` / `lud_clipboard_get_html()` for rich text
+(HTML, offers a plain-text fallback); `LUD_CLIPBOARD_HTML`/`_RTF` constants.
+`lud_clipboard_get_async(format, cb, user)` reads without blocking and delivers
+via callback during event processing; one request at a time. Large payloads use
+the X11 INCR protocol automatically. X11 serves text/images/files; Windows maps
+formats to native clipboard types (CF_UNICODETEXT/CF_HDROP/HTML Format/registered),
+validated under Wine. On Emscripten, writes (set_text/set_data/set_multi) go to
+navigator.clipboard and async reads (get_async) map to its readText/read; the
+browser has no synchronous clipboard read (get_text/get_data return NULL) and no
+file paths (set_files fails). Writable MIME types are the browser safelist
+(text/plain, text/html, image/png), and everything is gesture/permission gated.
+
+Drag and drop: the window is an XDND drop target AND drag source. Drops arrive
+as a `LUD_EV_DROP` event (`ev->drop.format`, `.data`, `.len`, `.x`, `.y`; data
+owned by ludica, valid only during the callback). `lud_parse_uri_list(data,
+len)` decodes a dropped/copied `text/uri-list` into a NULL-terminated path
+array. To start a drag out of the window, call `lud_drag_data(format, data,
+len)`, `lud_drag_files(paths, count)`, or `lud_drag_multi(items, count)` (several
+formats at once) when a drag gesture begins (mouse button held); non-blocking,
+ends with a `LUD_EV_DRAG_END` event (`ev->drag_end.accepted`).
+On X11 both directions work (reuses the clipboard selection + INCR machinery).
+On Windows both directions work too: an OLE IDropTarget delivers `LUD_EV_DROP`,
+and the drag source (`lud_drag_*`) hands an IDataObject to `DoDragDrop`, both
+reusing the clipboard format mapping. One difference: `DoDragDrop` is modal, so
+the Windows drag source blocks until the drop or cancel, then fires
+`LUD_EV_DRAG_END` (the X11 drag source is non-blocking). On Emscripten the drop
+target works: DOM drop events on the canvas deliver `LUD_EV_DROP` for text, HTML
+and files (a file arrives as its bytes under its MIME type, not a path). The
+Emscripten drag source (`lud_drag_*`) fails, since a browser cannot start an
+HTML5 drag programmatically.
 
 ## Adding a New Sample Program
 

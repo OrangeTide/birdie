@@ -24,7 +24,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shellapi.h>   /* DragQueryFileW */
+#include <shlobj.h>     /* DROPFILES (in shellapi.h on MSVC, shlobj.h on mingw) */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +35,7 @@
 #include <GLES2/gl2.h>
 
 #include "ludica_internal.h"
+#include "win32/win32.h"
 
 /* EGL 1.5 / EGL_KHR_create_context */
 #ifndef EGL_OPENGL_ES3_BIT
@@ -168,85 +172,11 @@ static WCHAR       pending_high; /* buffered UTF-16 high surrogate, 0 if none */
 static LONG        saved_style;
 static WINDOWPLACEMENT saved_place;
 
-/* ---- Clipboard (CF_UNICODETEXT) ---- */
-
-char *
-lud_clipboard_get_text(void)
+/* Expose the app window to win32/clipboard.c and win32/dragdrop.c. */
+HWND
+lud__win32_window(void)
 {
-	char *out = NULL;
-
-	if (!OpenClipboard(hwnd))
-		return NULL;
-
-	HANDLE h = GetClipboardData(CF_UNICODETEXT);
-	if (h) {
-		const WCHAR *wtext = GlobalLock(h);
-		if (wtext) {
-			int n = WideCharToMultiByte(CP_UTF8, 0, wtext, -1,
-						    NULL, 0, NULL, NULL);
-			if (n > 0) {
-				out = malloc(n);
-				if (out)
-					WideCharToMultiByte(CP_UTF8, 0, wtext, -1,
-							    out, n, NULL, NULL);
-			}
-			GlobalUnlock(h);
-		}
-	}
-
-	CloseClipboard();
-	return out;
-}
-
-int
-lud_clipboard_set_text(const char *utf8)
-{
-	if (!utf8)
-		utf8 = "";
-
-	int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-	if (n <= 0)
-		return LUD_ERR;
-
-	HGLOBAL hmem = GlobalAlloc(GMEM_MOVEABLE, (size_t)n * sizeof(WCHAR));
-	if (!hmem)
-		return LUD_ERR;
-
-	WCHAR *dst = GlobalLock(hmem);
-	if (!dst) {
-		GlobalFree(hmem);
-		return LUD_ERR;
-	}
-	MultiByteToWideChar(CP_UTF8, 0, utf8, -1, dst, n);
-	GlobalUnlock(hmem);
-
-	if (!OpenClipboard(hwnd)) {
-		GlobalFree(hmem);
-		return LUD_ERR;
-	}
-	EmptyClipboard();
-	if (!SetClipboardData(CF_UNICODETEXT, hmem)) {
-		/* Still own hmem on failure. */
-		CloseClipboard();
-		GlobalFree(hmem);
-		return LUD_ERR;
-	}
-	/* On success the clipboard owns hmem. */
-	CloseClipboard();
-	return LUD_OK;
-}
-
-void
-lud_clipboard_get_async(const char *format, lud_clipboard_cb cb, void *user)
-{
-	if (!cb)
-		return;
-	/* Win32 clipboard reads are synchronous; share the sync path. */
-	if (!format)
-		format = LUD_CLIPBOARD_TEXT;
-	char *text = lud_clipboard_get_text();
-	cb(format, text, text ? strlen(text) : 0, user);
-	free(text);
+	return hwnd;
 }
 
 /* ---- Event translation ---- */
@@ -462,6 +392,9 @@ lud__platform_init(const lud_desc_t *desc)
 	}
 	hdc = GetDC(hwnd);
 
+	/* Register as an OLE drop target (drag-and-drop into the window). */
+	lud__win32_dnd_register(hwnd);
+
 	/* Configure EGL for the requested GLES version. */
 	gles_ctx_attribs[1] = desc->gles_version;
 	config_attribs[CONFIG_RENDERABLE_IDX] =
@@ -542,6 +475,7 @@ lud__platform_shutdown(void)
 	}
 
 	if (hwnd) {
+		lud__win32_dnd_unregister(hwnd);
 		if (hdc) {
 			ReleaseDC(hwnd, hdc);
 			hdc = NULL;
