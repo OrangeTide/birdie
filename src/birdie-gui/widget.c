@@ -2663,6 +2663,29 @@ input_insert_text(struct widget *w, const char *s, int single_line)
 	fire_text_change(w);
 }
 
+/* Fill a text field from OS-dropped file paths (BD_EV_FILE_DROP landing on it).
+ * A single-line field takes the first path, replacing any content; a multiline
+ * area takes every path at the caret, one per line. The field gains focus. */
+static void
+drop_paths_into_field(bd_id id, const char *const *paths)
+{
+	struct widget *w = &pool[id];
+	if (!paths || !paths[0])
+		return;
+	if (w->type == BD_TEXT_AREA) {
+		for (int i = 0; paths[i]; i++) {
+			if (i)
+				input_insert_text(w, "\n", 0);
+			input_insert_text(w, paths[i], 0);
+		}
+	} else {
+		w->sel_anchor = 0;          /* select all so the insert replaces it */
+		w->cursor = w->text_len;
+		input_insert_text(w, paths[0], 1);
+	}
+	focus_id = id;
+}
+
 /* Byte offset nearest the pixel x within a single-line field. */
 static int
 input_offset(struct widget *w, int mx)
@@ -4836,6 +4859,13 @@ bd_gui_event(const bd_event *ev)
 				if (pc && pc->event) { a = p; break; }
 				if (p == frame) break;
 			}
+		}
+		/* No extension widget took it: a text field under the point takes
+		 * the dropped path(s) as text (a CSV dropped on an import field). */
+		bd_id tf = hit_interactive(frame, ev->x, ev->y);
+		if (tf != BD_NONE && is_text_field(pool[tf].type)) {
+			drop_paths_into_field(tf, ev->paths);
+			return 1;
 		}
 		return 0;
 	}
