@@ -28,6 +28,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/x509_crt.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/net_sockets.h>
+#include <psa/crypto.h>
 
 /* ---- test harness ---- */
 static int checks, fails;
@@ -38,6 +45,32 @@ check(const char *what, int ok)
 	if (!ok) fails++;
 	printf("  [%s] %s\n", ok ? "PASS" : "FAIL", what);
 }
+
+/* A self-signed EC cert + key for the in-test TLS server. The client runs with
+ * BIRDIE_TLS_INSECURE so it never verifies, hence no CA or expiry concern.
+ * Regenerate with:
+ *   openssl ecparam -genkey -name prime256v1 -noout -out k.pem
+ *   openssl req -new -x509 -key k.pem -days 36500 -subj /CN=birdie-test -out c.pem */
+static const char TEST_CERT[] =
+	"-----BEGIN CERTIFICATE-----\n"
+	"MIIBgjCCASmgAwIBAgIULujiDyBo72K9lWohk9h0TXkoAZkwCgYIKoZIzj0EAwIw\n"
+	"FjEUMBIGA1UEAwwLYmlyZGllLXRlc3QwIBcNMjYwNzE4MDMzMTQzWhgPMjEyNjA2\n"
+	"MjQwMzMxNDNaMBYxFDASBgNVBAMMC2JpcmRpZS10ZXN0MFkwEwYHKoZIzj0CAQYI\n"
+	"KoZIzj0DAQcDQgAEpqQcvpIAl9FyPnyh7s2XeV5Ju5r1QpS0RHwftUvKdgEGEKJh\n"
+	"lDiUPJiJjn10K8H/QKUFDgGbQafqoaiLZ8PteqNTMFEwHQYDVR0OBBYEFKTZChp2\n"
+	"GyZzb5xJseujvFJKh2ZYMB8GA1UdIwQYMBaAFKTZChp2GyZzb5xJseujvFJKh2ZY\n"
+	"MA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgQyyFqTRzgc+yWSGi\n"
+	"8WGg9fEbRe6mgpOGwCknowGa4sICIBOIMf4Yymh9mMriPQoaafDbM2+vV1K9R+9Y\n"
+	"4e/3vku8\n"
+	"-----END CERTIFICATE-----\n"
+	;
+static const char TEST_KEY[] =
+	"-----BEGIN EC PRIVATE KEY-----\n"
+	"MHcCAQEEIKIzH/6Ad1cZJQttD8DKDkjnsX/N7UW010dF2UYLGlwFoAoGCCqGSM49\n"
+	"AwEHoUQDQgAEpqQcvpIAl9FyPnyh7s2XeV5Ju5r1QpS0RHwftUvKdgEGEKJhlDiU\n"
+	"PJiJjn10K8H/QKUFDgGbQafqoaiLZ8Pteg==\n"
+	"-----END EC PRIVATE KEY-----\n"
+	;
 
 static long
 now_ms(void)
@@ -207,6 +240,111 @@ main(void)
 
 	bd_net_free(n);        /* joins the net thread */
 	close(lsn);
+
+	/* ---- TLS: a real handshake + encrypted round trip against an in-test
+	 * mbedTLS server (the client verifies nothing, per BIRDIE_TLS_INSECURE) ---- */
+	setenv("BIRDIE_TLS_INSECURE", "1", 1);   /* set before bd_net_new: read on the thread */
+	{
+	int lsn2 = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in sa2; socklen_t sl2 = sizeof sa2;
+	memset(&sa2, 0, sizeof sa2);
+	sa2.sin_family = AF_INET;
+	sa2.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	if (lsn2 < 0 || bind(lsn2, (struct sockaddr *)&sa2, sizeof sa2) != 0 ||
+	    listen(lsn2, 1) != 0 ||
+	    getsockname(lsn2, (struct sockaddr *)&sa2, &sl2) != 0) {
+		check("TLS: opened a loopback listener", 0);
+	} else {
+		char port2[16];
+		bd_net *nt;
+		struct pollfd pf2 = { lsn2, POLLIN, 0 };
+		int cfd = -1;
+		snprintf(port2, sizeof port2, "%d", ntohs(sa2.sin_port));
+
+		rx_n = 0; srv_n = 0; st_last = BD_NET_IDLE;
+		nt = bd_net_new(on_data, on_state, NULL);
+		check("TLS: bd_net created", nt != NULL);
+		check("TLS: connect(tls=1) attempt starts",
+		    bd_net_connect(nt, "127.0.0.1", port2, 1) == 0);
+		if (poll(&pf2, 1, 3000) > 0)
+			cfd = accept(lsn2, NULL, NULL);
+		check("TLS: client connects to the listener", cfd >= 0);
+
+		if (cfd >= 0) {
+			mbedtls_ssl_context ssl; mbedtls_ssl_config conf;
+			mbedtls_x509_crt cert; mbedtls_pk_context pk;
+			mbedtls_entropy_context ent; mbedtls_ctr_drbg_context drbg;
+			mbedtls_net_context net;
+			int rc; long dl;
+
+			mbedtls_ssl_init(&ssl); mbedtls_ssl_config_init(&conf);
+			mbedtls_x509_crt_init(&cert); mbedtls_pk_init(&pk);
+			mbedtls_entropy_init(&ent); mbedtls_ctr_drbg_init(&drbg);
+			psa_crypto_init();               /* idempotent; needed for TLS 1.3 */
+			mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &ent,
+			    (const unsigned char *)"birdie-tls-test", 15);
+			rc = mbedtls_x509_crt_parse(&cert,
+			    (const unsigned char *)TEST_CERT, sizeof TEST_CERT);
+			check("TLS: server cert parses", rc == 0);
+			rc = mbedtls_pk_parse_key(&pk,
+			    (const unsigned char *)TEST_KEY, sizeof TEST_KEY,
+			    NULL, 0, mbedtls_ctr_drbg_random, &drbg);
+			check("TLS: server key parses", rc == 0);
+			mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER,
+			    MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+			mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &drbg);
+			mbedtls_ssl_conf_own_cert(&conf, &cert, &pk);
+			mbedtls_ssl_setup(&ssl, &conf);
+			net.fd = cfd;
+			mbedtls_net_set_nonblock(&net);
+			mbedtls_ssl_set_bio(&ssl, &net, mbedtls_net_send,
+			    mbedtls_net_recv, NULL);
+
+			/* the client handshakes on its own thread; yield on WANT_* */
+			dl = now_ms() + 8000;
+			while ((rc = mbedtls_ssl_handshake(&ssl)) != 0) {
+				if ((rc == MBEDTLS_ERR_SSL_WANT_READ ||
+				     rc == MBEDTLS_ERR_SSL_WANT_WRITE) &&
+				    now_ms() < dl) { usleep(2000); continue; }
+				break;
+			}
+			check("TLS: server-side handshake completes", rc == 0);
+			PUMP_UNTIL(nt, st_last == BD_NET_CONNECTED, 3000);
+			check("TLS: client reports CONNECTED after the handshake",
+			    st_last == BD_NET_CONNECTED);
+
+			/* server -> client ciphertext decrypts to the data callback */
+			rx_n = 0;
+			mbedtls_ssl_write(&ssl, (const unsigned char *)"secret\r\n", 8);
+			PUMP_UNTIL(nt, rx_has("secret", 6), 3000);
+			check("TLS: server ciphertext is decrypted to the client",
+			    rx_has("secret", 6));
+
+			/* client -> server: bd_net_send is encrypted; server decrypts it */
+			bd_net_send(nt, "hello\r\n", 7);
+			{
+				unsigned char b[256]; int got = 0;
+				dl = now_ms() + 3000;
+				while (now_ms() < dl && !memmem(b, (size_t)got, "hello", 5)) {
+					int r = mbedtls_ssl_read(&ssl, b + got,
+					    sizeof b - (size_t)got);
+					if (r > 0) got += r;
+					else usleep(2000);
+				}
+				check("TLS: client ciphertext decrypts on the server",
+				    memmem(b, (size_t)got, "hello", 5) != NULL);
+			}
+
+			mbedtls_ssl_close_notify(&ssl);
+			mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&conf);
+			mbedtls_x509_crt_free(&cert); mbedtls_pk_free(&pk);
+			mbedtls_ctr_drbg_free(&drbg); mbedtls_entropy_free(&ent);
+			close(cfd);
+		}
+		bd_net_free(nt);
+	}
+	close(lsn2);
+	}
 
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;
