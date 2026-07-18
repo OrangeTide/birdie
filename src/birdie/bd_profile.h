@@ -80,4 +80,23 @@ char *bd_profiles_export_csv(const bd_profiles *ps, const char *filter,
 int bd_profiles_load(bd_profiles *ps, const char *path);
 int bd_profiles_save(const bd_profiles *ps, const char *path);
 
+/* ---- merging one store into another (used after a CSV import) ---- */
+
+/* How bd_profiles_merge resolves an incoming profile whose name already exists
+ * in the destination. The values are stable: a UI may map radio-button indices
+ * straight onto them. */
+enum bd_import_policy {
+	BD_IMPORT_OVERWRITE = 0, /* merge the incoming fields into the existing */
+	BD_IMPORT_SKIP      = 1, /* keep the existing, drop the incoming */
+	BD_IMPORT_RENAME    = 2, /* add the incoming under a unique "name (n)" */
+};
+
+/* Number of profiles in src whose "name" already exists in dst. */
+int bd_profiles_count_collisions(bd_profiles *dst, bd_profiles *src);
+
+/* Merge src into dst under `policy` (a bd_import_policy). Non-clashing profiles
+ * are always added; clashing ones follow the policy. Returns the number of
+ * profiles added or updated. */
+int bd_profiles_merge(bd_profiles *dst, bd_profiles *src, int policy);
+
 #endif /* BD_PROFILE_H */

@@ -425,76 +425,10 @@ test_profile(void)
 /* ================================================================== */
 /* bd_profile -- import-collision merge (skip / rename / overwrite)    */
 /* ================================================================== */
-/* These mirror main.c's import-collision helpers (pure, public-API only).
- * The app has no client-UI test harness, so the merge algorithm the import
- * dialog runs is validated here against the real profile store. */
-enum { M_OVERWRITE, M_SKIP, M_RENAME };
-
-static void
-mtest_copy_keys(bd_profile *dst, const bd_profile *src, const char *force_name)
-{
-	int i, n = bd_profile_count(src);
-	for (i = 0; i < n; i++) {
-		const char *k = bd_profile_key(src, i);
-		if (force_name && !strcmp(k, "name"))
-			continue;
-		bd_profile_set(dst, k, bd_profile_val(src, i));
-	}
-	if (force_name)
-		bd_profile_set(dst, "name", force_name);
-}
-
-static void
-mtest_unique(bd_profiles *ps, const char *base, char *out, size_t sz)
-{
-	int i;
-	for (i = 2; i < 100000; i++) {
-		snprintf(out, sz, "%s (%d)", base, i);
-		if (!bd_profiles_find(ps, out))
-			return;
-	}
-}
-
-static int
-mtest_count_coll(bd_profiles *dst, bd_profiles *src)
-{
-	int i, c = 0, n = bd_profiles_count(src);
-	for (i = 0; i < n; i++) {
-		const char *name = bd_profile_get(bd_profiles_at(src, i), "name");
-		if (name && *name && bd_profiles_find(dst, name))
-			c++;
-	}
-	return c;
-}
-
-static int
-mtest_merge(bd_profiles *dst, bd_profiles *src, int policy)
-{
-	int i, changed = 0, n = bd_profiles_count(src);
-	for (i = 0; i < n; i++) {
-		bd_profile *sp = bd_profiles_at(src, i);
-		const char *name = bd_profile_get(sp, "name");
-		bd_profile *ex, *np;
-		if (!name || !*name)
-			continue;
-		ex = bd_profiles_find(dst, name);
-		if (!ex) {
-			np = bd_profiles_add(dst, name);
-			if (np) { mtest_copy_keys(np, sp, NULL); changed++; }
-		} else if (policy == M_SKIP) {
-			continue;
-		} else if (policy == M_RENAME) {
-			char nm[160];
-			mtest_unique(dst, name, nm, sizeof nm);
-			np = bd_profiles_add(dst, nm);
-			if (np) { mtest_copy_keys(np, sp, nm); changed++; }
-		} else {
-			mtest_copy_keys(ex, sp, NULL);
-			changed++;
-		}
-	}
-	return changed;
-}
+/* bd_profiles_count_collisions and bd_profiles_merge are the real functions the
+ * import dialog and the drop/paste import run (bd_profile.c). The app has no
+ * client-UI harness, so the merge algorithm is validated here directly against
+ * the profile store. */
 
 /* Build a store with one "Aardwolf" profile (host=old.host). */
 static bd_profiles *
@@ -518,12 +452,12 @@ test_profile_merge(void)
 	check("scratch parsed the two incoming profiles",
 	    bd_profiles_count(scratch) == 2);
 	check("exactly one incoming name collides with the base",
-	    mtest_count_coll(base, scratch) == 1);
+	    bd_profiles_count_collisions(base, scratch) == 1);
 	bd_profiles_free(base);
 
 	/* OVERWRITE: the clash is updated, the fresh name is added */
 	bd_profiles *d1 = mtest_base();
-	int c1 = mtest_merge(d1, scratch, M_OVERWRITE);
+	int c1 = bd_profiles_merge(d1, scratch, BD_IMPORT_OVERWRITE);
 	check("overwrite updates the clash and adds the new profile",
 	    c1 == 2 && bd_profiles_count(d1) == 2 &&
 	    strcmp(bd_profile_get(bd_profiles_find(d1, "Aardwolf"), "host"),
@@ -533,7 +467,7 @@ test_profile_merge(void)
 
 	/* SKIP: the clash is left as-is, the fresh name still lands */
 	bd_profiles *d2 = mtest_base();
-	int c2 = mtest_merge(d2, scratch, M_SKIP);
+	int c2 = bd_profiles_merge(d2, scratch, BD_IMPORT_SKIP);
 	check("skip keeps the existing clash but adds the new profile",
 	    c2 == 1 && bd_profiles_count(d2) == 2 &&
 	    strcmp(bd_profile_get(bd_profiles_find(d2, "Aardwolf"), "host"),
@@ -543,7 +477,7 @@ test_profile_merge(void)
 
 	/* RENAME: the incoming clash lands under a fresh name, original kept */
 	bd_profiles *d3 = mtest_base();
-	int c3 = mtest_merge(d3, scratch, M_RENAME);
+	int c3 = bd_profiles_merge(d3, scratch, BD_IMPORT_RENAME);
 	check("rename keeps the original and adds a renamed copy",
 	    c3 == 2 && bd_profiles_count(d3) == 3 &&
 	    strcmp(bd_profile_get(bd_profiles_find(d3, "Aardwolf"), "host"),
@@ -554,6 +488,49 @@ test_profile_merge(void)
 	bd_profiles_free(d3);
 
 	bd_profiles_free(scratch);
+}
+
+/* ================================================================== */
+/* bd_profile -- CSV-text detection contract (drop / paste import)     */
+/* ================================================================== */
+/* The drop and paste import paths (main.c: import_csv_bytes with
+ * report_empty=0, on_file_drop, the Ctrl-V intercept) rely on
+ * bd_profiles_import_csv's return to decide whether dropped/pasted text is a
+ * MUD list: >0 imports it, <=0 leaves the text unclaimed. Lock that contract so
+ * arbitrary text is never silently swallowed as an import. */
+static int
+import_detect(const char *text)
+{
+	bd_profiles *ps = bd_profiles_new();
+	int n = bd_profiles_import_csv(ps, text, strlen(text),
+	    BD_PROFILE_SAFE_COLUMNS);
+	bd_profiles_free(ps);
+	return n;
+}
+
+static void
+test_profile_import_detect(void)
+{
+	printf("bd_profile (CSV-text detection):\n");
+
+	/* a real title-schema list imports (>0): the drop/paste is claimed */
+	check("a title-schema CSV is detected as importable (>0)",
+	    import_detect("name,host,port\nAardwolf,aardmud.org,23\n") == 1);
+
+	/* header with a name column but no data rows: nothing to import (0) */
+	check("a header-only CSV imports nothing (0)",
+	    import_detect("name,host,port\n") == 0);
+
+	/* tabular text without a name column is not our list: declined (0) */
+	check("CSV lacking a name column is declined (0)",
+	    import_detect("host,port\naardmud.org,23\n") == 0);
+
+	/* free-form prose a user might drop is not swallowed as an import */
+	check("arbitrary prose is not treated as an import (<=0)",
+	    import_detect("the quick brown fox\njumps over\n") <= 0);
+
+	/* empty text imports nothing */
+	check("empty text imports nothing (<=0)", import_detect("") <= 0);
 }
 
 /* ================================================================== */
@@ -791,6 +768,7 @@ main(void)
 	test_mxp();
 	test_profile();
 	test_profile_merge();
+	test_profile_import_detect();
 	test_encoding();
 	printf("\n%d checks, %d failed\n", checks, fails);
 	return fails ? 1 : 0;

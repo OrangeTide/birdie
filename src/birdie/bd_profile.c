@@ -447,3 +447,74 @@ bd_profiles_save(const bd_profiles *ps, const char *path)
 	free(csv);
 	return wr == len ? 0 : -1;
 }
+
+/* ---- merging one store into another ---- */
+
+/* Copy every key from src into dst. force_name (if set) replaces src's name,
+ * for the rename policy. */
+static void
+copy_profile_keys(bd_profile *dst, const bd_profile *src, const char *force_name)
+{
+	int i, n = bd_profile_count(src);
+	for (i = 0; i < n; i++) {
+		const char *k = bd_profile_key(src, i);
+		if (force_name && !strcmp(k, "name"))
+			continue;
+		bd_profile_set(dst, k, bd_profile_val(src, i));
+	}
+	if (force_name)
+		bd_profile_set(dst, "name", force_name);
+}
+
+/* "base (2)", "base (3)", ... : the first that no profile in ps already uses. */
+static void
+unique_profile_name(bd_profiles *ps, const char *base, char *out, size_t outsz)
+{
+	int i;
+	for (i = 2; i < 100000; i++) {
+		snprintf(out, outsz, "%s (%d)", base, i);
+		if (!bd_profiles_find(ps, out))
+			return;
+	}
+}
+
+int
+bd_profiles_count_collisions(bd_profiles *dst, bd_profiles *src)
+{
+	int i, c = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		const char *name = bd_profile_get(bd_profiles_at(src, i), "name");
+		if (name && *name && bd_profiles_find(dst, name))
+			c++;
+	}
+	return c;
+}
+
+int
+bd_profiles_merge(bd_profiles *dst, bd_profiles *src, int policy)
+{
+	int i, changed = 0, n = bd_profiles_count(src);
+	for (i = 0; i < n; i++) {
+		bd_profile *sp = bd_profiles_at(src, i);
+		const char *name = bd_profile_get(sp, "name");
+		bd_profile *ex, *np;
+		if (!name || !*name)
+			continue;
+		ex = bd_profiles_find(dst, name);
+		if (!ex) {                          /* no clash: add as-is */
+			np = bd_profiles_add(dst, name);
+			if (np) { copy_profile_keys(np, sp, NULL); changed++; }
+		} else if (policy == BD_IMPORT_SKIP) {
+			continue;                       /* keep the existing one */
+		} else if (policy == BD_IMPORT_RENAME) {
+			char nm[160];
+			unique_profile_name(dst, name, nm, sizeof nm);
+			np = bd_profiles_add(dst, nm);
+			if (np) { copy_profile_keys(np, sp, nm); changed++; }
+		} else {                            /* BD_IMPORT_OVERWRITE (merge) */
+			copy_profile_keys(ex, sp, NULL);
+			changed++;
+		}
+	}
+	return changed;
+}
