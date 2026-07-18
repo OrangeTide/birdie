@@ -25,23 +25,18 @@ $(test_gui_EXEC)
 endef
 
 # test_client exercises the MUD-client core (bd_ring/csv/telopt/trigger/profile).
-# Those units are socket-free, callback-driven state machines, so the test
-# compiles them directly (no ludica, no sockets, no threads) and needs no
-# external libraries. bd_trigger references bd_vm_eval for '@' Lua bodies, so
-# bd_vm.c (its null backend) is linked to satisfy the symbol; the tests use only
-# command bodies, so no scripting runtime is required.
+# It links birdie_client (the shared client library) and pulls only the units it
+# references from the archive; the socket/thread/TLS stack (bd_net) stays
+# unpulled because the test never references it. bd_trigger references bd_vm_eval
+# for '@' Lua bodies, resolved by birdie_client's null bd_vm backend; the tests
+# use only command bodies, so no scripting runtime is required. bd_utf8 (used by
+# bd_mxp) comes transitively from birdie_gui via birdie_client.
 EXECUTABLES  += test_client
 TEST_TARGETS += test_client
 
 test_client_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-test_client_SRCS  = test_client.c \
-	../src/birdie/bd_ring.c ../src/birdie/bd_csv.c ../src/birdie/bd_telopt.c \
-	../src/birdie/bd_trigger.c ../src/birdie/bd_verb.c ../src/birdie/bd_mxp.c \
-	../src/birdie/bd_profile.c ../src/birdie/bd_vm.c ../src/birdie/bd_encoding.c \
-	../src/birdie-gui/bd_utf8.c
-# bd_mxp decodes numeric entities through bd_utf8 (in the toolkit dir).
-test_client_CFLAGS = -I$(test_client_DIR)../src/birdie \
-	-I$(test_client_DIR)../src/birdie-gui
+test_client_SRCS  = test_client.c
+test_client_LIBS  = birdie_client
 test_client_LDLIBS = -lm
 
 define test_client_TESTCMD
@@ -55,9 +50,13 @@ endef
 EXECUTABLES  += test_fs
 TEST_TARGETS += test_fs
 
+# bd_fs lives in the birdie_gui toolkit; link it so the object is compiled once.
+# Static-archive linking pulls only bd_fs.o (+ bd_utf8.o it uses), not the
+# widgets or any backend. The test drives the real bd_fs_platform_default() and
+# injects its fakes through the runtime vtable, so no symbol override is needed.
 test_fs_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-test_fs_SRCS  = test_fs.c ../src/birdie-gui/bd_fs.c
-test_fs_CFLAGS = -I$(test_fs_DIR)../src/birdie-gui
+test_fs_SRCS  = test_fs.c
+test_fs_LIBS  = birdie_gui
 
 define test_fs_TESTCMD
 $(test_fs_EXEC)
@@ -73,15 +72,12 @@ endef
 EXECUTABLES  += test_session
 TEST_TARGETS += test_session
 
+# Links birdie_client and defines its own fake bd_net + no-op bd_vm_lua. Those
+# fakes satisfy bd_session's references first, so the archive's real bd_net.o
+# (and its iox/mbedtls/miniz deps) is never pulled and no Lua runtime is needed.
 test_session_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-test_session_SRCS  = test_session.c \
-	../src/birdie/bd_session.c ../src/birdie/bd_mcp.c \
-	../src/birdie/bd_log.c ../src/birdie/bd_replay.c \
-	../src/birdie/bd_mxp.c ../src/birdie/bd_trigger.c ../src/birdie/bd_vm.c \
-	../src/birdie/bd_profile.c ../src/birdie/bd_csv.c \
-	../src/birdie-gui/bd_utf8.c
-test_session_CFLAGS = -I$(test_session_DIR)../src/birdie \
-	-I$(test_session_DIR)../src/birdie-gui
+test_session_SRCS  = test_session.c
+test_session_LIBS  = birdie_client
 test_session_LDLIBS = -lm
 
 define test_session_TESTCMD
@@ -97,13 +93,14 @@ endef
 EXECUTABLES  += test_netloop
 TEST_TARGETS += test_netloop
 
+# Links birdie_client for the REAL bd_net (and the ring/telopt/encoding it
+# pulls); iox/mbedtls/miniz come transitively. The test's own TU needs -pthread
+# and links mbedtls directly for its in-test TLS server (already via
+# birdie_client). No fakes here, so bd_net.o is pulled and exercised.
 test_netloop_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-test_netloop_SRCS  = test_netloop.c \
-	../src/birdie/bd_net.c ../src/birdie/bd_ring.c ../src/birdie/bd_telopt.c \
-	../src/birdie/bd_encoding.c ../src/birdie-gui/bd_utf8.c
-test_netloop_CFLAGS = -pthread -I$(test_netloop_DIR)../src/birdie \
-	-I$(test_netloop_DIR)../src/birdie-gui
-test_netloop_LIBS   = iox mbedtls miniz
+test_netloop_SRCS  = test_netloop.c
+test_netloop_LIBS   = birdie_client
+test_netloop_CFLAGS = -pthread
 test_netloop_LDLIBS = -pthread -lm
 
 define test_netloop_TESTCMD
@@ -117,9 +114,11 @@ endef
 EXECUTABLES  += test_mcp
 TEST_TARGETS += test_mcp
 
+# Links birdie_client and pulls only bd_mcp.o (self-contained; no session, net,
+# or UI), so nothing else from the archive is dragged in.
 test_mcp_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-test_mcp_SRCS  = test_mcp.c ../src/birdie/bd_mcp.c
-test_mcp_CFLAGS = -I$(test_mcp_DIR)../src/birdie
+test_mcp_SRCS  = test_mcp.c
+test_mcp_LIBS  = birdie_client
 
 define test_mcp_TESTCMD
 $(test_mcp_EXEC)

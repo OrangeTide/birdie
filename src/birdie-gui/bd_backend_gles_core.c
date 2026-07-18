@@ -33,7 +33,13 @@
  * without its own copy. */
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
+/* STBI_ONLY_PNG compiles out the loaders that reference some of stb_image's
+ * overflow-check helpers, so GCC/Clang flag them as unused. They are vendored
+ * third-party code we do not edit; silence the diagnostic around the include. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include "stb_image.h"
+#pragma GCC diagnostic pop
 
 /* GL streaming state for the toolkit's 2D quads. One context is current at a
  * time, so a single instance serves whichever backend is linked. */
