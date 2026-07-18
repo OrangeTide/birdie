@@ -35,7 +35,8 @@ enum bd_session_event_kind {
 	BD_SESSION_DATA,        /* decoded application bytes (telnet stripped) */
 	BD_SESSION_PROMPT,      /* prompt boundary (telnet EOR / GA) */
 	BD_SESSION_ECHO,        /* server echo control (mask input on suppress) */
-	BD_SESSION_PACKAGE      /* GMCP / MSDP out-of-band package */
+	BD_SESSION_PACKAGE,     /* GMCP / MSDP out-of-band package */
+	BD_SESSION_MCP_EDIT     /* MCP simpleedit: open an editor on content */
 };
 
 typedef struct bd_session_event {
@@ -57,6 +58,11 @@ typedef struct bd_session_event {
 	int proto;              /* BD_TELOPT_GMCP / BD_TELOPT_MSDP */
 	const char *name;
 	const char *json;
+
+	/* BD_SESSION_MCP_EDIT: reference + edit_type, with name (above) as the
+	 * label and data/len (above) as the \n-joined body to edit */
+	const char *reference;
+	const char *edit_type;   /* "string" | "string-list" | "moo-code" */
 } bd_session_event;
 
 typedef void (*bd_session_event_fn)(bd_session *s, const bd_session_event *ev,
@@ -85,6 +91,12 @@ bd_net_state bd_session_state(const bd_session *s);
  * an alias consumed the input. send_raw bypasses aliases. */
 int bd_session_send_line(bd_session *s, const char *utf8);
 int bd_session_send_raw(bd_session *s, const void *bytes, size_t n);
+
+/* Send edited MCP simpleedit content back to the server for a prior
+ * BD_SESSION_MCP_EDIT request (reference + type as delivered). No-op if the
+ * server never opened an MCP session. */
+void bd_session_mcp_edit_done(bd_session *s, const char *reference,
+                              const char *type, const char *text);
 
 /* The session's trigger engine and scripting VM, so the verb parser, profile
  * scripts, and tests can install triggers and run script. Never NULL for a

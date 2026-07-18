@@ -48,6 +48,15 @@ static bd_findbar *script_find;
 static bd_id      script_status;
 static int        script_open;
 static char       script_path[600];
+static bd_dialog *mcp_dlg;              /* MCP simpleedit editor */
+static bd_id      mcp_editor;
+static bd_findbar *mcp_find;
+static bd_id      mcp_label;
+static int        mcp_open;
+static char       mcp_ref[256];
+static char       mcp_type[32];
+static void open_mcp_edit(const char *reference, const char *name,
+                          const char *type, const char *content);
 static bd_id import_path;               /* CSV import file-path field */
 
 /* export column-filter dialog */
@@ -308,6 +317,9 @@ on_session_event(bd_session *s, const bd_session_event *ev, void *arg)
 		    ev->proto == BD_TELOPT_GMCP ? "GMCP" : "MSDP",
 		    ev->name, ev->json);
 		fflush(stdout);
+		break;
+	case BD_SESSION_MCP_EDIT:
+		open_mcp_edit(ev->reference, ev->name, ev->edit_type, ev->data);
 		break;
 	case BD_SESSION_PROMPT:
 	default:
@@ -1062,6 +1074,11 @@ on_event(const lud_event_t *ev)
 			bd_findbar_open(script_find);   /* Ctrl-F focuses the find bar */
 			return 1;
 		}
+		if (mcp_open && mcp_find && bev.type == BD_EV_KEY_DOWN &&
+		    (bev.mods & BD_MOD_CTRL) && bev.key == 'F') {
+			bd_findbar_open(mcp_find);
+			return 1;
+		}
 		if (bd_gui_event(&bev))
 			return 1;
 	}
@@ -1379,6 +1396,62 @@ on_trig_pick_color(bd_id id, void *arg)
 	(void)id;
 	(void)arg;
 	open_color_chooser(trig_body_from_color);
+}
+
+/* ---- MCP simpleedit editor (server hands us text; Save sends it back) ---- */
+
+static void
+on_mcp_find_close(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	bd_focus(mcp_editor);
+}
+
+static void
+on_mcp_save(bd_id id, void *arg)
+{
+	char *buf;
+	int len;
+	(void)id;
+	(void)arg;
+	len = bd_editor_text(mcp_editor, NULL, 0);
+	buf = malloc((size_t)len + 1);
+	if (!buf)
+		return;
+	bd_editor_text(mcp_editor, buf, len + 1);
+	bd_session_mcp_edit_done(session, mcp_ref, mcp_type, buf);
+	free(buf);
+	mcp_open = 0;
+	bd_dialog_close(mcp_dlg);
+}
+
+static void
+on_mcp_cancel(bd_id id, void *arg)
+{
+	(void)id;
+	(void)arg;
+	mcp_open = 0;      /* the CANCEL button closes the dialog itself */
+}
+
+/* A BD_SESSION_MCP_EDIT event: fill the editor and open it. */
+static void
+open_mcp_edit(const char *reference, const char *name, const char *type,
+              const char *content)
+{
+	static char title[320];
+	snprintf(mcp_ref, sizeof mcp_ref, "%s", reference ? reference : "");
+	snprintf(mcp_type, sizeof mcp_type, "%s",
+	    (type && type[0]) ? type : "string-list");
+	bd_editor_set_text(mcp_editor, content ? content : "");
+	bd_editor_set_syntax(mcp_editor,
+	    strcmp(mcp_type, "moo-code") == 0 ? bd_syntax_builtin("lua") : NULL);
+	snprintf(title, sizeof title, "%s  [%s]  (%s)",
+	    name && name[0] ? name : "edit", mcp_ref, mcp_type);
+	bd_set(mcp_label, BD_LABEL_S, title, BD_END);
+	mcp_open = 1;
+	bd_dialog_open(mcp_dlg);
+	bd_focus(mcp_editor);
 }
 
 /* ---- profile script editor (edits the profile's hand-written triggers.lua as
@@ -1736,6 +1809,17 @@ init(void)
 	bd_dialog_button(script_dlg, "Close", BD_DIALOG_CANCEL, on_script_close, NULL);
 	bd_dialog_button(script_dlg, "Save", BD_DIALOG_NORMAL, on_script_save, NULL);
 
+	/* MCP simpleedit editor: server-sent content, Send transmits it back */
+	mcp_dlg = bd_dialog_create("MCP edit (server content)", 660, 470);
+	bd_id mcbody = bd_dialog_content(mcp_dlg);
+	mcp_label = bd_create(mcbody, BD_LABEL, BD_LABEL_S, "", BD_PREF_H_I, 16, BD_END);
+	mcp_editor = bd_editor_create(mcbody, BD_GROW_I, 1, BD_END);
+	mcp_find = bd_findbar_create(mcbody, mcp_editor, 1);
+	if (mcp_find)
+		bd_findbar_on_close(mcp_find, on_mcp_find_close, NULL);
+	bd_dialog_button(mcp_dlg, "Cancel", BD_DIALOG_CANCEL, on_mcp_cancel, NULL);
+	bd_dialog_button(mcp_dlg, "Send", BD_DIALOG_NORMAL, on_mcp_save, NULL);
+
 	/* the export column-filter form: pick columns (name is always included),
 	 * choose a path, Export writes the CSV */
 	export_dlg = bd_dialog_create("Export profiles", 440, 360);
@@ -1817,6 +1901,7 @@ cleanup(void)
 	/* the file chooser (bd_filedlg) owns and reclaims its own dialog */
 	connect_dlg = edit_dlg = settings_dlg = triggers_dlg = NULL;
 	script_dlg = NULL;
+	mcp_dlg = NULL;
 	export_dlg = import_dlg = color_dlg = NULL;
 	bd_gui_cleanup();
 }

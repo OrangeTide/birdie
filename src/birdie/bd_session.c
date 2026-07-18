@@ -8,6 +8,7 @@
 #include "bd_log.h"
 #include "bd_replay.h"
 #include "bd_mxp.h"
+#include "bd_mcp.h"
 #include "bd_csv.h"
 
 #include <stdlib.h>
@@ -48,6 +49,9 @@ struct bd_session {
 	/* incoming-line assembly for the trigger engine (UI thread only) */
 	char *linebuf;
 	size_t line_len, line_cap;
+	size_t line_streamed;           /* bytes of the pending line already shown */
+
+	bd_mcp *mcp;                    /* MUD Client Protocol (in-band #$# lines) */
 
 	/* user triggers (GUI-edited, persisted to triggers.csv; see header) */
 	struct user_trig *utrig;
@@ -907,27 +911,112 @@ retire_line(bd_session *s)
 		emit_data(s, "\n", 1);          /* normal: just terminate the line */
 	}
 	s->line_len = 0;
+	s->line_streamed = 0;
+}
+
+/* MCP: transmit one control line (with CRLF). */
+static void
+mcp_send(const char *line, void *arg)
+{
+	bd_session *s = arg;
+	bd_net_send(s->net, line, (int)strlen(line));
+	bd_net_send(s->net, "\r\n", 2);
+}
+
+/* MCP: a simpleedit-content arrived; hand it to the front-end. */
+static void
+mcp_edit(const bd_mcp_edit *e, void *arg)
+{
+	bd_session *s = arg;
+	bd_session_event ev = { 0 };
+	ev.kind = BD_SESSION_MCP_EDIT;
+	ev.name = e->name;
+	ev.reference = e->reference;
+	ev.edit_type = e->type;
+	ev.data = e->content;
+	ev.len = e->content_len;
+	emit(s, &ev);
+}
+
+/* True while the pending line's prefix could still become an MCP marker
+ * (#$# or #$"), so its live display is held until the newline classifies it. */
+static int
+line_may_be_mcp(bd_session *s)
+{
+	const char *b = s->linebuf;
+	size_t n = s->line_len;
+	if (!s->mcp || n == 0 || b[0] != '#')
+		return 0;
+	if (n >= 2 && b[1] != '$')
+		return 0;
+	if (n >= 3 && b[2] != '#' && b[2] != '"')
+		return 0;
+	return 1;
+}
+
+/* Stream the not-yet-shown bytes of the pending (unterminated) line, unless it
+ * might be an MCP marker line -- then wait for the newline. */
+static void
+flush_pending(bd_session *s)
+{
+	if (line_may_be_mcp(s))
+		return;
+	if (s->line_len > s->line_streamed) {
+		emit_data(s, s->linebuf + s->line_streamed,
+		    (int)(s->line_len - s->line_streamed));
+		s->line_streamed = s->line_len;
+	}
+}
+
+/* Handle one completed line: let MCP classify it first. An MCP control line is
+ * dropped (never displayed); a `#$"` quoted line is unquoted in place so the
+ * display and triggers see the literal text; anything else streams its unshown
+ * bytes and retires through the trigger/rewrite pipeline. */
+static void
+retire_or_mcp(bd_session *s)
+{
+	if (s->mcp) {
+		const char *out;
+		int out_len;
+		int n = (int)s->line_len;
+		if (n > 0 && s->linebuf[n - 1] == '\r')
+			n--;                    /* MCP parses the line without the CR */
+		if (bd_mcp_feed(s->mcp, s->linebuf, n,
+		    &out, &out_len) == BD_MCP_CONSUMED)
+			return;                 /* control line: display nothing */
+		if (out != s->linebuf) {        /* a #$" quoted line: drop the marker */
+			memmove(s->linebuf, out, (size_t)out_len);
+			s->line_len = (size_t)out_len;
+			if (s->line_streamed > s->line_len)
+				s->line_streamed = 0;
+		}
+	}
+	if (s->line_len > s->line_streamed)
+		emit_data(s, s->linebuf + s->line_streamed,
+		    (int)(s->line_len - s->line_streamed));
+	retire_line(s);
 }
 
 /*
  * Assemble incoming bytes into lines. Bytes are streamed live to the display
  * (so prompts and partial lines appear immediately) and buffered for trigger
- * matching; each '\n' retires a line (see retire_line). The unterminated
- * remainder stays buffered and is also the pending prompt text.
+ * matching; each '\n' retires a line (see retire_line / retire_or_mcp). The
+ * unterminated remainder stays buffered and is the pending prompt text. Lines
+ * whose start could be an MCP marker (`#$`) have their live display deferred
+ * until the newline, so MCP control lines are never shown.
  */
 static void
 feed_lines(bd_session *s, const char *data, int len)
 {
-	int i, run = 0;
+	int i;
 	for (i = 0; i < len; i++) {
 		char c = data[i];
 		if (c == '\n') {
-			emit_data(s, data + run, i - run);  /* stream the line live */
-			retire_line(s);                     /* triggers/rewrite/'\n' */
-			run = i + 1;
+			retire_or_mcp(s);
+			s->line_len = 0;
+			s->line_streamed = 0;
 			continue;
 		}
-		/* buffer the byte for trigger matching (it is streamed in a run) */
 		if (s->line_len + 1 > s->line_cap) {
 			size_t nc = s->line_cap ? s->line_cap * 2 : 256;
 			char *nb = realloc(s->linebuf, nc);
@@ -938,9 +1027,9 @@ feed_lines(bd_session *s, const char *data, int len)
 		}
 		s->linebuf[s->line_len++] = c;
 	}
-	if (len > run)                          /* stream the unterminated tail */
-		emit_data(s, data + run, len - run);
+	flush_pending(s);               /* live-stream the safe part of the tail */
 }
+
 
 /* ---- MXP (parser callbacks fire from bd_mxp_feed, on the UI thread) ---- */
 
@@ -1054,6 +1143,7 @@ net_prompt(void *arg)
 		bd_triggers_prompt(s->trig, plain);
 		dispatch_hook(s, "prompt", plain, NULL);
 		s->line_len = 0;
+		s->line_streamed = 0;
 	}
 }
 
@@ -1111,6 +1201,10 @@ bd_session_new(const bd_profile *profile)
 		bd_mxp_cb mc = { mxp_text, mxp_tag, s };
 		s->mxp = bd_mxp_new(&mc);
 	}
+	{
+		bd_mcp_cb mcb = { mcp_send, mcp_edit, s };
+		s->mcp = bd_mcp_new(&mcb);
+	}
 	bd_net_set_echo_cb(s->net, net_echo);
 	bd_net_set_prompt_cb(s->net, net_prompt);
 	bd_net_set_package_cb(s->net, net_package);
@@ -1131,6 +1225,7 @@ bd_session_free(bd_session *s)
 	bd_vm_free(s->vm);
 	bd_log_free(s->log);            /* flushes and closes the sink files */
 	bd_mxp_free(s->mxp);
+	bd_mcp_free(s->mcp);
 	free(s->data_dir);
 	free(s->linebuf);
 	free(s->scratch_rd);
@@ -1169,6 +1264,7 @@ bd_session_connect(bd_session *s)
 
 	s->mxp_active = 0;                       /* renegotiated each connection */
 	bd_mxp_reset(s->mxp);
+	bd_mcp_reset(s->mcp);                    /* fresh MCP session per connect */
 
 	return bd_net_connect(s->net, host, port, tls);
 }
@@ -1211,6 +1307,14 @@ bd_session_send_raw(bd_session *s, const void *bytes, size_t n)
 	if (!s)
 		return -1;
 	return bd_net_send(s->net, bytes, (int)n);
+}
+
+void
+bd_session_mcp_edit_done(bd_session *s, const char *reference,
+                         const char *type, const char *text)
+{
+	if (s)
+		bd_mcp_edit_done(s->mcp, reference, type, text);
 }
 
 void

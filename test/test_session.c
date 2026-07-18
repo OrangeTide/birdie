@@ -155,6 +155,8 @@ static int  ev_echo_n, ev_echo_last;
 static int  ev_prompt_n;
 static int  ev_pkg_n, ev_pkg_proto;
 static char ev_pkg_name[64], ev_pkg_json[64];
+static int  ev_edit_n;
+static char ev_edit_ref[128], ev_edit_name[64], ev_edit_type[32], ev_edit_content[512];
 
 static void
 on_event(bd_session *s, const bd_session_event *ev, void *ud)
@@ -176,6 +178,16 @@ on_event(bd_session *s, const bd_session_event *ev, void *ud)
 		snprintf(ev_pkg_name, sizeof ev_pkg_name, "%s", ev->name ? ev->name : "");
 		snprintf(ev_pkg_json, sizeof ev_pkg_json, "%s", ev->json ? ev->json : "");
 		break;
+	case BD_SESSION_MCP_EDIT: {
+		int n = ev->len < (int)sizeof ev_edit_content - 1
+		    ? ev->len : (int)sizeof ev_edit_content - 1;
+		ev_edit_n++;
+		snprintf(ev_edit_ref, sizeof ev_edit_ref, "%s", ev->reference ? ev->reference : "");
+		snprintf(ev_edit_name, sizeof ev_edit_name, "%s", ev->name ? ev->name : "");
+		snprintf(ev_edit_type, sizeof ev_edit_type, "%s", ev->edit_type ? ev->edit_type : "");
+		if (n > 0) memcpy(ev_edit_content, ev->data, (size_t)n);
+		ev_edit_content[n > 0 ? n : 0] = 0;
+		break; }
 	}
 }
 static void ev_clear_data(void) { ev_data_n = 0; ev_data[0] = '\0'; }
@@ -289,6 +301,53 @@ main(void)
 	    strstr(ev_data, "bold") != NULL && strstr(ev_data, "<b>") == NULL);
 	check("mxp triggers fire on the parsed tag",
 	    strcmp(g_sent, "sawbold\r\n") == 0);
+
+
+	/* MCP: the in-band #$# protocol is intercepted in the line pipeline */
+	net_fire_mxp(0);                        /* plain line pipeline for this part */
+	ev_clear_data(); sent_clear(); ev_edit_n = 0;
+	net_recv("#$#mcp version: 2.1 to: 2.1\r\n");
+	check("the mcp handshake line is not displayed",
+	    strstr(ev_data, "#$#") == NULL);
+	check("the handshake is answered with an auth key + negotiation",
+	    strstr(g_sent, "#$#mcp authentication-key:") != NULL &&
+	    strstr(g_sent, "package: dns-org-mud-moo-simpleedit") != NULL &&
+	    strstr(g_sent, "#$#mcp-negotiate-end") != NULL);
+	{
+		char mkey[64] = "", buf[512];
+		const char *p = strstr(g_sent, "authentication-key: ");
+		if (p) sscanf(p + 20, "%63s", mkey);
+
+		/* a #$" quoted ordinary line displays with the marker stripped */
+		ev_clear_data();
+		net_recv("#$\"#$#looks-like-mcp\r\n");
+		check("a quoted line displays without its #$\" marker",
+		    strstr(ev_data, "#$#looks-like-mcp") != NULL &&
+		    strstr(ev_data, "#$\"") == NULL);
+
+		/* simpleedit-content assembles across multiline and fires an event */
+		sent_clear(); ev_edit_n = 0;
+		snprintf(buf, sizeof buf,
+		    "#$#dns-org-mud-moo-simpleedit-content %s reference: \"#7:desc\" "
+		    "name: \"desc\" type: string-list content*: \"\" _data-tag: e1\r\n",
+		    mkey);
+		net_recv(buf);
+		net_recv("#$#* e1 content: hello\r\n");
+		net_recv("#$#* e1 content: world\r\n");
+		net_recv("#$#: e1\r\n");
+		check("simpleedit-content surfaces as an MCP_EDIT event",
+		    ev_edit_n == 1 && strcmp(ev_edit_ref, "#7:desc") == 0 &&
+		    strcmp(ev_edit_type, "string-list") == 0 &&
+		    strcmp(ev_edit_content, "hello\nworld") == 0);
+
+		/* sending the edit back emits a simpleedit-set with the body */
+		sent_clear();
+		bd_session_mcp_edit_done(s, "#7:desc", "string-list", "HELLO\nWORLD");
+		check("edit_done sends a simpleedit-set with the edited lines",
+		    strstr(g_sent, "dns-org-mud-moo-simpleedit-set") != NULL &&
+		    strstr(g_sent, "content: HELLO") != NULL &&
+		    strstr(g_sent, "content: WORLD") != NULL);
+	}
 
 	/* disconnect surfaces a state event */
 	net_fire_state(BD_NET_CLOSED, "bye");

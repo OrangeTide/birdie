@@ -75,7 +75,8 @@ TEST_TARGETS += test_session
 
 test_session_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 test_session_SRCS  = test_session.c \
-	../src/birdie/bd_session.c ../src/birdie/bd_log.c ../src/birdie/bd_replay.c \
+	../src/birdie/bd_session.c ../src/birdie/bd_mcp.c \
+	../src/birdie/bd_log.c ../src/birdie/bd_replay.c \
 	../src/birdie/bd_mxp.c ../src/birdie/bd_trigger.c ../src/birdie/bd_vm.c \
 	../src/birdie/bd_profile.c ../src/birdie/bd_csv.c \
 	../src/birdie-gui/bd_utf8.c
