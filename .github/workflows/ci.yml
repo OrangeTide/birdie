@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run headless GUI test
-        run: make test
+        run: make -j$(nproc) test
 
   # Full application build, plus the dist bundle. Needs the GL/X11 dev
   # libraries the ludica backend links against.
@@ -46,7 +46,7 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y libegl-dev libgles-dev libx11-dev
       - name: Build
-        run: make
+        run: make -j$(nproc)
       - name: Build dist bundle
         run: make dist
 
@@ -63,4 +63,4 @@ jobs:
       - name: Install mingw-w64 toolchain
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Cross-compile GUI libraries for Windows
-        run: make windows-check
+        run: make -j$(nproc) windows-check

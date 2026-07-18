@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Headless GUI test
-        run: make test
+        run: make -j$(nproc) test
       - name: Build birdie-gui source bundle
         run: make dist GUI_VERSION=${{ needs.setup.outputs.version }}
       - uses: actions/upload-artifact@v6
@@ -131,7 +131,7 @@ jobs:
       # features into a binary meant to be portable. These are the standard
       # Ubuntu baselines for each arch.
       - name: Build (RELEASE)
-        run: make CC=${{ matrix.cc }} RELEASE=1 RELEASE_MARCH=${{ matrix.march }}
+        run: make -j$(nproc) CC=${{ matrix.cc }} RELEASE=1 RELEASE_MARCH=${{ matrix.march }}
 
       - name: Package
         run: |
